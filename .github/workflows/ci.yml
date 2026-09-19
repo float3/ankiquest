@@ -22,6 +22,9 @@ jobs:
       - name: Test
         run: nix develop --command cargo test
 
+      - name: Test desktop deck completion
+        run: python3 -m unittest discover -s tests -v
+
       - name: Lint
         run: nix develop --command cargo clippy --all-targets -- -D warnings
 

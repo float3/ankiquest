@@ -10,7 +10,7 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 type Signature = Vec<Option<(SystemTime, u64)>>;
 
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
     scratch: PathBuf,
     signatures: HashMap<String, Signature>,
 }
@@ -72,6 +72,7 @@ impl Store {
                  primary key (user, key)
              ) without rowid;",
         )?;
+        crate::decks::initialize(&conn)?;
         Ok(Self {
             conn,
             scratch,

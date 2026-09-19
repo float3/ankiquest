@@ -84,10 +84,25 @@ h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; }
 .board .xp b { display: block; font-size: 17px; color: var(--accent); }
 .board .xp span { font-size: 11px; color: var(--dim); white-space: nowrap; }
 .empty { color: var(--dim); text-align: center; padding: 24px 0; }
+.deck-sharing button, .deck-sharing input { font: inherit; }
+.deck-sharing button { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.deck-sharing button:disabled { opacity: 0.55; cursor: default; }
+dialog.deck-sharing { width: min(560px, calc(100% - 32px)); max-height: 85vh; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); }
+dialog.deck-sharing::backdrop { background: #0008; }
+.deck-sharing h3 { margin: 0; font-size: 18px; }
+.deck-sharing .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.deck-sharing input[type=password] { width: 100%; margin-top: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+.deck-sharing fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 14px 0; padding: 12px; min-width: 0; }
+.deck-sharing legend { font-weight: 600; overflow-wrap: anywhere; }
+.deck-sharing label { display: block; margin: 8px 0; overflow-wrap: anywhere; }
+.deck-sharing input[type=checkbox] { margin-right: 8px; accent-color: var(--accent); }
+.deck-sharing .recipients { margin: 12px 0 0 20px; }
+.deck-sharing .error { color: var(--fire); }
 </style>
 </head>
 <body>
 <main id="app"><p class="empty">Loading</p></main>
+<dialog id="deck-sharing" class="deck-sharing" aria-labelledby="deck-sharing-title"></dialog>
 <script>
 const app = document.getElementById("app");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -144,6 +159,10 @@ function view(p, rows) {
     <div class="sub">${num(p.xp_into_level)} / ${num(p.xp_for_next)} XP to level ${p.level + 1} · ${num(p.xp_total)} total</div>
   </div>
 </section>
+<section class="deck-sharing"><h2>Deck completion notifications</h2>
+  <p class="sub">Choose who hears when you finish a deck for the day. Off by default for every deck.</p>
+  <button type="button" id="manage-decks">Manage deck notifications</button>
+</section>
 ${p.at_risk ? `<section class="risk">Your ${p.streak} day streak is waiting for today's reviews.</section>` : ""}
 <section class="stats">
   <div class="stat fire"><b>${p.streak}</b><span>day streak</span></div>
@@ -173,7 +192,119 @@ ${p.at_risk ? `<section class="risk">Your ${p.streak} day streak is waiting for 
 </section>`;
 }
 
+function openDeckSharing(user, display) {
+  const dialog = document.getElementById("deck-sharing");
+  let token = "";
+  let closed = false;
+  const controller = new AbortController();
+  dialog.innerHTML = `<h3 id="deck-sharing-title">Deck notifications · ${esc(display)}</h3>
+    <p class="sub">Notify selected people once per deck each Anki day, after you finish all scheduled cards, including learning cards due later today.</p>
+    <div id="deck-sharing-content"><form id="deck-unlock">
+      <label for="deck-token">Your AnkiQuest token</label>
+      <input id="deck-token" type="password" required autocomplete="off" spellcheck="false" aria-describedby="deck-token-help">
+      <p id="deck-token-help" class="sub">Use the token from your AnkiQuest settings. It is kept only while this window is open.</p>
+      <button type="submit">Load my decks</button>
+    </form></div>
+    <p id="deck-status" role="status" aria-live="polite"></p>
+    <div class="actions"><button type="button" id="deck-close">Close</button></div>`;
+  const content = dialog.querySelector("#deck-sharing-content");
+  const status = dialog.querySelector("#deck-status");
+  const say = (message, error = false) => {
+    status.textContent = message;
+    status.className = error ? "error" : "sub";
+  };
+  const request = async (body) => {
+    const response = await fetch("/api/decks/" + encodeURIComponent(user), {
+      method: body ? "POST" : "GET",
+      headers: { "Authorization": "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      cache: "no-store", signal: controller.signal,
+    });
+    if (!response.ok) {
+      if (response.status === 401) throw new Error("The token was not accepted for this player. Close and reopen this window to try again.");
+      if (response.status === 400 || response.status === 404) throw new Error("The deck or recipient list has changed. Close and reopen this window to refresh it.");
+      throw new Error("Could not save or load deck notifications. Please try again.");
+    }
+    return response.json();
+  };
+  const showDecks = data => {
+    if (!data.decks.length) {
+      content.innerHTML = `<p>No decks have been uploaded yet. Open an updated AnkiQuest client and sync your reviews, then reopen this window.</p>`;
+      return;
+    }
+    content.innerHTML = `<form id="deck-settings">
+      ${data.decks.map((deck, index) => `<fieldset data-deck="${index}">
+        <legend>${esc(deck.name)}</legend>
+        <label><input type="checkbox" class="deck-enabled" ${deck.enabled ? "checked" : ""}>Notify people when I finish this deck</label>
+        <div class="recipients" ${deck.enabled ? "" : "hidden"}>
+          <span class="sub">Notify these people:</span>
+          ${data.recipients.map((person, i) => `<label><input type="checkbox" data-recipient="${i}" ${deck.recipients.includes(person.user) ? "checked" : ""}>${esc(person.display)}${person.display !== person.user ? ` <span class="sub">(${esc(person.user)})</span>` : ""}</label>`).join("") || `<p class="sub">No other players are available yet.</p>`}
+        </div>
+      </fieldset>`).join("")}
+      <p class="sub">Only selected people receive your name and the deck name. Changes apply to future completions.</p>
+      <button type="submit">Save preferences</button>
+    </form>`;
+    const form = content.querySelector("form");
+    form.querySelectorAll("fieldset").forEach(field => {
+      field.querySelector(".deck-enabled").addEventListener("change", event => {
+        field.querySelector(".recipients").hidden = !event.target.checked;
+        say("Unsaved changes.");
+      });
+      field.querySelectorAll("[data-recipient]").forEach(input => input.addEventListener("change", () => say("Unsaved changes.")));
+    });
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const decks = [...form.querySelectorAll("fieldset")].map((field, i) => ({
+        id: data.decks[i].id,
+        enabled: field.querySelector(".deck-enabled").checked,
+        recipients: [...field.querySelectorAll("[data-recipient]:checked")].map(input => data.recipients[Number(input.dataset.recipient)].user),
+      }));
+      const invalid = decks.findIndex(deck => deck.enabled && !deck.recipients.length);
+      if (invalid >= 0) {
+        say(`Select at least one person for ${data.decks[invalid].name}, or turn its notifications off.`, true);
+        form.querySelectorAll("fieldset")[invalid].querySelector(".deck-enabled").focus();
+        return;
+      }
+      const controls = [...form.querySelectorAll("input, button")];
+      controls.forEach(control => { control.disabled = true; });
+      say("Saving…");
+      try {
+        await request({ decks });
+        if (!closed) say("Preferences saved.");
+      } catch (error) {
+        if (!closed) say(error.message, true);
+      } finally {
+        controls.forEach(control => { control.disabled = false; });
+      }
+    });
+  };
+  content.querySelector("form").addEventListener("submit", async event => {
+    event.preventDefault();
+    token = dialog.querySelector("#deck-token").value.trim();
+    const button = event.target.querySelector("button");
+    button.disabled = true;
+    say("Loading decks…");
+    try {
+      const data = await request();
+      if (!closed) { showDecks(data); say(""); }
+    } catch (error) {
+      if (!closed) say(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  dialog.querySelector("#deck-close").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => {
+    closed = true;
+    token = "";
+    controller.abort();
+    dialog.innerHTML = "";
+  }, { once: true });
+  dialog.showModal();
+}
+
 async function render() {
+  if (document.getElementById("deck-sharing").open) return;
   const user = decodeURIComponent(location.hash.slice(1));
   try {
     const [rows, week] = await Promise.all([
@@ -188,6 +319,7 @@ async function render() {
         document.title = `${p.display} · level ${p.level}`;
         try { localStorage.setItem("ankiquestPlayer", p.user); } catch (e) {}
         app.innerHTML = view(p, rows);
+        document.getElementById("manage-decks").addEventListener("click", () => openDeckSharing(p.user, p.display));
         return;
       }
     }

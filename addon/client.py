@@ -35,7 +35,7 @@ class Client:
 
     def _request(self, path, body=None):
         headers = {"Content-Type": "application/json"}
-        if body is not None:
+        if self.token:
             headers["Authorization"] = "Bearer " + self.token
         request = urllib.request.Request(
             self.base + path,
@@ -45,18 +45,26 @@ class Client:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.load(response)
 
-    def upload(self, reviews, rollover_hour, silent, deleted=()):
+    def shared_decks(self):
+        settings = self._request("/api/decks/" + self.user)
+        return sorted(deck["id"] for deck in settings["decks"] if deck["enabled"])
+
+    def upload(self, reviews, rollover_hour, silent, deleted=(), decks=None, clock_offset=None, catalog=False):
+        body = {
+            "reviews": reviews,
+            "clock": {
+                "offset_west_min": offset_west_min() if clock_offset is None else clock_offset,
+                "rollover_hour": rollover_hour,
+            },
+            "silent": silent,
+            "deleted": list(deleted),
+        }
+        if decks is not None:
+            body["decks"] = decks
+            body["catalog"] = catalog
         return self._request(
             "/api/reviews/" + self.user,
-            {
-                "reviews": reviews,
-                "clock": {
-                    "offset_west_min": offset_west_min(),
-                    "rollover_hour": rollover_hour,
-                },
-                "silent": silent,
-                "deleted": list(deleted),
-            },
+            body,
         )
 
 
