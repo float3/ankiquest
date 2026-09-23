@@ -155,3 +155,8 @@ services.ankiquest = {
   };
 };
 ```
+
+The module runs the server in a tight sandbox. systemd holds the port and
+passes it in, and the service may not connect to loopback or private
+addresses, only out to the internet for ntfy. So `ntfy` must be a public
+server. Outside systemd, `addr` is bound as usual.

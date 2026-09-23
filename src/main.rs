@@ -1443,6 +1443,25 @@ fn display_of(config: &Config, user: &str) -> String {
         .unwrap_or_else(|| user.to_string())
 }
 
+/// The listening socket systemd passes when a `.socket` unit starts the server.
+/// The port then belongs to the socket unit, so the service's own address
+/// rules can shut it out of loopback without refusing nginx.
+#[cfg(unix)]
+fn inherited_listener() -> Option<std::net::TcpListener> {
+    use std::os::fd::FromRawFd;
+    let pid: u32 = std::env::var("LISTEN_PID").ok()?.parse().ok()?;
+    if pid != std::process::id() || std::env::var("LISTEN_FDS").ok()? != "1" {
+        return None;
+    }
+    // SAFETY: systemd passes exactly one descriptor, at 3, and nothing else here owns it.
+    Some(unsafe { std::net::TcpListener::from_raw_fd(3) })
+}
+
+#[cfg(not(unix))]
+fn inherited_listener() -> Option<std::net::TcpListener> {
+    None
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1519,8 +1538,14 @@ async fn main() -> Result<(), Error> {
 
     let router = router(app.clone());
 
-    let listener = tokio::net::TcpListener::bind(&app.config.addr).await?;
-    println!("ankiquest listening on http://{}", app.config.addr);
+    let listener = match inherited_listener() {
+        Some(listener) => {
+            listener.set_nonblocking(true)?;
+            tokio::net::TcpListener::from_std(listener)?
+        }
+        None => tokio::net::TcpListener::bind(&app.config.addr).await?,
+    };
+    println!("ankiquest listening on http://{}", listener.local_addr()?);
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
