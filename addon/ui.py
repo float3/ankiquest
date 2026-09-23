@@ -19,7 +19,7 @@ from aqt.qt import (
 from aqt.qt import Qt
 
 from .decks import label, ordered
-from .notify import answerable
+from .notify import answerable, when
 
 MAX_MESSAGE = 200
 
@@ -235,8 +235,17 @@ def _message(entry, send):
     card = QFrame()
     card.setFrameShape(_enum(QFrame, "Shape", "StyledPanel"))
     layout = QVBoxLayout(card)
-    layout.addWidget(QLabel("<b>%s</b>" % entry.get("title", "")))
+    title = QLabel(entry.get("title", ""))
+    title.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    font = title.font()
+    font.setBold(True)
+    title.setFont(font)
+    stamp = QLabel(when(entry.get("created_at")))
+    stamp.setEnabled(False)
+    stamp.setAlignment(_enum(Qt, "AlignmentFlag", "AlignRight"))
+    layout.addWidget(_row(title, stamp))
     body = QLabel(entry.get("body", ""))
+    body.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
     body.setWordWrap(True)
     layout.addWidget(body)
     if not answerable(entry):

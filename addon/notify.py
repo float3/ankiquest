@@ -1,5 +1,7 @@
 """What the desktop says out loud: rank changes, streak warnings and the inbox."""
 
+from datetime import datetime
+
 HOUR_MS = 3_600_000
 DAY_MS = 86_400_000
 FRESH_SECONDS = 86_400
@@ -72,6 +74,15 @@ def fresh_messages(inbox, cursor, now_s):
         if entry.get("created_at", 0) >= now_s - FRESH_SECONDS:
             fresh.append(entry)
     return fresh, cursor
+
+
+def when(created_at):
+    """Local date and time of an inbox entry, as the phone shows it."""
+    if not created_at:
+        return ""
+    seconds = created_at / 1000 if created_at >= 10_000_000_000 else created_at
+    moment = datetime.fromtimestamp(seconds)
+    return "%s %d, %d, %s" % (moment.strftime("%b"), moment.day, moment.year, moment.strftime("%H:%M"))
 
 
 def answerable(entry):
