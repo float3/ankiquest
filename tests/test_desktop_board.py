@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 ADDON = Path(__file__).resolve().parents[1] / "addon"
@@ -130,6 +131,23 @@ class NotifyTests(unittest.TestCase):
         self.assertTrue(notify.answerable({"sender": "cerro"}))
         self.assertFalse(notify.answerable({"sender": "cerro", "replied": True}))
         self.assertFalse(notify.answerable({"sender": ""}))
+
+
+class InboxTimeTests(unittest.TestCase):
+    def test_an_entry_shows_its_local_date_and_time(self):
+        stamp = 1_789_000_000
+        moment = datetime.fromtimestamp(stamp)
+        text = notify.when(stamp)
+        self.assertIn(str(moment.year), text)
+        self.assertIn(moment.strftime("%H:%M"), text)
+        self.assertTrue(text.startswith(moment.strftime("%b")))
+
+    def test_seconds_and_milliseconds_read_the_same(self):
+        self.assertEqual(notify.when(1_789_000_000), notify.when(1_789_000_000_000))
+
+    def test_an_entry_without_a_time_shows_none(self):
+        self.assertEqual("", notify.when(None))
+        self.assertEqual("", notify.when(0))
 
 
 class DeckTreeTests(unittest.TestCase):
