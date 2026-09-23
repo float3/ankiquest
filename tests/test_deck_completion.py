@@ -210,11 +210,9 @@ class RefreshTests(unittest.TestCase):
         qt.__getattr__ = lambda name: Mock()
         with patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt}):
             self.addon = load_module("ankiquest_test_addon", ADDON / "__init__.py", package=True)
-        self.addon.ui = SimpleNamespace(
-            settings_dialog=Mock(return_value=None), deck_dialog=Mock(), inbox_dialog=Mock()
-        )
+        self.addon.ui = SimpleNamespace(settings_dialog=Mock(return_value=None), deck_dialog=Mock())
+        self.addon.web = SimpleNamespace(open_page=Mock())
         self.addon.client = lambda: self.api
-        self.addon.snapshot = lambda _: {}
         self.addon.offset_west_min = lambda: -120
         self.decks = [{"id": "1", "name": "Spanish", "remaining": 0, "reviewed_today": 1, "day": 20000}]
         self.addon.deck_snapshots = Mock(return_value=self.decks)
@@ -237,7 +235,7 @@ class RefreshTests(unittest.TestCase):
              "created_at": int(time.time()), "sender": "hill", "replied": False},
         ]
         self.api.name = "cerro"
-        self.api.leaderboard = Mock(return_value=self.standings)
+        self.api.rank = Mock(return_value={"order": [row["user"] for row in self.standings], "change": None})
         self.api.profile = Mock(return_value={"level": 3, "xp_into_level": 1, "xp_for_next": 2})
         self.api.notifications = Mock(return_value=self.inbox)
 
@@ -278,25 +276,26 @@ class RefreshTests(unittest.TestCase):
         self.addon.open_deck_notifications()
         self.api.save_deck_settings.assert_not_called()
 
-    def test_an_announced_completion_is_reported_locally(self):
-        self.api.upload = Mock(return_value={"announced": [{"deck": "Spanish", "recipients": 2}]})
+    def test_what_the_server_says_about_an_upload_is_shown(self):
+        told = {"headlines": ["\U0001f4e3 Spanish \u2014 told 2 friends"], "status": "+5 XP"}
+        self.api.upload = Mock(return_value={"feedback": told})
         self.addon.refresh(False)
         message = self.addon.tooltip.call_args.args[0]
-        self.assertIn("Spanish", message)
         self.assertIn("told 2 friends", message)
+        self.assertIn("+5 XP", message)
 
     def test_a_quiet_upload_says_nothing(self):
         self.addon.refresh(False)
         self.addon.tooltip.assert_not_called()
 
-    def test_the_deck_list_shows_the_board_below_the_stats(self):
+    def test_the_deck_list_shows_the_summary_below_the_stats(self):
         self.with_board()
         self.addon.poll(quiet=True)
         content = SimpleNamespace(stats="<div>heatmap</div>")
         self.addon.on_deck_browser(None, content)
         self.assertLess(content.stats.index("heatmap"), content.stats.index("Leaderboard"))
-        self.assertIn("Cerro", content.stats)
-        self.assertIn("ankiquest:inbox", content.stats)
+        self.assertIn("#1 this week", content.stats)
+        self.assertIn("ankiquest:web:inbox", content.stats)
 
     def test_a_quiet_poll_only_remembers_what_a_loud_one_would_have_said(self):
         self.with_board()
@@ -304,6 +303,20 @@ class RefreshTests(unittest.TestCase):
         self.addon.tooltip.assert_not_called()
         self.assertEqual(self.mw.pm.profile["ankiquestInboxCursor"], 4)
         self.assertEqual(self.mw.pm.profile["ankiquestLastOrder"], ["cerro"])
+
+    def test_the_server_worded_rank_change_is_shown_once_polled_loudly(self):
+        self.with_board()
+        self.mw.pm.profile["ankiquestLastOrder"] = ["hill", "cerro"]
+        self.api.rank.return_value = {
+            "order": ["cerro", "hill"],
+            "change": {"title": "\U0001f451 You took the crown", "body": "You passed Hill."},
+        }
+        self.addon.poll()
+        self.api.rank.assert_called_once_with(["hill", "cerro"])
+        self.assertEqual(
+            "\U0001f451 You took the crown<br>You passed Hill.", self.addon.tooltip.call_args_list[0].args[0]
+        )
+        self.assertEqual(self.mw.pm.profile["ankiquestLastOrder"], ["cerro", "hill"])
 
     def test_a_new_message_is_announced_once(self):
         self.with_board()
@@ -315,20 +328,16 @@ class RefreshTests(unittest.TestCase):
         self.addon.poll()
         self.assertIn("Good job!", self.addon.tooltip.call_args.args[0])
 
-    def test_picking_a_period_redraws_the_deck_list(self):
-        self.assertEqual((True, None), self.addon.on_js_message(False, "ankiquest:period:month", None))
-        self.assertEqual("month", self.settings["period"])
-        self.mw.deckBrowser.refresh.assert_called_once()
+    def test_deck_list_links_open_the_website_inside_anki(self):
+        self.assertEqual((True, None), self.addon.on_js_message(False, "ankiquest:web:inbox", None))
+        self.assertEqual("/community#activity", self.addon.web.open_page.call_args.args[2])
+        self.assertEqual((True, None), self.addon.on_js_message(False, "ankiquest:web:https://evil", None))
+        self.assertEqual(1, self.addon.web.open_page.call_count)
         self.assertEqual(False, self.addon.on_js_message(False, "something:else", None))
 
-    def test_replying_marks_the_message_answered(self):
-        self.with_board()
-        self.api.reply = Mock(return_value="Hill")
-        status = Mock()
-        self.addon.send_reply(self.inbox[0], "Good job!", status)
-        self.api.reply.assert_called_once_with(4, "Good job!")
-        self.assertTrue(self.inbox[0]["replied"])
-        status.setText.assert_called_with("Sent to Hill")
+    def test_the_website_opens_on_my_profile(self):
+        self.addon.open_website()
+        self.assertEqual("/#cerro", self.addon.web.open_page.call_args.args[2])
 
     def test_snapshot_uses_same_clock_as_upload(self):
         self.addon.refresh(False)

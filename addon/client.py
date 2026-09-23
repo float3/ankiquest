@@ -46,8 +46,9 @@ class Client:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.load(response)
 
-    def leaderboard(self):
-        return self._request("/api/leaderboard")
+    def rank(self, previous):
+        """The weekly order, and how this player moved since `previous`."""
+        return self._request("/api/rank/" + self.user, {"previous": list(previous or [])})
 
     def profile(self):
         return self._request("/api/profile/" + self.user)
@@ -98,55 +99,8 @@ class Client:
         )
 
 
-def announcements(profile):
-    """What the last upload told other people about, straight from the response."""
-    lines = []
-    for item in profile.get("announced") or []:
-        people = item.get("recipients", 0)
-        lines.append(
-            "\U0001f4e3 %s \u2014 told %d %s"
-            % (item["deck"], people, "friend" if people == 1 else "friends")
-        )
-    return lines
-
-
 def reconcile(window_rows, recent, known, mark):
     present = {r[0] for r in window_rows}
     deleted = sorted(recent - present) if mark else []
     restored = [r for r in window_rows if r[0] <= known and r[0] not in recent]
     return present, deleted, restored
-
-
-def snapshot(profile):
-    return {
-        "xp": profile["xp_total"],
-        "level": profile["level"],
-        "into": profile["xp_into_level"],
-        "need": profile["xp_for_next"],
-        "streak": profile["streak"],
-        "combo": profile["today"]["current_combo"],
-        "quests": {q["title"] for q in profile["quests"] if q["done"]},
-        "achievements": {a["title"] for a in profile["achievements"] if a["unlocked"]},
-    }
-
-
-def describe(before, after):
-    gained = after["xp"] - before["xp"]
-    if gained == 0:
-        return None
-    if gained < 0:
-        status = "−%d XP  ·  combo %d" % (-gained, after["combo"])
-        status += "  ·  Lv %d  %d/%d" % (after["level"], after["into"], after["need"])
-        return status, False
-    lines = []
-    if after["level"] > before["level"]:
-        lines.append("Level %d!" % after["level"])
-    lines += ["Achievement: " + t for t in sorted(after["achievements"] - before["achievements"])]
-    lines += ["Quest complete: " + t for t in sorted(after["quests"] - before["quests"])]
-    if after["streak"] > before["streak"]:
-        lines.append("%d day streak" % after["streak"])
-    status = "+%d XP" % gained
-    if after["combo"] >= 5:
-        status += "  ·  combo %d" % after["combo"]
-    status += "  ·  Lv %d  %d/%d" % (after["level"], after["into"], after["need"])
-    return "<br>".join(lines + [status]), bool(lines)
