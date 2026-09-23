@@ -1,5 +1,5 @@
 // Run with Node and Playwright installed. Optional environment variables:
-// PLAYWRIGHT_MODULE: module name/path; ANKIQUEST_BROWSER_CHANNEL: e.g. msedge;
+// PLAYWRIGHT_MODULE: module name/path; PLAYWRIGHT_CHANNEL: e.g. msedge;
 // ANKIQUEST_AVATAR_EVIDENCE: directory for screenshots and measurements.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -27,7 +27,7 @@ if (evidence) fs.mkdirSync(evidence, { recursive: true });
 async function main() {
   const browser = await chromium.launch({
     headless: true,
-    ...(process.env.ANKIQUEST_BROWSER_CHANNEL ? { channel: process.env.ANKIQUEST_BROWSER_CHANNEL } : {}),
+    ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
   });
   const results = [], failures = [];
   try {

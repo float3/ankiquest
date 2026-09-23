@@ -1,5 +1,5 @@
 // Uses the real leaderboard/profile renderers and CSS without contacting a server.
-// PLAYWRIGHT_MODULE, ANKIQUEST_BROWSER_CHANNEL, ANKIQUEST_AVATAR_EVIDENCE are optional.
+// PLAYWRIGHT_MODULE, PLAYWRIGHT_CHANNEL, ANKIQUEST_AVATAR_EVIDENCE are optional.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -18,7 +18,7 @@ const evidence = process.env.ANKIQUEST_AVATAR_EVIDENCE;
 if (evidence) fs.mkdirSync(evidence, { recursive: true });
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, ...(process.env.ANKIQUEST_BROWSER_CHANNEL ? { channel: process.env.ANKIQUEST_BROWSER_CHANNEL } : {}) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
   const results = [], failures = [];
   try {
     for (const width of [320, 390, 1440]) for (const colorScheme of ['light', 'dark']) {

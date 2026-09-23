@@ -49,7 +49,7 @@ The website accepts files up to 20 MB and reduces them before upload. The server
 - `POST /api/avatar/<user>` accepts the raw picture body with `Authorization: Bearer <token>` and returns `{"revision":"1"}`.
 - `DELETE /api/avatar/<user>` removes the picture and returns 204.
 
-Browser regression checks are in `tests/avatar_layout.cjs`, `tests/avatar_index_layout.cjs`, and `tests/avatar_photos.cjs`. Run them with Node and Playwright installed; `PLAYWRIGHT_MODULE` and `ANKIQUEST_BROWSER_CHANNEL` optionally select an existing installation/browser. The tests use synthetic users and mocked requests.
+Browser regression checks are in `tests/avatar_layout.cjs`, `tests/avatar_index_layout.cjs`, and `tests/avatar_photos.cjs`. Run them with Node and Playwright installed; `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHANNEL` optionally select an existing installation/browser. The tests use synthetic users and mocked requests.
 
 ## Private website access
 

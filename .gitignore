@@ -5,3 +5,4 @@
 ankiquest.json
 __pycache__
 *.ankiaddon
+node_modules

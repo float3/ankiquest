@@ -1,5 +1,5 @@
 // Browser-only regression suite: all requests use synthetic users and mocked routes.
-// Optional PLAYWRIGHT_MODULE and ANKIQUEST_BROWSER_CHANNEL work as in avatar_layout.cjs.
+// Optional PLAYWRIGHT_MODULE and PLAYWRIGHT_CHANNEL work as in avatar_layout.cjs.
 // ANKIQUEST_AVATAR_WIDTH and ANKIQUEST_AVATAR_THEME select a viewport/theme (390/light by default).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -12,7 +12,7 @@ const siteStyles = fs.readFileSync(path.join(root, 'static/site.css'), 'utf8');
 const siteScript = fs.readFileSync(path.join(root, 'static/site.js'), 'utf8');
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, ...(process.env.ANKIQUEST_BROWSER_CHANNEL ? { channel: process.env.ANKIQUEST_BROWSER_CHANNEL } : {}) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
   const checks = [], requests = [], errors = [];
   const metadata = Object.create(null), broken = new Set();
   let image, imageRequests = 0, pauseWrite = null, pauseMetadata = null, pauseStatus = null, cookieUser = null;
