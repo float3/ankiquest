@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "test:web": "node --test --test-concurrency=1 tests/*.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
