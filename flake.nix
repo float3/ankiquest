@@ -128,6 +128,7 @@
           type = lib.types.nullOr lib.types.str;
           default = null;
           example = "https://ntfy.sh";
+          description = "ntfy server to push reminders through. The service may not reach loopback or private addresses, so this must be a public server.";
         };
         weekTimezone = lib.mkOption {
           type = lib.types.str;
@@ -164,10 +165,20 @@
             message = "services.ankiquest.privateSite needs sitePasswordFile or at least one user tokenFile.";
           }
         ];
+        # systemd holds the port and passes it in. Connections nginx makes to
+        # it belong to the socket unit, so the service's own address rules can
+        # shut it out of loopback and the private network entirely.
+        systemd.sockets.ankiquest = {
+          description = "ankiquest socket";
+          wantedBy = ["sockets.target"];
+          listenStreams = ["127.0.0.1:${toString cfg.port}"];
+        };
+
         systemd.services.ankiquest = {
           description = "ankiquest";
           wantedBy = ["multi-user.target"];
-          after = ["network.target" "anki-sync-server.service"];
+          requires = ["ankiquest.socket"];
+          after = ["network.target" "anki-sync-server.service" "ankiquest.socket"];
           environment.ANKIQUEST_CONFIG = configFile;
           serviceConfig = {
             ExecStart = lib.getExe cfg.package;
@@ -179,6 +190,51 @@
               ++ lib.optional (cfg.sitePasswordFile != null) "site-password:${toString cfg.sitePasswordFile}";
             Restart = "always";
             RestartSec = 5;
+
+            # It only ever connects out to the ntfy server, over the internet.
+            IPAddressDeny = [
+              "localhost"
+              "link-local"
+              "multicast"
+              "0.0.0.0/8"
+              "10.0.0.0/8"
+              "100.64.0.0/10"
+              "172.16.0.0/12"
+              "192.168.0.0/16"
+              "fc00::/7"
+            ];
+            # AF_UNIX for name lookups through nscd.
+            RestrictAddressFamilies = ["AF_UNIX" "AF_INET" "AF_INET6"];
+            # Only its own state directory under /var/lib; the rest is hidden.
+            TemporaryFileSystem = "/var/lib:ro";
+            InaccessiblePaths = ["-/mnt" "-/media" "-/srv"];
+            ProtectHome = true;
+            ProtectSystem = "strict";
+            PrivateTmp = true;
+            PrivateDevices = true;
+            DevicePolicy = "closed";
+            PrivateUsers = true;
+            PrivateIPC = true;
+            ProtectProc = "invisible";
+            ProcSubset = "pid";
+            ProtectClock = true;
+            ProtectHostname = true;
+            ProtectKernelLogs = true;
+            ProtectKernelModules = true;
+            ProtectKernelTunables = true;
+            ProtectControlGroups = true;
+            CapabilityBoundingSet = "";
+            NoNewPrivileges = true;
+            RestrictNamespaces = true;
+            RestrictRealtime = true;
+            RestrictSUIDSGID = true;
+            LockPersonality = true;
+            MemoryDenyWriteExecute = true;
+            RemoveIPC = true;
+            SystemCallArchitectures = "native";
+            SystemCallFilter = ["@system-service" "~@privileged @resources"];
+            SystemCallErrorNumber = "EPERM";
+            UMask = "0077";
           };
         };
 
