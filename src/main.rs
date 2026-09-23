@@ -3,6 +3,7 @@ mod avatars;
 mod challenges;
 mod competition;
 mod decks;
+mod feedback;
 mod freezes;
 mod game;
 mod reminders;
@@ -287,19 +288,70 @@ async fn set_freezes(
 #[derive(Deserialize)]
 struct Pending {
     reviews: Vec<Review>,
+    /// The newest review the client already showed feedback for.
+    seen_through: Option<i64>,
 }
 
 async fn preview(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     Json(pending): Json<Pending>,
-) -> Result<Json<Profile>, StatusCode> {
+) -> Result<Json<UploadResponse>, StatusCode> {
     if pending.reviews.len() > MAX_PENDING {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
-    app.preview(&user, &pending.reviews)
-        .map(Json)
-        .ok_or(StatusCode::NOT_FOUND)
+    let profile = app
+        .preview(&user, &pending.reviews)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let before = pending.seen_through.and_then(|seen| {
+        let shown: Vec<Review> = pending
+            .reviews
+            .iter()
+            .filter(|review| review.id <= seen)
+            .copied()
+            .collect();
+        app.preview(&user, &shown)
+    });
+    let feedback = feedback::feedback(before.as_ref(), &profile, &[]);
+    Ok(Json(UploadResponse {
+        profile,
+        announced: Vec::new(),
+        feedback,
+    }))
+}
+
+#[derive(Deserialize)]
+struct RankQuery {
+    #[serde(default)]
+    previous: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct RankResponse {
+    order: Vec<String>,
+    change: Option<feedback::Notice>,
+}
+
+/// The weekly order, and how `user` moved since the order a device saw last.
+async fn rank(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    Json(query): Json<RankQuery>,
+) -> Json<RankResponse> {
+    let Json(board) = leaderboard(State(app), Query(BoardQuery { period: None })).await;
+    let places: Vec<feedback::Place> = board
+        .iter()
+        .map(|standing| feedback::Place {
+            user: &standing.user,
+            display: &standing.display,
+            week_xp: standing.week_xp,
+        })
+        .collect();
+    let change = feedback::rank_change(&query.previous, &places, &user);
+    Json(RankResponse {
+        order: board.iter().map(|standing| standing.user.clone()).collect(),
+        change,
+    })
 }
 
 #[derive(Deserialize)]
@@ -353,6 +405,7 @@ async fn upload(
     };
     let mut store = app.store.lock().unwrap();
     let silent = upload.silent || !store.is_known(&user).map_err(store_error)?;
+    let before = if silent { None } else { app.profile(&user) };
     store
         .upsert(&user, &reviews, &upload.deleted, upload.clock)
         .map_err(store_error)?;
@@ -381,7 +434,12 @@ async fn upload(
             store.mark_seen(&user, &event.key).map_err(store_error)?;
         }
     }
-    Ok(Json(UploadResponse { profile, announced }))
+    let feedback = feedback::feedback(before.as_ref(), &profile, &announced);
+    Ok(Json(UploadResponse {
+        profile,
+        announced,
+        feedback,
+    }))
 }
 
 fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings, Error> {
@@ -798,6 +856,7 @@ struct UploadResponse {
     #[serde(flatten)]
     profile: Profile,
     announced: Vec<decks::Announcement>,
+    feedback: feedback::Feedback,
 }
 
 #[derive(Serialize)]
@@ -1630,6 +1689,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/api/profile/{user}", get(profile))
         .route("/api/preview/{user}", post(preview))
         .route("/api/reviews/{user}", post(upload))
+        .route("/api/rank/{user}", post(rank))
         .route("/api/decks/{user}", get(get_decks).post(set_decks))
         .route(
             "/api/streak-freezes/{user}",
@@ -2267,11 +2327,13 @@ mod tests {
             UrlPath("cerro".into()),
             Json(Pending {
                 reviews: reviews.clone(),
+                seen_through: None,
             }),
         )
         .await
         .unwrap()
-        .0;
+        .0
+        .profile;
         assert_eq!(projected.freezes, 1);
         assert_eq!(
             app.profile("cerro").unwrap().freezes,
@@ -4180,7 +4242,10 @@ mod tests {
         let _ = preview(
             State(app.clone()),
             UrlPath("cerro".into()),
-            Json(Pending { reviews: vec![] }),
+            Json(Pending {
+                reviews: vec![],
+                seen_through: None,
+            }),
         )
         .await
         .unwrap();
@@ -4193,5 +4258,168 @@ mod tests {
         );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    fn reviews_at(first: i64, count: i64) -> Vec<Review> {
+        (0..count)
+            .map(|index| Review {
+                id: first + index * 1000,
+                cid: 1_000 + index,
+                last_ivl: 1,
+                time_ms: 8_000,
+                kind: 1,
+            })
+            .collect()
+    }
+
+    fn plain_upload(reviews: Vec<Review>) -> Upload {
+        Upload {
+            reviews,
+            deleted: vec![],
+            clock: Clock::default(),
+            silent: false,
+            catalog: false,
+            decks: None,
+        }
+    }
+
+    async fn upload_as(app: &Arc<App>, user: &str, body: Upload) -> UploadResponse {
+        upload(
+            State(app.clone()),
+            UrlPath(user.into()),
+            headers(user),
+            Json(body),
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    #[tokio::test]
+    async fn uploads_describe_what_they_changed() {
+        let (app, path) = fixture();
+        let start = now_ms() - 60_000;
+        let first = upload_as(&app, "hill", plain_upload(reviews_at(start, 2))).await;
+        assert_eq!(first.feedback, feedback::Feedback::default());
+        let more = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
+        let status = more.feedback.status.unwrap();
+        assert!(status.starts_with('+'), "{status}");
+        assert!(status.contains("Lv "), "{status}");
+        let again = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
+        assert_eq!(again.feedback.status, None);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn announcements_lead_the_upload_feedback() {
+        let (app, path) = fixture();
+        upload_as(&app, "cerro", sample_upload(2, false)).await;
+        let _ = set_decks(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(preferences(&["hill"])),
+        )
+        .await
+        .unwrap();
+        let done = upload_as(&app, "cerro", sample_upload(0, false)).await;
+        assert_eq!(done.feedback.headlines, vec!["📣 Spanish — told 1 friend"]);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn previews_describe_reviews_since_the_last_preview() {
+        let (app, path) = fixture();
+        let start = now_ms() - 60_000;
+        upload_as(&app, "hill", plain_upload(reviews_at(start, 1))).await;
+        let pending = reviews_at(start, 3);
+        let ask = |seen_through| {
+            let app = app.clone();
+            let reviews = pending.clone();
+            async move {
+                preview(
+                    State(app),
+                    UrlPath("hill".into()),
+                    Json(Pending {
+                        reviews,
+                        seen_through,
+                    }),
+                )
+                .await
+                .unwrap()
+                .0
+            }
+        };
+        assert_eq!(ask(None).await.feedback.status, None);
+        let status = ask(Some(pending[1].id)).await.feedback.status.unwrap();
+        assert!(status.starts_with('+'), "{status}");
+        assert_eq!(ask(Some(pending[2].id)).await.feedback.status, None);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn rank_reports_the_order_and_how_a_player_moved() {
+        let (app, path) = fixture();
+        let start = now_ms() - 600_000;
+        upload_as(&app, "hill", plain_upload(reviews_at(start, 3))).await;
+        upload_as(&app, "cerro", plain_upload(reviews_at(start, 1))).await;
+        upload_as(&app, "cerro", plain_upload(reviews_at(start, 20))).await;
+        let answer = rank(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            Json(RankQuery {
+                previous: vec!["hill".into(), "cerro".into()],
+            }),
+        )
+        .await
+        .0;
+        assert_eq!(answer.order, vec!["cerro", "hill"]);
+        let change = answer.change.unwrap();
+        assert_eq!(change.title, "👑 You took the crown");
+        assert_eq!(change.body, "You passed Hill.");
+        let first_look = rank(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            Json(RankQuery { previous: vec![] }),
+        )
+        .await
+        .0;
+        assert!(first_look.change.is_none());
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn clients_share_the_study_day_and_review_format() {
+        let fixtures: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/clients.json")).unwrap();
+        for case in fixtures["study_day"].as_array().unwrap() {
+            let clock = Clock {
+                offset_west_min: case["offset_west_min"].as_i64().unwrap(),
+                rollover_hour: case["rollover_hour"].as_i64().unwrap(),
+            };
+            assert_eq!(
+                clock.day(case["now_ms"].as_i64().unwrap()),
+                case["day"].as_i64().unwrap(),
+                "{case}"
+            );
+        }
+        for case in fixtures["review_row"].as_array().unwrap() {
+            let review: Review = serde_json::from_value(case["review"].clone()).unwrap();
+            let row: Vec<i64> = serde_json::from_value(case["row"].clone()).unwrap();
+            assert_eq!(
+                (
+                    review.id,
+                    review.cid,
+                    review.last_ivl,
+                    review.time_ms,
+                    i64::from(review.kind)
+                ),
+                (row[0], row[1], row[2], row[3], row[4])
+            );
+        }
     }
 }

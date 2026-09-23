@@ -4,18 +4,15 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction
 from aqt.utils import openLink, tooltip
 
-from . import board, notify, ui
+from . import board, notify, ui, web
 from .client import (
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
     Client,
-    announcements,
-    describe,
     offset_west_min,
     reconcile,
     rows_to_reviews,
-    snapshot,
 )
 from .deck_completion import deck_snapshots, study_day
 
@@ -30,12 +27,11 @@ RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
 
 state = {
-    "previous": None,
     "busy": False,
     "again": False,
     "polling": False,
     "timer": None,
-    "board": None,
+    "place": None,
     "profile": None,
     "inbox": [],
 }
@@ -116,15 +112,9 @@ def refresh(show_feedback, resync=False):
         except Exception as e:
             print("ankiquest:", e)
             return
-        after = snapshot(profile)
-        before, state["previous"] = state["previous"], after
-        told = announcements(profile)
-        message = describe(before, after) if before else None
-        lines = list(told)
-        if message and (show_feedback or told):
-            lines.append(message[0])
-        if lines:
-            tooltip("<br>".join(lines), period=3500 if told or (message and message[1]) else 1800)
+        message = notify.feedback(profile, show_feedback)
+        if message:
+            tooltip(message[0], period=3500 if message[1] else 1800)
         if state["again"]:
             state["again"] = False
             refresh(True)
@@ -153,37 +143,37 @@ def poll(quiet=False):
         return
     state["polling"] = True
 
+    previous = mw.pm.profile.get(ORDER_KEY) or []
+
     def work():
-        return api.leaderboard(), api.profile(), api.notifications()
+        return api.rank(previous), api.profile(), api.notifications()
 
     def done(future):
         state["polling"] = False
         try:
-            standings, profile, inbox = future.result()
+            rank, profile, inbox = future.result()
         except Exception as e:
             print("ankiquest poll:", e)
             return
-        state["board"], state["profile"], state["inbox"] = standings, profile, inbox
-        announce(api, standings, profile, inbox, quiet)
+        order = rank.get("order") or []
+        state["place"] = order.index(api.name) + 1 if api.name in order else None
+        state["profile"], state["inbox"] = profile, inbox
+        announce(rank, profile, inbox, quiet)
         redraw()
 
     mw.taskman.run_in_background(work, done)
 
 
-def announce(api, standings, profile, inbox, quiet):
+def announce(rank, profile, inbox, quiet):
     settings = config()
     now_ms = int(time.time() * 1000)
-    previous = mw.pm.profile.get(ORDER_KEY)
-    mw.pm.profile[ORDER_KEY] = [row["user"] for row in standings]
+    mw.pm.profile[ORDER_KEY] = rank.get("order") or []
     fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
     mw.pm.profile[INBOX_KEY] = cursor
-    rollover = int(mw.col.get_config("rollover", 4)) if mw.col else 4
-    warning = notify.streak_message(
+    warning = notify.streak_warning(
         profile,
         int(settings.get("streak_hours", 2) or 0),
         now_ms,
-        offset_west_min(),
-        rollover,
         mw.pm.profile.get(STREAK_DAY_KEY),
     )
     if warning:
@@ -191,10 +181,8 @@ def announce(api, standings, profile, inbox, quiet):
     if quiet:
         return
 
-    if settings.get("notify_rank", True):
-        change = notify.rank_message(previous, standings, api.name)
-        if change:
-            tooltip(change, period=4000)
+    if settings.get("notify_rank", True) and rank.get("change"):
+        tooltip(notify.notice(rank["change"]), period=4000)
     if warning:
         tooltip(warning[0], period=5000)
     for entry in fresh:
@@ -213,76 +201,35 @@ def on_deck_browser(deck_browser, content):
     api = client()
     if not api.configured:
         return
-    if state["board"] is None and not state["polling"]:
+    if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
     waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
-    content.stats += board.html(
-        state["board"] or [],
-        config().get("period", board.DEFAULT_PERIOD),
-        api.name,
-        state["profile"],
-        waiting,
-    )
+    content.stats += board.html(state["profile"], state["place"], waiting)
 
 
 def on_js_message(handled, message, context):
-    if message.startswith("ankiquest:period:"):
-        period = message.split(":", 2)[2]
-        if period in dict(board.PERIODS):
-            save_config({"period": period})
-            redraw()
-        return (True, None)
-    if message == "ankiquest:inbox":
-        open_inbox()
+    if message.startswith("ankiquest:web:"):
+        page = message.split(":", 2)[2]
+        if page in board.PAGES:
+            open_page(board.PAGES[page])
         return (True, None)
     return handled
 
 
-def send_reply(entry, message, status):
+def open_page(path):
     api = client()
-
-    def work():
-        return api.reply(entry["id"], message)
-
-    def done(future):
-        try:
-            who = future.result()
-        except Exception as e:
-            _say(status, "Could not send: %s" % e)
-            return
-        entry["replied"] = True
-        _say(status, "Sent to %s" % who)
-        redraw()
-
-    mw.taskman.run_in_background(work, done)
-
-
-def _say(status, text):
-    try:
-        status.setText(text)
-    except RuntimeError:
-        tooltip(text)
+    if not api.base:
+        tooltip("Set the server in ankiquest settings first.")
+        return
+    web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
 
 
 def open_inbox():
-    api = client()
-    if not api.configured:
-        tooltip("Set the server, player and token in ankiquest settings first.")
-        return
-
-    def done(future):
-        try:
-            entries = future.result()
-        except Exception as e:
-            tooltip("ankiquest: could not load your inbox (%s)" % e)
-            return
-        state["inbox"] = entries
-        ids = [entry["id"] for entry in entries] + [mw.pm.profile.get(INBOX_KEY, 0)]
-        mw.pm.profile[INBOX_KEY] = max(ids)
-        ui.inbox_dialog(mw, entries, send_reply)
-        redraw()
-
-    mw.taskman.run_in_background(api.notifications, done)
+    mw.pm.profile[INBOX_KEY] = max(
+        [entry["id"] for entry in state["inbox"]] + [mw.pm.profile.get(INBOX_KEY, 0)]
+    )
+    open_page(board.PAGES["inbox"])
+    redraw()
 
 
 def open_settings():
@@ -290,8 +237,8 @@ def open_settings():
     if values is None:
         return
     save_config(values)
-    state["previous"] = None
-    state["board"] = None
+    state["profile"] = None
+    state["place"] = None
     refresh_shared_decks()
     poll(quiet=True)
     tooltip("ankiquest settings saved.")
@@ -317,7 +264,6 @@ def test_connection(values):
 def upload_everything():
     mw.pm.profile[MARK_KEY] = 0
     mw.pm.profile[RECENT_KEY] = []
-    state["previous"] = None
     refresh(False, resync=True)
     tooltip("Uploading your whole review history…")
 
@@ -370,11 +316,7 @@ def save_deck_choice(api, shared, unshared, recipients, nudges):
 
 
 def open_website():
-    api = client()
-    if not api.base:
-        tooltip("Set the server in ankiquest settings first.")
-        return
-    openLink("%s/#%s" % (api.base, api.user))
+    open_page(board.PAGES["profile"])
 
 
 def on_operation(changes, handler):
@@ -385,7 +327,6 @@ def on_operation(changes, handler):
 
 
 def on_profile_open():
-    state["previous"] = None
     if state["timer"] is None:
         try:
             state["timer"] = mw.progress.timer(POLL_MS, poll, repeat=True, parent=mw)

@@ -30,6 +30,10 @@ Open `/#<user>` for a profile, `/` for the leaderboard. `/hour`, `/day`, `/week`
 
 `/records` and `GET /api/records` name whoever has had the best hour, day, week, month and year here, with the XP and the review count of each and the two who came closest, along with the longest streak and the most days studied; a profile shows the same as personal bests. The record hour is any 60 minutes, not a clock hour.
 
+## Clients
+
+The Android app and the desktop add-on show what the server writes, so they word things the same way. Upload and preview responses carry `feedback` (`headlines` and an XP `status` line). Profiles carry `day_ends_at` and a `streak_warning` while the streak is at risk. `POST /api/rank/<user>` with `{"previous": [...]}` returns the weekly `order` and a `change` notice for the player. Behavior that has to stay in each client, such as the study day, the review row format and undo reconciliation, is pinned by `tests/fixtures/clients.json`, which the server, the add-on and the app all test against.
+
 ## Community and reminders
 
 Open `/community` for the winners calendar, weekly and monthly results, trophy cabinet, improvement and consistency awards, head-to-head history, comeback recognition, records, and year in review. Coverage starts with the earliest retained reviews and is labeled **available history**. Historical reconstructions and provisional results are identified; results become permanent after a 24-hour late-sync window. Existing review XP weights are unchanged.

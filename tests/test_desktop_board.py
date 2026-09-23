@@ -1,9 +1,10 @@
-"""Desktop leaderboard and notification wording; run with python -m unittest discover -s tests."""
+"""Desktop deck list line, notifications and web window; run with python -m unittest discover -s tests."""
 
 import importlib.util
+import json
+import re
 import sys
 import unittest
-from datetime import datetime
 from pathlib import Path
 
 ADDON = Path(__file__).resolve().parents[1] / "addon"
@@ -20,100 +21,65 @@ def load_module(name, path):
 board = load_module("ankiquest_board", ADDON / "board.py")
 notify = load_module("ankiquest_notify", ADDON / "notify.py")
 tree = load_module("ankiquest_decks", ADDON / "decks.py")
+web = load_module("ankiquest_web", ADDON / "web.py")
+client = load_module("ankiquest_client_shared", ADDON / "client.py")
+progress = load_module("ankiquest_progress_shared", ADDON / "deck_completion.py")
 
 
-def player(user, week, level=1, streak=0, **periods):
-    row = {
-        "user": user,
-        "display": user.title(),
-        "level": level,
-        "streak": streak,
-        "week_xp": week,
-    }
-    if periods:
-        row["periods"] = dict(periods, week=week)
-    return row
+FIXTURES = json.loads((Path(__file__).resolve().parent / "fixtures" / "clients.json").read_text("utf-8"))
 
 
-class BoardTests(unittest.TestCase):
-    def test_each_period_ranks_by_its_own_experience(self):
-        rows = [player("slow", 10, day=99), player("fast", 500, day=1)]
-        self.assertEqual(["fast", "slow"], [r["user"] for r in board.ranked(rows, "week")])
-        self.assertEqual(["slow", "fast"], [r["user"] for r in board.ranked(rows, "day")])
+class SummaryTests(unittest.TestCase):
+    def test_the_deck_list_line_shows_place_level_streak_and_links(self):
+        html = board.html({"level": 4, "xp_into_level": 1200, "xp_for_next": 2000, "streak": 3}, 2, 0)
+        self.assertIn("#2 this week", html)
+        self.assertIn("Lv 4  1,200/2,000 XP", html)
+        self.assertIn("\U0001f525 3 day streak", html)
+        self.assertIn("pycmd('ankiquest:web:board')", html)
+        self.assertNotIn("ankiquest:web:inbox", html)
 
-    def test_a_board_without_periods_still_reads_the_week(self):
-        rows = [player("cerro", 40), player("hill", 90)]
-        self.assertEqual(["hill", "cerro"], [r["user"] for r in board.ranked(rows, "month")])
-        self.assertEqual(90, board.xp_of(rows[1], "month"))
+    def test_a_waiting_inbox_and_a_risky_streak_are_visible(self):
+        html = board.html({"level": 1, "streak": 5, "at_risk": True}, None, 2)
+        self.assertIn("streak at risk today", html)
+        self.assertIn("pycmd('ankiquest:web:inbox')", html)
+        self.assertIn("2 new", html)
+        self.assertNotIn("this week", html)
 
-    def test_the_leader_wears_the_crown_and_i_am_bold(self):
-        html = board.html([player("cerro", 40), player("hill", 90, streak=3)], "week", "cerro")
-        self.assertIn("\U0001f451", html)
-        self.assertIn("font-weight:bold'><td", html.replace("\n", ""))
-        self.assertIn("\U0001f525 3", html)
-        self.assertLess(html.index("Hill"), html.index("Cerro"))
+    def test_every_link_opens_a_known_page(self):
+        html = board.html({}, 1, 1)
+        for page in re.findall(r"ankiquest:web:(\w+)", html):
+            self.assertIn(page, board.PAGES)
 
-    def test_the_chosen_period_is_the_one_marked(self):
-        html = board.html([player("cerro", 40)], "month", "cerro")
-        self.assertIn("pycmd('ankiquest:period:month')", html)
-        self.assertIn("font-weight:bold;text-decoration:underline;margin-left:.6em'", html)
-        self.assertIn("<span style='opacity:.7'>Month</span>", html)
-        self.assertEqual(1, html.count("text-decoration:underline"))
 
-    def test_an_empty_board_and_a_waiting_inbox_are_both_visible(self):
-        html = board.html([], "week", "cerro", {"level": 4, "xp_into_level": 1, "xp_for_next": 2}, 2)
-        self.assertIn("No one has any experience yet.", html)
-        self.assertIn("pycmd('ankiquest:inbox')", html)
-        self.assertIn("Lv 4", html)
+class FeedbackTests(unittest.TestCase):
+    def test_headlines_always_show_and_carry_the_status(self):
+        response = {"feedback": {"headlines": ["Level 5!"], "status": "+10 XP"}}
+        self.assertEqual(("Level 5!<br>+10 XP", True), notify.feedback(response, False))
 
-    def test_names_cannot_smuggle_markup_into_the_deck_list(self):
-        html = board.html([{"user": "x", "display": "<script>", "level": 1, "streak": 0, "week_xp": 1}], "week", "x")
-        self.assertNotIn("<script>", html)
-        self.assertIn("&lt;script&gt;", html)
+    def test_a_plain_status_only_shows_while_reviewing(self):
+        response = {"feedback": {"headlines": [], "status": "+10 XP"}}
+        self.assertEqual(("+10 XP", False), notify.feedback(response, True))
+        self.assertIsNone(notify.feedback(response, False))
+
+    def test_older_servers_and_quiet_uploads_say_nothing(self):
+        self.assertIsNone(notify.feedback({}, True))
+        self.assertIsNone(notify.feedback({"feedback": {"headlines": [], "status": None}}, True))
 
 
 class NotifyTests(unittest.TestCase):
-    def setUp(self):
-        self.standings = [player("hill", 900), player("cerro", 500), player("mago", 100)]
-
-    def test_taking_the_crown_and_being_passed_read_differently(self):
-        climbed = notify.rank_message(["hill", "mago", "cerro"], self.standings, "cerro")
-        self.assertIn("You're now #2", climbed)
-        self.assertIn("You passed Mago.", climbed)
-        self.assertIn("400 XP behind Hill.", climbed)
-
-        crowned = notify.rank_message(["cerro", "hill", "mago"], self.standings, "hill")
-        self.assertIn("\U0001f451 You took the crown", crowned)
-
-        lost = notify.rank_message(["cerro", "hill", "mago"], self.standings, "cerro")
-        self.assertIn("\U0001f451 Hill took the crown", lost)
-        self.assertIn("You're now #2.", lost)
-
-    def test_silence_without_movement_or_without_experience(self):
-        order = ["hill", "cerro", "mago"]
-        self.assertIsNone(notify.rank_message(order, self.standings, "cerro"))
-        self.assertIsNone(notify.rank_message(None, self.standings, "cerro"))
-        self.assertIsNone(notify.rank_message(order, self.standings, "nobody"))
-        quiet = [player("hill", 0), player("cerro", 0)]
-        self.assertIsNone(notify.rank_message(["cerro", "hill"], quiet, "hill"))
-
     def test_the_streak_warning_waits_for_the_last_hours_and_speaks_once(self):
-        day = 20_000
-        profile = {"at_risk": True, "streak": 7, "freezes": 0}
-        early = day * notify.DAY_MS + 4 * notify.HOUR_MS
-        self.assertIsNone(notify.streak_message(profile, 2, early, 0, 0, None))
-
-        late = (day + 1) * notify.DAY_MS - notify.HOUR_MS
-        text, marked = notify.streak_message(profile, 2, late, 0, 0, None)
-        self.assertIn("7 day streak ends in 1h", text)
-        self.assertIn("No freezes left.", text)
-        self.assertEqual(day, marked)
-        self.assertIsNone(notify.streak_message(profile, 2, late, 0, 0, marked))
-        self.assertIsNone(notify.streak_message(profile, 0, late, 0, 0, None))
-        self.assertIsNone(notify.streak_message({"at_risk": False}, 2, late, 0, 0, None))
-
-        spare = dict(profile, freezes=1)
-        self.assertIn("A freeze would cover you", notify.streak_message(spare, 2, late, 0, 0, None)[0])
+        ends = 100 * notify.HOUR_MS
+        profile = {
+            "streak_warning": {"title": "\U0001f525 Your 7 day streak ends in 1h", "body": "No rush."},
+            "day_ends_at": ends,
+        }
+        self.assertIsNone(notify.streak_warning(profile, 2, ends - 3 * notify.HOUR_MS, None))
+        text, marked = notify.streak_warning(profile, 2, ends - notify.HOUR_MS, None)
+        self.assertEqual("\U0001f525 Your 7 day streak ends in 1h<br>No rush.", text)
+        self.assertEqual(ends, marked)
+        self.assertIsNone(notify.streak_warning(profile, 2, ends - notify.HOUR_MS, marked))
+        self.assertIsNone(notify.streak_warning(profile, 0, ends - notify.HOUR_MS, None))
+        self.assertIsNone(notify.streak_warning({"day_ends_at": ends}, 2, ends - 1, None))
 
     def test_only_recent_arrivals_are_announced_but_all_are_consumed(self):
         now = 1_700_000_000
@@ -133,21 +99,58 @@ class NotifyTests(unittest.TestCase):
         self.assertFalse(notify.answerable({"sender": ""}))
 
 
-class InboxTimeTests(unittest.TestCase):
-    def test_an_entry_shows_its_local_date_and_time(self):
-        stamp = 1_789_000_000
-        moment = datetime.fromtimestamp(stamp)
-        text = notify.when(stamp)
-        self.assertIn(str(moment.year), text)
-        self.assertIn(moment.strftime("%H:%M"), text)
-        self.assertTrue(text.startswith(moment.strftime("%b")))
+class WebTests(unittest.TestCase):
+    base = "https://anki.example.com"
 
-    def test_seconds_and_milliseconds_read_the_same(self):
-        self.assertEqual(notify.when(1_789_000_000), notify.when(1_789_000_000_000))
+    def test_only_the_servers_own_pages_are_signed_in(self):
+        for url in ("/", "/week", "/community#activity", "/#hill", "/community?period=week"):
+            self.assertTrue(web.allowed(self.base, self.base + url), url)
+        for url in (
+            "https://evil.example.com/week",
+            "http://anki.example.com/week",
+            "https://anki.example.com:8443/week",
+            "https://user:pw@anki.example.com/week",
+            "https://anki.example.com/api/profile/hill",
+            "https://anki.example.com/login",
+        ):
+            self.assertFalse(web.allowed(self.base, url), url)
 
-    def test_an_entry_without_a_time_shows_none(self):
-        self.assertEqual("", notify.when(None))
-        self.assertEqual("", notify.when(0))
+    def test_a_server_below_a_path_keeps_its_prefix(self):
+        base = "https://example.com/anki"
+        self.assertTrue(web.allowed(base, "https://example.com/anki/community#activity"))
+        self.assertFalse(web.allowed(base, "https://example.com/community"))
+        self.assertEqual("https://example.com/anki/week", web.page_url(base + "/", "/week"))
+
+    def test_the_session_script_checks_the_origin_and_escapes_the_token(self):
+        script = web.session_script(self.base, "hill", 'to"ken')
+        self.assertIn('location.origin !== "https://anki.example.com"', script)
+        self.assertIn('"token": "to\\"ken"', script)
+        self.assertIn("ankiquest-auth", script)
+        self.assertIn("window.ankiquestSession = null", web.session_script(self.base, "hill", ""))
+
+
+class SharedFixtureTests(unittest.TestCase):
+    """tests/fixtures/clients.json is checked by the server and the Android app too."""
+
+    def test_study_day(self):
+        for case in FIXTURES["study_day"]:
+            self.assertEqual(
+                case["day"],
+                progress.study_day(case["now_ms"], case["offset_west_min"], case["rollover_hour"]),
+                case,
+            )
+
+    def test_reconcile(self):
+        for case in FIXTURES["reconcile"]:
+            rows = [(i, 0, 0, 0, 0) for i in case["window"]]
+            present, deleted, restored = client.reconcile(rows, set(case["recent"]), case["known"], case["mark"])
+            self.assertEqual(set(case["window"]), present)
+            self.assertEqual(case["deleted"], deleted, case)
+            self.assertEqual(case["restored"], [row[0] for row in restored], case)
+
+    def test_review_row(self):
+        for case in FIXTURES["review_row"]:
+            self.assertEqual([case["review"]], client.rows_to_reviews([tuple(case["row"])]))
 
 
 class DeckTreeTests(unittest.TestCase):

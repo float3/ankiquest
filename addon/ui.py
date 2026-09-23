@@ -1,9 +1,8 @@
-"""The dialogs behind the Tools menu: settings, deck sharing and the inbox."""
+"""The dialogs behind the Tools menu: settings and deck sharing."""
 
 from aqt.qt import (
     QCheckBox,
     QDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -19,9 +18,6 @@ from aqt.qt import (
 from aqt.qt import Qt
 
 from .decks import label, ordered
-from .notify import answerable, when
-
-MAX_MESSAGE = 200
 
 
 def _enum(owner, group, name):
@@ -210,66 +206,3 @@ def _titled(title, widget):
     layout.addWidget(label)
     layout.addWidget(widget)
     return holder
-
-
-def inbox_dialog(parent, entries, send):
-    """Reads what other people have done, and answers it without leaving Anki."""
-    dialog = QDialog(parent)
-    dialog.setWindowTitle("ankiquest inbox")
-    dialog.resize(560, 420)
-    layout = QVBoxLayout(dialog)
-    cards = []
-    for entry in reversed(entries):
-        cards.append(_message(entry, send))
-    layout.addWidget(_scroller(cards or [QLabel("Nothing yet.")]))
-    close = QPushButton("Close")
-    close.clicked.connect(dialog.accept)
-    row = QHBoxLayout()
-    row.addStretch(1)
-    row.addWidget(close)
-    layout.addLayout(row)
-    dialog.exec()
-
-
-def _message(entry, send):
-    card = QFrame()
-    card.setFrameShape(_enum(QFrame, "Shape", "StyledPanel"))
-    layout = QVBoxLayout(card)
-    title = QLabel(entry.get("title", ""))
-    title.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
-    font = title.font()
-    font.setBold(True)
-    title.setFont(font)
-    stamp = QLabel(when(entry.get("created_at")))
-    stamp.setEnabled(False)
-    stamp.setAlignment(_enum(Qt, "AlignmentFlag", "AlignRight"))
-    layout.addWidget(_row(title, stamp))
-    body = QLabel(entry.get("body", ""))
-    body.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
-    body.setWordWrap(True)
-    layout.addWidget(body)
-    if not answerable(entry):
-        return card
-
-    status = QLabel("")
-    field = QLineEdit()
-    field.setPlaceholderText("Say something nice")
-    field.setMaxLength(MAX_MESSAGE)
-    cheer = QPushButton("Good job!")
-    reply = QPushButton("Send")
-
-    def answer(message):
-        message = message.strip()
-        if not message:
-            return
-        for widget in (cheer, reply, field):
-            widget.setEnabled(False)
-        status.setText("Sending…")
-        send(entry, message, status)
-
-    cheer.clicked.connect(lambda: answer(cheer.text()))
-    reply.clicked.connect(lambda: answer(field.text()))
-    field.returnPressed.connect(lambda: answer(field.text()))
-    layout.addWidget(_row(field, cheer, reply))
-    layout.addWidget(status)
-    return card

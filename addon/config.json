@@ -3,6 +3,5 @@
     "user": "",
     "token": "",
     "notify_rank": true,
-    "streak_hours": 2,
-    "period": "week"
+    "streak_hours": 2
 }

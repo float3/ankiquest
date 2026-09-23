@@ -1,0 +1,157 @@
+{
+  "_about": "Behaviour every ankiquest client must share. The Android fork keeps a copy in AnkiDroid/src/test/resources/ankiquest/clients.json; CI there fails when it drifts from this file.",
+  "study_day": [
+    {
+      "now_ms": 1789000000000,
+      "offset_west_min": -120,
+      "rollover_hour": 4,
+      "day": 20705
+    },
+    {
+      "now_ms": 1788494399999,
+      "offset_west_min": 0,
+      "rollover_hour": 4,
+      "day": 20699
+    },
+    {
+      "now_ms": 1788494400000,
+      "offset_west_min": 0,
+      "rollover_hour": 4,
+      "day": 20700
+    },
+    {
+      "now_ms": 1789000000000,
+      "offset_west_min": 180,
+      "rollover_hour": 0,
+      "day": 20705
+    },
+    {
+      "now_ms": 1789000000000,
+      "offset_west_min": 180,
+      "rollover_hour": 23,
+      "day": 20704
+    },
+    {
+      "now_ms": 0,
+      "offset_west_min": 60,
+      "rollover_hour": 4,
+      "day": -1
+    }
+  ],
+  "reconcile": [
+    {
+      "window": [
+        1,
+        2,
+        3
+      ],
+      "recent": [],
+      "known": 0,
+      "mark": 0,
+      "deleted": [],
+      "restored": []
+    },
+    {
+      "window": [
+        1,
+        3
+      ],
+      "recent": [
+        1,
+        2,
+        3
+      ],
+      "known": 3,
+      "mark": 3,
+      "deleted": [
+        2
+      ],
+      "restored": []
+    },
+    {
+      "window": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "recent": [
+        1,
+        2
+      ],
+      "known": 3,
+      "mark": 5,
+      "deleted": [],
+      "restored": [
+        3
+      ]
+    },
+    {
+      "window": [
+        5
+      ],
+      "recent": [
+        4
+      ],
+      "known": 0,
+      "mark": 0,
+      "deleted": [],
+      "restored": []
+    },
+    {
+      "window": [
+        2,
+        4,
+        6
+      ],
+      "recent": [
+        1,
+        2,
+        3
+      ],
+      "known": 4,
+      "mark": 6,
+      "deleted": [
+        1,
+        3
+      ],
+      "restored": [
+        4
+      ]
+    }
+  ],
+  "review_row": [
+    {
+      "row": [
+        1789000000123,
+        1700000000000,
+        -600,
+        4200,
+        0
+      ],
+      "review": {
+        "id": 1789000000123,
+        "cid": 1700000000000,
+        "last_ivl": -600,
+        "time_ms": 4200,
+        "kind": 0
+      }
+    },
+    {
+      "row": [
+        1789000000456,
+        1700000000001,
+        12,
+        9000,
+        1
+      ],
+      "review": {
+        "id": 1789000000456,
+        "cid": 1700000000001,
+        "last_ivl": 12,
+        "time_ms": 9000,
+        "kind": 1
+      }
+    }
+  ]
+}

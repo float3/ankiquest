@@ -5,9 +5,8 @@ Everything here is also under **Tools → ankiquest settings…**, which is easi
 - `token`: your upload token
 - `notify_rank`: say something when your place on the leaderboard changes
 - `streak_hours`: warn you this many hours before your streak ends (0 turns it off)
-- `period`: which leaderboard the deck list shows (`hour`, `day`, `week`, `month`, `year`, `all`)
 
-The leaderboard appears under the deck list, below your other statistics. **Tools → ankiquest inbox…** shows what other people have finished and answers it with a cheer or your own words.
+A line under the deck list shows your weekly place, level and streak. Its links, **Tools → ankiquest on the web…** and **Tools → ankiquest inbox…** open the website in a window inside Anki, already signed in with your token, where you can see the leaderboard, reply to messages and join challenges.
 
 Review log rows (card id, timestamp, previous interval, time taken, review type) and deck progress (deck IDs, names, daily remaining counts and review counts) are sent to your server, never card content. Deck names and progress are available privately through your upload token.
 
