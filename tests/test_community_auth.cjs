@@ -95,7 +95,7 @@ test('late native credentials connect, while explicit disconnect survives repeat
   await page.locator('#reminder-form').waitFor();
   await page.locator('#view-reminders [data-disconnect]').click();
   await deliver();
-  assert.equal(await page.locator('#reminder-form').count(), 0);
+  await page.locator('#reminder-form').waitFor({ state: 'detached' });
   await page.locator('#connect-button').click();
   await page.locator('#reminder-form').waitFor();
   assert.equal(await page.locator('#auth-dialog').evaluate(dialog => dialog.open), false);

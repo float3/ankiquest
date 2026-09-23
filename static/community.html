@@ -331,7 +331,7 @@ function connect() {
   if(!state.data.players.length) $("auth-message").textContent="No player accounts are available yet.";
   $("auth-dialog").showModal();
 }
-addEventListener("ankiquest:locked",()=>{state.nativeDisconnected=true;delete window.ankiquestSession;clearPrivate();});
+addEventListener("ankiquest:locked",()=>{state.nativeDisconnected=true;if(!state.disconnecting)delete window.ankiquestSession;clearPrivate();});
 function clearPrivate() {
   AnkiQuestAvatars.close();
   state.authEpoch++;state.privateEpoch++;state.reminderEpoch++;state.activityEpoch++;
@@ -343,7 +343,7 @@ function clearPrivate() {
   if($("challenge-dialog").open)$("challenge-dialog").close();
   $("challenge-create-content").innerHTML="";renderPrivate();
 }
-async function disconnect() { state.nativeDisconnected=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=error.message;} } }
+async function disconnect() { state.nativeDisconnected=true;delete window.ankiquestSession;state.disconnecting=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=error.message;} } finally { state.disconnecting=false; } }
 function connectNativeSession() {
   if(!state.data||state.nativeDisconnected)return false;
   const saved=window.ankiquestSession;
