@@ -1,6 +1,7 @@
 /target
 /result
 /state
+/node_modules
 ankiquest.json
 __pycache__
 *.ankiaddon
