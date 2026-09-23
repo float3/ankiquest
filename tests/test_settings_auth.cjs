@@ -14,7 +14,7 @@ const dialogs = [
   { name: 'freezes', open: '#manage-freezes', id: '#streak-freezes', ready: '#freeze-preferences', input: '#freeze-token', unlock: '#freeze-unlock', save: 'Save preference', endpoint: 'streak-freezes' },
   { name: 'decks', open: '#manage-decks', id: '#deck-sharing', ready: '#deck-settings', input: '#deck-token', unlock: '#deck-unlock', save: 'Save preferences', endpoint: 'decks' },
 ];
-const incoming = { name:'incoming', open:'#manage-received-notifications', id:'#notification-preferences', ready:'#notification-settings', input:'#notification-token', unlock:'#notification-unlock', save:'Save preferences', endpoint:'notification-preferences' };
+const incoming = { name:'incoming', open:'#manage-received-notifications', id:'#notification-preferences', ready:'#notification-settings', input:'#notification-token', unlock:'#notification-unlock', save:'Save preferences', endpoint:'deck-subscriptions' };
 let browser;
 before(async () => {
   browser = await chromium.launch({
@@ -43,7 +43,7 @@ async function fixture(t, session = savedSession, user = 'cerro', options = {}) 
     window.settingsFetchSignals = [];
     const fetch = window.fetch;
     window.fetch = function (input, options) {
-      if (/^\/api\/(streak-freezes|decks|notification-preferences)\//.test(String(input))) window.settingsFetchSignals.push(options.signal);
+      if (/^\/api\/(streak-freezes|decks|deck-subscriptions)\//.test(String(input))) window.settingsFetchSignals.push(options.signal);
       return fetch.call(this, input, options);
     };
     const setItem = Storage.prototype.setItem;
@@ -86,7 +86,7 @@ async function fixture(t, session = savedSession, user = 'cerro', options = {}) 
         today: { reviews: 0, xp: 0 }, quests: [], heatmap: [{ date: '2026-09-22', reviews: 0, xp: 0 }],
         lifetime: { reviews: 0, hours: 0, best_streak: 1, best_combo: 0, days_active: 1 }, achievements: [],
       };
-    } else if (/^\/api\/(streak-freezes|decks|notification-preferences)\//.test(url.pathname)) {
+    } else if (/^\/api\/(streak-freezes|decks|deck-subscriptions)\//.test(url.pathname)) {
       let forcedStatus;
       if (state.holdNext) {
         const held = state.holdNext;
@@ -106,8 +106,8 @@ async function fixture(t, session = savedSession, user = 'cerro', options = {}) 
       if (forcedStatus === 401 || (forcedStatus !== 200 && !cookieAuthorized && request.headers().authorization !== `Bearer ${state.acceptedToken}`)) return route.fulfill({ status: 401, body: '' });
       data = url.pathname.startsWith('/api/streak-freezes/')
         ? { enabled: request.method() === 'POST' ? request.postDataJSON().enabled : false, freezes: 2, capacity: 3 }
-        : url.pathname.startsWith('/api/notification-preferences/')
-        ? { enabled: request.method() === 'POST' ? request.postDataJSON().enabled : true, muted_senders:request.method() === 'POST' ? request.postDataJSON().muted_senders : [], senders:[{user:'hill',display:'Hill'}] }
+        : url.pathname.startsWith('/api/deck-subscriptions/')
+        ? { enabled: request.method() === 'POST' ? request.postDataJSON().enabled : true, muted_senders:request.method() === 'POST' ? [] : options.muted || [], unsubscribed_senders:request.method() === 'POST' ? request.postDataJSON().unsubscribed_senders : options.unsubscribed || [], sharing_senders:options.sharing || ['hill'], senders:[{user:'hill',display:'Hill'}] }
         : { decks: [{ id: '42', name: 'Spanish', enabled: false, recipients: [] }], recipients: [], nudges: false };
     } else return route.fulfill({ status: 404, body: '' });
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
@@ -130,7 +130,7 @@ async function fixture(t, session = savedSession, user = 'cerro', options = {}) 
       const arrived=new Promise(resolve=>{arrive=resolve;}),released=new Promise(resolve=>{release=resolve;});
       state.holdSession={arrive,released};pendingReleases.push(release);return{arrived,release};
     },
-    settingsRequests: () => requests.filter(request => /\/api\/(streak-freezes|decks|notification-preferences)\//.test(request.url)),
+    settingsRequests: () => requests.filter(request => /\/api\/(streak-freezes|decks|deck-subscriptions)\//.test(request.url)),
     async deliver(session = savedSession) {
       await page.evaluate(value => {
         window.ankiquestSession = value;
@@ -556,12 +556,58 @@ test('native account cleanup closes recipient preferences while repeated valid i
 test('incoming: native credentials load and save without token reentry', async t=>{
   const f=await fixture(t);await f.open(incoming);await f.ready(incoming);
   assert.equal(await f.page.locator(incoming.input).count(),0);
-  await f.page.locator('[data-muted-sender="hill"]').check();
+  await f.page.locator('[data-unsubscribed-sender="hill"]').check();
   await f.page.locator('[data-notification-save]').click();
   await f.page.locator('#notification-status').filter({hasText:'Preferences saved'}).waitFor();
-  assert.deepEqual(JSON.parse(f.settingsRequests().at(-1).body),{enabled:true,muted_senders:['hill']});
+  assert.deepEqual(JSON.parse(f.settingsRequests().at(-1).body),{enabled:true,unsubscribed_senders:['hill']});
   assert(f.settingsRequests().every(request=>request.auth==='Bearer saved-token'));
   await f.noCredentialPersistence('saved-token');
+});
+
+test('incoming: subscriptions remain editable while the overall alert switch is off', async t=>{
+  const f=await fixture(t);await f.open(incoming);await f.ready(incoming);
+  await f.page.locator('#notification-enabled').uncheck();
+  await f.page.locator('[data-unsubscribed-sender="hill"]').check();
+  await f.page.locator('[data-notification-save]').click();
+  await f.page.locator('#notification-status').filter({hasText:'Preferences saved'}).waitFor();
+  assert.deepEqual(JSON.parse(f.settingsRequests().at(-1).body),{enabled:false,unsubscribed_senders:['hill']});
+  assert.equal(await f.page.locator('[data-unsubscribed-sender="hill"]').isEnabled(),true);
+});
+
+test('incoming: unrelated configured members are not shown as current senders',async t=>{
+  const f=await fixture(t,savedSession,'cerro',{sharing:[]});await f.open(incoming);await f.ready(incoming);
+  assert.equal(await f.page.locator('[data-unsubscribed-sender]').count(),0);
+  await f.page.getByText('No one is sharing decks with you yet.',{exact:false}).waitFor();
+});
+
+test('incoming: unsubscribed senders remain listed after sharing stops',async t=>{
+  const f=await fixture(t,savedSession,'cerro',{sharing:[],unsubscribed:['hill']});await f.open(incoming);await f.ready(incoming);
+  assert.equal(await f.page.locator('[data-unsubscribed-sender="hill"]').isChecked(),true);
+});
+
+test('incoming: existing mutes become unsubscribe choices and can be cleared to subscribe again', async t=>{
+  const f=await fixture(t,savedSession,'cerro',{muted:['hill']});await f.open(incoming);await f.ready(incoming);
+  const choice=f.page.locator('[data-unsubscribed-sender="hill"]');
+  assert.equal(await choice.isChecked(),true);
+  await f.page.getByText('Your previous mutes are selected above.',{exact:false}).waitFor();
+  await f.page.locator('[data-notification-save]').click();
+  await f.page.locator('#notification-status').filter({hasText:'Preferences saved'}).waitFor();
+  assert.deepEqual(JSON.parse(f.settingsRequests().at(-1).body),{enabled:true,unsubscribed_senders:['hill']});
+  await choice.uncheck();await f.page.locator('[data-notification-save]').click();
+  await f.page.waitForFunction(()=>document.querySelector('[data-notification-status]').textContent.includes('Preferences saved')&&!document.querySelector('[data-notification-save]').disabled);
+  assert.deepEqual(JSON.parse(f.settingsRequests().at(-1).body),{enabled:true,unsubscribed_senders:[]});
+});
+
+for(const width of [320,390,1440])test('incoming: unsubscribe drafts survive a failed save at '+width+'px',async t=>{
+  const f=await fixture(t);await f.page.setViewportSize({width,height:844});await f.open(incoming);await f.ready(incoming);
+  await f.page.locator('[data-unsubscribed-sender="hill"]').check();f.state.nextFailure=500;
+  await f.page.locator('[data-notification-save]').click();
+  await f.page.locator('#notification-status').filter({hasText:'Your changes are still here'}).waitFor();
+  assert.equal(await f.page.locator('[data-unsubscribed-sender="hill"]').isChecked(),true);
+  assert.equal(await f.page.locator('[data-notification-save]').isEnabled(),true);
+  assert(await f.page.locator(incoming.id).evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth+1),'no horizontal overflow');
+  await f.page.locator('[data-notification-save]').click();
+  await f.page.locator('#notification-status').filter({hasText:'Preferences saved'}).waitFor();
 });
 
 for(const cookieUser of [null,'hill']) {
@@ -628,7 +674,7 @@ test('incoming: connecting once shares its owner session with deck settings and 
 test('incoming: the leaderboard entry resolves the cookie owner before loading',async t=>{
   const f=await fixture(t,null,'cerro',{modern:true,cookieUser:'cerro'});
   await f.page.evaluate(()=>openNotificationPreferences());await f.ready(incoming);
-  assert.equal(f.settingsRequests()[0].url,origin+'/api/notification-preferences/cerro');
+  assert.equal(f.settingsRequests()[0].url,origin+'/api/deck-subscriptions/cerro');
   assert.equal(f.settingsRequests()[0].auth,undefined);
 });
 
@@ -638,5 +684,5 @@ test('incoming: the leaderboard manual player can be corrected after a failed at
   await f.page.locator(incoming.input).fill('wrong-token');await f.page.locator('[data-notification-load]').click();
   await f.page.locator('#notification-status').filter({hasText:'not accepted'}).waitFor();
   await f.page.locator('#notification-player').fill('cerro');await f.unlock(incoming);
-  assert.equal(f.settingsRequests().at(-1).url,origin+'/api/notification-preferences/cerro');
+  assert.equal(f.settingsRequests().at(-1).url,origin+'/api/deck-subscriptions/cerro');
 });

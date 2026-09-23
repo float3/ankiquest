@@ -7,6 +7,7 @@ mod freezes;
 mod game;
 mod reminders;
 mod store;
+mod subscriptions;
 
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -390,8 +391,10 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings
         .ntfy
         .as_deref()
         .is_some_and(|base| !base.trim().is_empty());
+    let unsubscribed = store.unsubscribed_recipients(user)?;
     users.retain(|candidate| {
         candidate != user
+            && !unsubscribed.contains(candidate)
             && app.config.users.get(candidate).is_some_and(|config| {
                 config
                     .token
@@ -475,6 +478,8 @@ struct IncomingPreferences {
     #[serde(flatten)]
     settings: decks::IncomingSettings,
     senders: Vec<decks::Recipient>,
+    unsubscribed_senders: Vec<String>,
+    sharing_senders: Vec<String>,
 }
 
 fn incoming_preferences(
@@ -484,6 +489,8 @@ fn incoming_preferences(
 ) -> Result<IncomingPreferences, Error> {
     let mut users: BTreeSet<String> = app.config.users.keys().cloned().collect();
     users.extend(store.known_incoming_senders(user)?);
+    let unsubscribed_senders = store.unsubscribed_senders(user)?;
+    users.extend(unsubscribed_senders.iter().cloned());
     users.remove(user);
     let mut senders: Vec<_> = users
         .into_iter()
@@ -496,6 +503,8 @@ fn incoming_preferences(
     Ok(IncomingPreferences {
         settings: store.incoming_settings(user)?,
         senders,
+        unsubscribed_senders,
+        sharing_senders: store.sharing_senders(user)?,
     })
 }
 
@@ -535,6 +544,35 @@ async fn set_incoming_preferences(
     }
     store
         .set_incoming_settings(&user, &update)
+        .map_err(store_error)?;
+    incoming_preferences(&app, &store, &user)
+        .map(Json)
+        .map_err(store_error)
+}
+
+async fn set_deck_subscriptions(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(update): Json<subscriptions::Settings>,
+) -> Result<Json<IncomingPreferences>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if !update.valid(&user) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut store = app.store.lock().unwrap();
+    let current = incoming_preferences(&app, &store, &user).map_err(store_error)?;
+    if update
+        .unsubscribed_senders
+        .iter()
+        .any(|sender| !current.senders.iter().any(|person| &person.user == sender))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    store
+        .set_deck_subscriptions(&user, &update)
         .map_err(store_error)?;
     incoming_preferences(&app, &store, &user)
         .map(Json)
@@ -1603,6 +1641,10 @@ fn router(app: Arc<App>) -> Router {
             get(get_incoming_preferences).post(set_incoming_preferences),
         )
         .route("/api/activity/{user}", get(activity))
+        .route(
+            "/api/deck-subscriptions/{user}",
+            get(get_incoming_preferences).post(set_deck_subscriptions),
+        )
         .route("/api/activity/{user}/read", post(read_activity))
         .route("/api/reply/{user}", post(reply))
         .layer(axum::middleware::from_fn_with_state(
@@ -3061,6 +3103,210 @@ mod tests {
             );
         }
         assert!(app.store.lock().unwrap().decks("cerro").unwrap().is_empty());
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn recipient_unsubscribe_removes_sender_selections_and_only_recipient_can_restore() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let (app, path) = fixture();
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(sample_upload(2, false)),
+        )
+        .await
+        .unwrap();
+        let _ = set_decks(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(preferences(&["hill", "friend"])),
+        )
+        .await
+        .unwrap();
+        let save = |owner: &str, unsubscribed: Vec<&str>| {
+            Request::post("/api/deck-subscriptions/hill")
+                .header("authorization", format!("Bearer {owner}-secret"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"enabled":true,"unsubscribed_senders":unsubscribed})
+                        .to_string(),
+                ))
+                .unwrap()
+        };
+        let response = router(app.clone())
+            .oneshot(save("hill", vec!["cerro"]))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let settings = get_decks(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(settings.decks[0].recipients, ["friend"]);
+        assert!(
+            !settings
+                .recipients
+                .iter()
+                .any(|person| person.user == "hill")
+        );
+        assert_eq!(
+            set_decks(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(preferences(&["hill", "friend"]))
+            )
+            .await
+            .unwrap_err(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            router(app.clone())
+                .oneshot(save("cerro", vec![]))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            router(app.clone())
+                .oneshot(save("hill", vec![]))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.store.lock().unwrap().decks("cerro").unwrap()[0].recipients,
+            ["friend", "hill"]
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn subscription_api_requires_owner_validates_senders_and_protects_cookie_writes() {
+        use axum::body::{Body, to_bytes};
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        let (app, path) = fixture();
+        let read = || {
+            Request::get("/api/deck-subscriptions/hill")
+                .body(Body::empty())
+                .unwrap()
+        };
+        for token in [None, Some("cerro-secret")] {
+            let mut request = read();
+            if let Some(token) = token {
+                request
+                    .headers_mut()
+                    .insert("authorization", format!("Bearer {token}").parse().unwrap());
+            }
+            assert_eq!(
+                router(app.clone()).oneshot(request).await.unwrap().status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        for (body, status) in [
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":["hill"]}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":["unknown"]}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":["cerro","cerro"]}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":["bad\nname"]}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":(0..101).map(|i| format!("sender{i}")).collect::<Vec<_>>()}),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"enabled":true}),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                serde_json::json!({"enabled":true,"unsubscribed_senders":[],"recipient":"cerro"}),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let request = Request::post("/api/deck-subscriptions/hill")
+                .header("authorization", "Bearer hill-secret")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap();
+            assert_eq!(
+                router(app.clone()).oneshot(request).await.unwrap().status(),
+                status
+            );
+        }
+        let session = access::session(
+            State(app.clone()),
+            axum::extract::ConnectInfo("127.0.0.1:40123".parse().unwrap()),
+            headers("hill"),
+            axum::body::Bytes::new(),
+        )
+        .await;
+        assert_eq!(session.status(), StatusCode::NO_CONTENT);
+        let cookie = session.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        for csrf in [false, true] {
+            let mut request = Request::post("/api/deck-subscriptions/hill")
+                .header("cookie", cookie)
+                .header("content-type", "application/json");
+            if csrf {
+                request = request.header("x-ankiquest-csrf", "1");
+            }
+            let response = router(app.clone())
+                .oneshot(
+                    request
+                        .body(Body::from(
+                            r#"{"enabled":true,"unsubscribed_senders":["cerro"]}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if csrf {
+                    StatusCode::OK
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            if csrf {
+                let body: serde_json::Value =
+                    serde_json::from_slice(&to_bytes(response.into_body(), 100_000).await.unwrap())
+                        .unwrap();
+                assert_eq!(body["unsubscribed_senders"], serde_json::json!(["cerro"]));
+                assert_eq!(body["sharing_senders"], serde_json::json!([]));
+                assert!(!body.to_string().contains("deck_id"));
+            }
+        }
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

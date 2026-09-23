@@ -300,7 +300,8 @@ fn insert_notification(
     let cancelled = message.kind == "completion"
         && !conn.query_row(
             "select not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-             and not exists (select 1 from incoming_muted_senders where recipient = ?1 and sender = ?2)",
+             and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions) where recipient = ?1 and sender = ?2)",
             params![message.to, message.from],
             |r| r.get::<_, bool>(0),
         )?;
@@ -415,6 +416,9 @@ impl Store {
             deck.recipients = stmt
                 .query_map(params![user, deck.id], |r| r.get(0))?
                 .collect::<Result<_, _>>()?;
+            // No active recipients means sharing is off in the editor. Keep the
+            // stored switch so a recipient can restore an unchanged selection.
+            deck.enabled &= !deck.recipients.is_empty();
         }
         Ok(decks)
     }
@@ -424,8 +428,29 @@ impl Store {
         user: &str,
         preferences: &[Preference],
     ) -> Result<(), Error> {
+        let current: HashMap<_, _> = self
+            .decks(user)?
+            .into_iter()
+            .map(|deck| (deck.id.clone(), deck))
+            .collect();
         let tx = self.conn.transaction()?;
         for deck in preferences {
+            // Clients save the whole form, including untouched decks. Preserve
+            // detached selections (and the stored switch) for those decks.
+            if current.get(&deck.id).is_some_and(|saved| {
+                saved.enabled == deck.enabled
+                    && saved.recipients.len() == deck.recipients.len()
+                    && saved.recipients.iter().collect::<HashSet<_>>()
+                        == deck.recipients.iter().collect::<HashSet<_>>()
+            }) {
+                continue;
+            }
+            // Explicit sender edits replace remembered selections too. A later
+            // resubscribe must not undo a newer choice made by the sender.
+            tx.execute(
+                "delete from unsubscribed_decks where sender=?1 and deck_id=?2",
+                params![user, deck.id],
+            )?;
             tx.execute(
                 "update decks set enabled = ?3 where owner = ?1 and id = ?2",
                 params![user, deck.id, deck.enabled],
@@ -470,6 +495,18 @@ impl Store {
                  on conflict (owner, id) do update set name = excluded.name",
                 params![user, deck.id, deck.name],
             )?;
+            // A restored recipient may have missed snapshots while sharing was
+            // off. Only fresh work (or a later Anki day) ends that baseline.
+            tx.execute(
+                "delete from subscription_baselines where sender=?1 and deck_id=?2
+                        and (day!=?3 or ?4)",
+                params![
+                    user,
+                    deck.id,
+                    today,
+                    deck.remaining > 0 || deck.reviewed_today == 0
+                ],
+            )?;
             if deck.remaining != 0 || deck.reviewed_today == 0 {
                 continue;
             }
@@ -489,12 +526,15 @@ impl Store {
                 .prepare(
                     "select recipient from deck_recipients
                      where owner = ?1 and deck_id = ?2 and recipient != ?1
+                     and not exists (select 1 from subscription_baselines b
+                                     where b.sender=?1 and b.deck_id=?2 and b.recipient=deck_recipients.recipient and b.day=?3)
                      and not exists (select 1 from incoming_settings
                                      where user = deck_recipients.recipient and enabled = 0)
-                     and not exists (select 1 from incoming_muted_senders
+                     and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                      where recipient = deck_recipients.recipient and sender = ?1)",
                 )?
-                .query_map(params![user, deck.id], |r| r.get(0))?
+                .query_map(params![user, deck.id, today], |r| r.get(0))?
                 .collect::<Result<_, _>>()?;
             candidates.push((deck, recipients));
         }
@@ -565,6 +605,14 @@ impl Store {
             .collect::<Result<_, _>>()?;
         for id in stored.iter().filter(|id| !keep.contains(id.as_str())) {
             tx.execute(
+                "delete from subscription_baselines where sender=?1 and deck_id=?2",
+                params![user, id],
+            )?;
+            tx.execute(
+                "delete from unsubscribed_decks where sender=?1 and deck_id=?2",
+                params![user, id],
+            )?;
+            tx.execute(
                 "delete from decks where owner = ?1 and id = ?2",
                 params![user, id],
             )?;
@@ -584,7 +632,8 @@ impl Store {
                  and created_at>=?3
                  and (kind != 'completion' or (completion_cancelled = 0
                      and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                     and not exists (select 1 from incoming_muted_senders
+                     and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                      where recipient = ?1 and sender = notifications.sender)))
                  order by id desc limit 500) order by n.id"
         ))?;
@@ -607,7 +656,8 @@ impl Store {
             where n.recipient=?1 and n.push_only=0 and n.created_at>=?3 and (?4 is null or n.id<?4)
             and (n.kind != 'completion' or (n.completion_cancelled = 0
                 and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                and not exists (select 1 from incoming_muted_senders
+                and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                 where recipient = ?1 and sender = n.sender)))
             order by n.id desc limit ?5"
         ))?;
@@ -631,7 +681,8 @@ impl Store {
              from notifications n where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
              and (n.kind != 'completion' or (n.completion_cancelled = 0
                  and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                 and not exists (select 1 from incoming_muted_senders
+                 and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                  where recipient = ?1 and sender = n.sender)))",
             params![user, now_ms, cutoff],
             |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
@@ -827,7 +878,8 @@ impl Store {
                      and (kind != 'completion' or (completion_cancelled = 0
                          and not exists (select 1 from incoming_settings
                                          where user = notifications.recipient and enabled = 0)
-                         and not exists (select 1 from incoming_muted_senders
+                         and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                          where recipient = notifications.recipient
                                          and sender = notifications.sender)))
                        and created_at >= ?2
@@ -875,7 +927,8 @@ impl Store {
              and (kind != 'completion' or (completion_cancelled = 0
                  and not exists (select 1 from incoming_settings
                                  where user = notifications.recipient and enabled = 0)
-                 and not exists (select 1 from incoming_muted_senders
+                 and not exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
                                  where recipient = notifications.recipient
                                  and sender = notifications.sender)))
              and (kind != 'nudge' or exists (select 1 from player_settings

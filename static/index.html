@@ -893,7 +893,7 @@ function openNotificationPreferences(user = "", display = "") {
     const loading = body === undefined;
     const requestUser = user, requestToken = token, requestSession = ownerSession, requestController = authController;
     const active = () => current() && !requestController.signal.aborted && requestUser === user && requestToken === token && requestSession === ownerSession;
-    const response = await fetch("/api/notification-preferences/" + encodeURIComponent(requestUser), {
+    const response = await fetch("/api/deck-subscriptions/" + encodeURIComponent(requestUser), {
       method: loading ? "GET" : "POST",
       headers: AnkiQuestSite.ownerHeaders(requestToken ? {user:requestUser, token:requestToken} : requestSession, body),
       ...(loading ? {} : { body: JSON.stringify(body) }),
@@ -918,6 +918,8 @@ function openNotificationPreferences(user = "", display = "") {
     if (!active()) throw new DOMException("Settings changed.", "AbortError");
     if (!data || typeof data.enabled !== "boolean" || !Array.isArray(data.muted_senders) ||
         !data.muted_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
+        !Array.isArray(data.unsubscribed_senders) || !data.unsubscribed_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
+        !Array.isArray(data.sharing_senders) || !data.sharing_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
         !Array.isArray(data.senders) || !data.senders.every(sender => sender && typeof sender.user === "string" && sender.user.length > 0 && typeof sender.display === "string")) {
       throw new Error("The server returned unexpected notification settings. Please try again.");
     }
@@ -925,10 +927,11 @@ function openNotificationPreferences(user = "", display = "") {
   };
   const showSettings = data => {
     if (!current()) return;
-    const muted = new Set(data.muted_senders);
-    const people = new Map(data.senders.map(person => [person.user, person]));
-    // Keep existing mutes editable even if a sender is no longer configured.
-    for (const sender of muted) if (!people.has(sender)) people.set(sender, { user: sender, display: sender });
+    const unsubscribed = new Set([...data.unsubscribed_senders, ...data.muted_senders]);
+    const relevant = new Set([...data.sharing_senders, ...unsubscribed]);
+    const people = new Map(data.senders.filter(person => relevant.has(person.user)).map(person => [person.user, person]));
+    // Keep subscriptions and previous mutes editable for former players too.
+    for (const sender of unsubscribed) if (!people.has(sender)) people.set(sender, { user: sender, display: sender });
     const senders = [...people.values()].sort((a, b) => a.display.localeCompare(b.display) || a.user.localeCompare(b.user));
     dialog.querySelector("#notification-intro").textContent = `Deck completion alerts for ${fixedUser ? display || user : user}. These settings apply across your devices.`;
     content.innerHTML = `<form id="notification-settings" data-notification-settings>
@@ -936,37 +939,38 @@ function openNotificationPreferences(user = "", display = "") {
         <input id="notification-enabled" type="checkbox" role="switch" ${data.enabled ? "checked" : ""} data-receiving-enabled>
         <span><strong>Receive deck completion notifications</strong><small>Turn off to stop all deck completion alerts.</small></span>
       </label>
-      <fieldset aria-describedby="notification-mute-help">
-        <legend>Mute specific people</legend>
-        <p id="notification-mute-help" class="scope-note">A checked name means their deck completion alerts are muted. Your choices are kept while all alerts are off.</p>
+      <fieldset aria-describedby="notification-subscription-help">
+        <legend>Unsubscribe from specific people</legend>
+        <p id="notification-subscription-help" class="scope-note">A checked name removes you from all of their deck-sharing lists. They cannot add you back. Clear the name and save to subscribe again.</p>
         ${senders.map((person, index) => `<label class="mute-person" for="notification-sender-${index}">
-          <input id="notification-sender-${index}" type="checkbox" data-muted-sender="${esc(person.user)}" ${muted.has(person.user) ? "checked" : ""}>
-          <span>Mute ${esc(person.display || person.user)}${person.display && person.display !== person.user ? `<small>${esc(person.user)}</small>` : ""}</span>
-        </label>`).join("") || `<p class="sub">No other players are available yet. You can still turn all deck completion alerts off.</p>`}
+          <input id="notification-sender-${index}" type="checkbox" data-unsubscribed-sender="${esc(person.user)}" ${unsubscribed.has(person.user) ? "checked" : ""}>
+          <span>Unsubscribe from ${esc(person.display || person.user)}${person.display && person.display !== person.user ? `<small>${esc(person.user)}</small>` : ""}</span>
+        </label>`).join("") || `<p class="sub">No one is sharing decks with you yet. You can still turn all deck completion alerts off.</p>`}
       </fieldset>
+      ${data.muted_senders.length ? `<p class="scope-note">Your previous mutes are selected above. Saving also removes you from those people’s sharing lists.</p>` : ""}
       <ul class="rules">
-        <li>Saving with all alerts off cancels your pending deck completion alerts. Muting a person cancels pending completion alerts from them.</li>
-        <li>Muting also removes matching completion alerts from your inbox.</li>
-        <li>Turning alerts back on or unmuting someone applies to new completions only.</li>
+        <li>Turning all alerts off cancels pending deck completion alerts without changing your subscriptions.</li>
+        <li>Unsubscribing cancels that person’s pending completion alerts and removes matching alerts from your inbox.</li>
+        <li>Subscribing again restores your previous deck selections unless the sender has changed or deleted them. Only new completions are sent; old alerts are not replayed.</li>
       </ul>
       <button type="submit" class="freeze-button primary" data-notification-save>Save preferences</button>
     </form>`;
     const form = content.querySelector("form");
     const enabled = form.querySelector("#notification-enabled");
-    const senderInputs = [...form.querySelectorAll("[data-muted-sender]")];
+    const senderInputs = [...form.querySelectorAll("[data-unsubscribed-sender]")];
     const saveButton = form.querySelector("[data-notification-save]");
     const syncControls = () => {
       form.setAttribute("aria-busy", String(busy));
       enabled.disabled = busy;
       saveButton.disabled = busy;
-      senderInputs.forEach(input => { input.disabled = busy || !enabled.checked; });
+      senderInputs.forEach(input => { input.disabled = busy; });
     };
     enabled.addEventListener("change", () => { syncControls(); say("Unsaved changes. Save to apply them."); });
     senderInputs.forEach(input => input.addEventListener("change", () => say("Unsaved changes. Save to apply them.")));
     form.addEventListener("submit", async event => {
       event.preventDefault();
       if (busy || !current()) return;
-      const draft = { enabled: enabled.checked, muted_senders: senderInputs.filter(input => input.checked).map(input => input.dataset.mutedSender) };
+      const draft = { enabled: enabled.checked, unsubscribed_senders: senderInputs.filter(input => input.checked).map(input => input.dataset.unsubscribedSender) };
       busy = true;
       syncControls();
       say("Saving…");
@@ -975,8 +979,8 @@ function openNotificationPreferences(user = "", display = "") {
         if (current()) {
           busy = false;
           showSettings(saved);
-          say(saved.enabled ? "Preferences saved. You will receive new completion alerts from people you have not muted."
-            : "Preferences saved. All deck completion alerts are off. Your muted people are kept.");
+          say(saved.enabled ? "Preferences saved. Your sender subscriptions have been updated."
+            : "Preferences saved. All deck completion alerts are off. Your sender subscriptions are saved.");
           content.querySelector("[data-notification-save]").focus();
         }
       } catch (error) {
