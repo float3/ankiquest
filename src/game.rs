@@ -755,6 +755,8 @@ pub struct Profile {
     pub freezes_enabled: bool,
     pub freeze_earned_today: bool,
     pub at_risk: bool,
+    pub day_ends_at: i64,
+    pub streak_warning: Option<crate::feedback::Notice>,
     pub local_hour: i64,
     pub today: Today,
     pub lifetime: Lifetime,
@@ -1264,6 +1266,13 @@ pub fn compute_with_freezes(
     };
 
     let now = days.get(&today).unwrap_or(&empty);
+    let at_risk = streak > 0 && !days.contains_key(&today);
+    let day_ends_at = clock.day_start_ms(today + 1);
+    let effective_freezes = if freezes_enabled_at(freeze_preferences, now_ms) {
+        freezes
+    } else {
+        0
+    };
     Profile {
         user: user.into(),
         display: display.into(),
@@ -1275,15 +1284,15 @@ pub fn compute_with_freezes(
         periods,
         records,
         streak,
-        freezes: if freezes_enabled_at(freeze_preferences, now_ms) {
-            freezes
-        } else {
-            0
-        },
+        freezes: effective_freezes,
         stored_freezes: freezes,
         freezes_enabled: freezes_enabled_at(freeze_preferences, now_ms),
         freeze_earned_today,
-        at_risk: streak > 0 && !days.contains_key(&today),
+        at_risk,
+        day_ends_at,
+        streak_warning: at_risk.then(|| {
+            crate::feedback::streak_warning(streak, effective_freezes, day_ends_at, now_ms)
+        }),
         local_hour: clock.hour(now_ms),
         today: Today {
             reviews: now.reviews,
