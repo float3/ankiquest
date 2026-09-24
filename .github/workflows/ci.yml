@@ -43,6 +43,8 @@ jobs:
 
       - name: Test desktop deck completion
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
           python3 -m venv "$RUNNER_TEMP/aqt"
           "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqt
           "$RUNNER_TEMP/aqt/bin/python" -m unittest discover -s tests -v
