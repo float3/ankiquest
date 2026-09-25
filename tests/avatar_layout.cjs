@@ -90,7 +90,7 @@ async function main() {
             letterWidth: letters.width, letterHeight: letters.height,
             offsetX: letters.x + letters.width / 2 - bounds.x - bounds.width / 2,
             offsetY: letters.y + letters.height / 2 - bounds.y - bounds.height / 2,
-            display: style.display,
+            display: style.display, radius: style.borderTopLeftRadius,
           };
         }));
         assert.equal(measurements.length, 7, 'Every relevant avatar context is rendered');
@@ -102,6 +102,7 @@ async function main() {
             assert(Math.abs(measurement.width - measurement.height) <= 0.5, `${label}: avatar stays square`);
             const expectedSize = { matchup: 48, awards: 36, standings: 36, table: 29, calendar: width < 621 ? 21 : 24, challenge: 24 }[measurement.context];
             assert.equal(measurement.width, expectedSize, `${label}: existing context size is preserved`);
+            assert.equal(measurement.radius, '50%', `${label}: avatar has a circular shape`);
             assert(measurement.letterWidth > 0 && measurement.letterHeight > 0, `${label}: initials are visible`);
             assert(Math.abs(measurement.offsetX) <= 1.5, `${label}: horizontal offset ${measurement.offsetX.toFixed(2)}px`);
             // Font ascent/descent can shift the glyph box slightly within a centered line.

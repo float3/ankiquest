@@ -44,10 +44,10 @@ async function main() {
         pageWidth: innerWidth, scrollWidth: document.documentElement.scrollWidth,
         names: [...document.querySelectorAll('.board .player-cell, .profile-hero .avatar-name')].map(container => {
           const isBoard = !!container.closest('.board');
-          const bounds = container.getBoundingClientRect(), avatar = container.querySelector('.avatar').getBoundingClientRect(), text = isBoard ? container.querySelector('.name') : container.lastElementChild;
+          const bounds = container.getBoundingClientRect(), avatarElement = container.querySelector('.avatar'), avatar = avatarElement.getBoundingClientRect(), text = isBoard ? container.querySelector('.name') : container.lastElementChild;
           const textBounds = text.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(text);
           const letters = range.getBoundingClientRect(), style = getComputedStyle(text);
-          return { context: isBoard ? 'board' : 'profile', text: text.textContent, width: bounds.width, textWidth: textBounds.width, avatarCount: container.querySelectorAll('.avatar').length, avatarWidth: avatar.width, avatarVisible: avatar.left >= bounds.left - 0.5 && avatar.right <= bounds.right + 0.5, textVisible: letters.left >= textBounds.left - 0.5 && letters.right <= textBounds.right + 0.5, textOverflow: style.textOverflow, overflow: style.overflow, whiteSpace: style.whiteSpace };
+          return { context: isBoard ? 'board' : 'profile', text: text.textContent, width: bounds.width, textWidth: textBounds.width, avatarCount: container.querySelectorAll('.avatar').length, avatarWidth: avatar.width, avatarRadius: getComputedStyle(avatarElement).borderTopLeftRadius, avatarVisible: avatar.left >= bounds.left - 0.5 && avatar.right <= bounds.right + 0.5, textVisible: letters.left >= textBounds.left - 0.5 && letters.right <= textBounds.right + 0.5, textOverflow: style.textOverflow, overflow: style.overflow, whiteSpace: style.whiteSpace };
         }),
       }));
       results.push({ width, colorScheme, ...measurement });
@@ -59,6 +59,7 @@ async function main() {
           assert(name.avatarVisible, `${label}: avatar is clipped by its name link (${name.width.toFixed(1)}px available for ${name.avatarWidth}px avatar)`);
           assert.equal(name.avatarCount, 1, `${label}: exactly one avatar is rendered`);
           assert.equal(name.avatarWidth, name.context === 'profile' ? 48 : width <= 620 ? 30 : 36, `${label}: avatar retains the theme's intended size`);
+          assert.equal(name.avatarRadius, '50%', `${label}: avatar has a circular shape`);
           assert(name.textWidth >= 40, `${label}: no usable space remains for the name`);
           assert(name.textVisible || (name.textOverflow === 'ellipsis' && name.overflow === 'hidden'), `${label}: name is silently clipped without ellipsis`);
         } catch (error) { failures.push(error.message); }

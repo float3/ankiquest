@@ -151,6 +151,8 @@ async function main() {
     await page.evaluate(() => { window.ankiquestSession = null; dispatchEvent(new Event('ankiquest-auth')); });
 
     await open(); assert(await save.isDisabled());
+    assert.equal(await dialog.locator('.avatar-preview').evaluate(element => getComputedStyle(element).borderTopLeftRadius), '50%', 'Editor preview is circular');
+    assert.equal(await dialog.locator('.avatar-preview .avatar').evaluate(element => getComputedStyle(element).borderTopLeftRadius), '50%', 'Initials preview is circular');
     await dialog.locator('[data-remove]').click(); await status('Enter your AnkiQuest token'); assert.equal(requests.length, 0);
     await choose(landscape); await save.click(); assert.equal(requests.length, 0, 'Required password blocks unauthenticated upload');
     await dialog.locator('[name=token]').fill('wrong-token'); await save.click(); await status('That token was not accepted');
