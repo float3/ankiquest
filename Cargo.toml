@@ -11,7 +11,7 @@ repository = "https://github.com/float3/ankiquest"
 axum = "0.8"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
-getrandom = "0.2"
+getrandom = "0.4"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
