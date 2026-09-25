@@ -112,6 +112,15 @@ async function main() {
       }, buffer.toString('base64'));
       for (const pixel of pixels) assert.deepEqual(pixel, [0, 255, 0, 255], 'Center crop preserves aspect ratio and excludes the red outer bands');
     }
+    async function pixelAt(buffer, x, y) {
+      return page.evaluate(async ({ base64, x, y }) => {
+        const blob = await fetch('data:image/png;base64,' + base64).then(response => response.blob());
+        const bitmap = await createImageBitmap(blob), canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 256;
+        const context = canvas.getContext('2d'); context.drawImage(bitmap, 0, 0); bitmap.close();
+        return [...context.getImageData(x, y, 1, 1).data];
+      }, { base64: buffer.toString('base64'), x, y });
+    }
 
     const escapedUser = 'qa-"/<player>?&', escapedName = '<img src=x> Alice';
     await page.evaluate(({ escapedUser, escapedName }) => {
@@ -171,6 +180,42 @@ async function main() {
     assert.equal(await cerro.locator('img').count(), 0); assert(await dialog.locator('[data-remove]').isDisabled());
     await close();
     checks.push('supplied-token editor, portrait center crop, authenticated deletion and immediate initials fallback');
+
+    await open('cerro', 'qa-cerro-token'); await choose(landscape);
+    const crop = dialog.locator('.avatar-crop-canvas'), box = await crop.boundingBox();
+    assert(box.width >= 240, 'The crop area is large enough to position a picture on a phone');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await save.click(); await status('Profile picture saved.');
+    const dragged = requests.at(-1).body;
+    assert.deepEqual(await pixelAt(dragged, 8, 128), [255, 0, 0, 255], 'Dragging includes the selected red edge');
+    assert.deepEqual(await pixelAt(dragged, 247, 128), [0, 255, 0, 255], 'Dragging keeps the green center at the opposite edge');
+    await close();
+
+    await open('cerro', 'qa-cerro-token'); await choose(portrait);
+    for (let step = 0; step < 6; step++) await dialog.locator('.avatar-crop-canvas').press('Shift+ArrowDown');
+    await save.click(); await status('Profile picture saved.');
+    assert.deepEqual(await pixelAt(requests.at(-1).body, 128, 8), [255, 0, 0, 255], 'Arrow keys can move the crop vertically');
+    assert.deepEqual(await pixelAt(requests.at(-1).body, 128, 247), [0, 255, 0, 255], 'Vertical repositioning is saved');
+    await close();
+
+    const stripes = Buffer.from(await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+      const context = canvas.getContext('2d');
+      for (const [x, width, color] of [[0, 85, '#ff0000'], [85, 85, '#00ff00'], [170, 86, '#0000ff']]) {
+        context.fillStyle = color; context.fillRect(x, 0, width, 256);
+      }
+      return canvas.toDataURL('image/png').split(',')[1];
+    }), 'base64');
+    await open('cerro', 'qa-cerro-token'); await choose(stripes);
+    await dialog.locator('[name=zoom]').evaluate(input => { input.value = '4'; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await save.click(); await status('Profile picture saved.');
+    assert.deepEqual(await pixelAt(requests.at(-1).body, 8, 128), [0, 255, 0, 255], 'Zoom crops away the outer color bands');
+    assert.deepEqual(await pixelAt(requests.at(-1).body, 247, 128), [0, 255, 0, 255], 'The saved picture matches the zoomed preview');
+    await close();
+    checks.push('large crop preview, drag and keyboard repositioning, and zoom applied to the saved picture');
 
     cookieUser = 'cerro';
     await page.evaluate(() => AnkiQuestSite.status(true, false));
@@ -295,14 +340,14 @@ async function main() {
     await dialog.locator('[name=picture]').setInputFiles(file(landscape)); await page.waitForFunction(() => decodeGates.length === 1);
     await dialog.locator('[name=picture]').setInputFiles(file(portrait)); await page.waitForFunction(() => decodeGates.length === 2);
     await page.evaluate(() => decodeGates[1]()); await status('Ready to save.');
-    const newerPreview = await dialog.locator('.avatar-preview>img').getAttribute('src');
+    const newerPreview = await dialog.locator('.avatar-preview>canvas').evaluate(canvas => canvas.toDataURL());
     await page.evaluate(() => decodeGates[0]());
-    assert.equal(await dialog.locator('.avatar-preview>img').getAttribute('src'), newerPreview, 'Stale decode cannot replace newer selection');
+    assert.equal(await dialog.locator('.avatar-preview>canvas').evaluate(canvas => canvas.toDataURL()), newerPreview, 'Stale decode cannot replace newer selection');
     await close();
     await open('cerro', 'qa-cerro-token');
     await dialog.locator('[name=picture]').setInputFiles(file(landscape)); await page.waitForFunction(() => decodeGates.length === 3);
     await close(); await open('alice', 'qa-alice-token'); await page.evaluate(() => decodeGates[2]());
-    assert.equal(await dialog.locator('.avatar-preview>img').count(), 0, 'Closed editor decode cannot enter another account');
+    assert.equal(await dialog.locator('.avatar-preview>canvas').count(), 0, 'Closed editor decode cannot enter another account');
     assert.equal(await dialog.locator('.avatar-preview .avatar').getAttribute('data-avatar-user'), 'alice');
     await close(); await page.evaluate(() => { window.createImageBitmap = realCreateImageBitmap; });
     assert.equal(await page.evaluate(() => activePreviewURLs.size), 0);
