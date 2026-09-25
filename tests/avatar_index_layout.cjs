@@ -34,7 +34,9 @@ async function main() {
         let content = `<section class="card"><h2>Leaderboard</h2>${board(rows, rows[0].user)}</section>`;
         for (const row of rows) {
           const profile = { ...row, achievements: [], quests: [], heatmap: [{ date: '2026-09-22', reviews: 150, xp: 1500 }], today: { reviews: 150, xp: 1500 }, lifetime: { reviews: 12345, hours: 150, best_streak: 100, best_combo: 75, days_active: 100 }, xp_into_level: 250, xp_for_next: 2000, xp_total: 145000 };
-          const wrapper = document.createElement('div'); wrapper.innerHTML = view(profile, rows);
+          const isOwner = row.user === rows[0].user;
+          const wrapper = document.createElement('div'); wrapper.innerHTML = view(profile, rows, isOwner);
+          if (wrapper.querySelectorAll('#manage-avatar').length !== (isOwner ? 1 : 0)) throw new Error('Only the signed-in player can edit their profile picture');
           content += wrapper.querySelector('.profile-hero').outerHTML;
         }
         app.innerHTML = content;

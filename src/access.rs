@@ -201,7 +201,7 @@ fn token_owner(app: &App, given: &str) -> Option<String> {
         .filter_map(|(name, user)| {
             user.token
                 .as_deref()
-                .filter(|expected| constant_eq(expected, given))
+                .filter(|expected| !expected.is_empty() && constant_eq(expected, given))
                 .map(|_| name.clone())
         })
         .collect();
@@ -224,13 +224,10 @@ fn member(app: &App, headers: &HeaderMap) -> Option<String> {
 
 pub(crate) fn authorized(app: &App, user: &str, headers: &HeaderMap) -> bool {
     if headers.contains_key(header::AUTHORIZATION) {
-        return app
-            .config
-            .users
-            .get(user)
-            .and_then(|user| user.token.as_deref())
-            .zip(bearer(headers))
-            .is_some_and(|(expected, given)| constant_eq(expected, given));
+        return bearer(headers)
+            .and_then(|given| token_owner(app, given))
+            .as_deref()
+            == Some(user);
     }
     member(app, headers).as_deref() == Some(user)
 }
