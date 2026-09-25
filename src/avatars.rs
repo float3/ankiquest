@@ -487,6 +487,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_token_shared_by_two_players_cannot_change_either_profile_picture() {
+        let (mut app, path) = fixture();
+        Arc::get_mut(&mut app)
+            .unwrap()
+            .config
+            .users
+            .get_mut("hill")
+            .unwrap()
+            .token = Some("cerro-secret".into());
+        for user in ["cerro", "hill"] {
+            for method in ["POST", "DELETE"] {
+                assert_eq!(
+                    routed(
+                        &app,
+                        method,
+                        &format!("/api/avatar/{user}"),
+                        &[("authorization", "Bearer cerro-secret")],
+                        sample(ImageFormat::Png),
+                    )
+                    .await
+                    .status(),
+                    StatusCode::UNAUTHORIZED,
+                    "{method} {user} must have a unique owner token"
+                );
+            }
+        }
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
     async fn public_site_keeps_avatar_reads_public_and_honors_image_etags() {
         let (app, path) = fixture();
         save(

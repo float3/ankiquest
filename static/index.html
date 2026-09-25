@@ -628,7 +628,7 @@ function streakFreezes(player) {
   </div>`;
 }
 
-function view(p, rows) {
+function view(p, rows, canEditAvatar = false) {
   const unlocked = p.achievements.filter(a => a.unlocked).length;
   const achievements = [...p.achievements].sort((a, b) => !!b.unlocked - !!a.unlocked || pct(b.progress, b.target) - pct(a.progress, a.target));
   return `
@@ -641,7 +641,7 @@ ${pageHero(p.display, "A study journey, one session at a time. Quests, milestone
     <h2>Keep the progress going.</h2>
     <div class="sub">${num(p.xp_total)} XP earned so far</div>
     <div class="name avatar-name">${AnkiQuestSite.avatar(p.user,p.display)}<span>${esc(p.display)}</span></div>
-    <div><button class="avatar-edit-button" type="button" id="manage-avatar">Profile picture</button></div>
+    ${canEditAvatar ? '<div><button class="avatar-edit-button" type="button" id="manage-avatar">Profile picture</button></div>' : ''}
     <div class="bar gold"><i style="width:${pct(p.xp_into_level, p.xp_for_next)}%"></i></div>
     <div class="sub">${num(p.xp_into_level)} / ${num(p.xp_for_next)} XP to level ${p.level + 1} · ${num(p.xp_total)} total</div>
   </div>
@@ -1205,8 +1205,12 @@ async function render() {
         document.title = `${p.display} · AnkiQuest`;
         AnkiQuestSite.setProfile(p.user, true);
         try { localStorage.setItem("ankiquestPlayer", p.user); } catch (e) {}
-        app.innerHTML = view(p, rows);
-        document.getElementById("manage-avatar").addEventListener("click", () => AnkiQuestAvatars.open({user:p.user,display:p.display}));
+        const access = await AnkiQuestSite.status();
+        if (!canRender()) return;
+        const native = window.ankiquestSession;
+        const canEditAvatar = access?.member?.user === p.user || (native?.user === p.user && typeof native.token === "string" && !!native.token.trim());
+        app.innerHTML = view(p, rows, canEditAvatar);
+        if (canEditAvatar) document.getElementById("manage-avatar").addEventListener("click", () => AnkiQuestAvatars.open({user:p.user,display:p.display}));
         document.getElementById("manage-decks").addEventListener("click", () => openDeckSharing(p.user, p.display));
         document.getElementById("manage-received-notifications").addEventListener("click", () => openNotificationPreferences(p.user, p.display));
         document.getElementById("manage-freezes").addEventListener("click", () => openStreakFreezes(p.user, p.display));
