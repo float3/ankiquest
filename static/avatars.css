@@ -23,3 +23,6 @@ dialog.avatar-editor{box-sizing:border-box;width:min(450px,calc(100% - 32px));ma
 .avatar-editor :focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 .avatar-editor .avatar-status{min-height:24px;font-size:13px}
 .avatar-editor .avatar-status.error{color:var(--fire)}
+/* Keep every profile picture round, including the compact board and calendar sizes. */
+:is(.avatar,.board .avatar,.table-player .avatar,.day .avatar,.challenge .member .avatar,.matchup .avatar,.auth-status .avatar,.profile-hero .avatar-name .avatar){border-radius:50%}
+.avatar-editor .avatar-preview,.avatar-editor .avatar-preview>img{border-radius:50%}
