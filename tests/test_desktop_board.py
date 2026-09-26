@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import re
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -100,6 +102,49 @@ class NotifyTests(unittest.TestCase):
 
 
 class WebTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node is needed to execute the browser session script")
+    def test_browser_session_uses_normalized_default_ports_and_keeps_other_origins_out(self):
+        cases = [
+            ("https://example.com:443", "https://example.com/week", True),
+            ("http://example.com:80", "http://example.com/community", True),
+            ("https://example.com:8443", "https://example.com:8443/week", True),
+            ("https://example.com:8443", "https://example.com/week", False),
+            ("https://example.com:443", "https://other.example.com/week", False),
+            ("https://[::1]:443", "https://[::1]/week", True),
+            ("https://example.com:0", "https://example.com/week", False),
+        ]
+        runner = """
+            const fs = require('node:fs'), vm = require('node:vm');
+            const {script, url} = JSON.parse(fs.readFileSync(0, 'utf8'));
+            const context = {location:new URL(url), window:{dispatchEvent(){}}, CustomEvent:class{}};
+            vm.runInNewContext(script, context);
+            process.stdout.write(JSON.stringify(context.window.ankiquestSession || null));
+        """
+        for base, url, expected in cases:
+            with self.subTest(base=base, url=url):
+                result = subprocess.run(
+                    [shutil.which("node"), "-e", runner],
+                    input=json.dumps({"script": web.session_script(base, "hill", "test-token"), "url": url}),
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                self.assertEqual(
+                    json.loads(result.stdout), {"user": "hill", "token": "test-token"} if expected else None
+                )
+
+    def test_explicit_and_implicit_default_ports_are_the_same_origin(self):
+        for base, url in [
+            ("https://example.com:443", "https://example.com/week"),
+            ("https://example.com", "https://example.com:443/week"),
+            ("http://example.com:80", "http://example.com/week"),
+            ("http://example.com", "http://example.com:80/week"),
+        ]:
+            with self.subTest(base=base, url=url):
+                self.assertTrue(web.allowed(base, url))
+        self.assertFalse(web.allowed("https://example.com:8443", "https://example.com/week"))
+        self.assertFalse(web.allowed("https://example.com", "https://example.com:8443/week"))
+
     base = "https://anki.example.com"
 
     def test_only_the_servers_own_pages_are_signed_in(self):

@@ -16,29 +16,36 @@ def page_url(base, path):
     return base.rstrip("/") + path
 
 
+def origin(parts):
+    """Use the browser's origin spelling, omitting HTTP(S) default ports."""
+    host = parts.hostname or ""
+    if ":" in host:
+        host = "[" + host + "]"
+    port = parts.port
+    if port is not None and port != {"http": 80, "https": 443}.get(parts.scheme):
+        host += ":" + str(port)
+    return parts.scheme + "://" + host
+
+
 def allowed(base, url):
     """Only ankiquest's own pages ever receive the token."""
     expected = urllib.parse.urlsplit(base.rstrip("/") + "/")
     actual = urllib.parse.urlsplit(url)
     if expected.username or expected.password or actual.username or actual.password:
         return False
-    if (actual.scheme, actual.hostname, actual.port) != (
-        expected.scheme,
-        expected.hostname,
-        expected.port,
-    ):
+    if origin(actual) != origin(expected):
         return False
     return actual.path in {expected.path + route for route in ROUTES}
 
 
 def session_script(base, user, token):
-    origin = "%s://%s" % urllib.parse.urlsplit(base)[:2]
+    expected_origin = origin(urllib.parse.urlsplit(base))
     session = json.dumps({"user": user, "token": token}) if token else "null"
     return (
         "(() => { if (location.origin !== %s) return;"
         " window.ankiquestSession = %s;"
         " window.dispatchEvent(new CustomEvent('ankiquest-auth')); })();"
-        % (json.dumps(origin), session)
+        % (json.dumps(expected_origin), session)
     )
 
 
