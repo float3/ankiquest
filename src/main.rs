@@ -5,6 +5,7 @@ mod competition;
 mod decks;
 mod feedback;
 mod freezes;
+mod friend_nudges;
 mod game;
 mod reminders;
 mod store;
@@ -1654,6 +1655,7 @@ async fn main() -> Result<(), Error> {
 fn router(app: Arc<App>) -> Router {
     Router::new()
         .merge(avatars::routes())
+        .merge(friend_nudges::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))
