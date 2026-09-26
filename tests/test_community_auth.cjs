@@ -25,7 +25,7 @@ async function fixture(t, session = saved, options = {}) {
   page.setDefaultTimeout(10000);
   page.setDefaultNavigationTimeout(15000);
   const errors = [], requests = [];
-  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null };
+  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null, receiving:false, nudged:false };
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(session => {
     window.storageWrites = [];
@@ -40,7 +40,7 @@ async function fixture(t, session = saved, options = {}) {
     const request = route.request(), url = new URL(request.url());
     if (url.pathname === '/community') return route.fulfill({ contentType: 'text/html', body: html });
     if (url.pathname === '/site.js') return route.fulfill({contentType: 'text/javascript', body: siteScript});
-    if (['/avatars.js','/avatars.css','/site.css'].includes(url.pathname)) {
+    if (['/friend-nudges.js','/avatars.js','/avatars.css','/site.css'].includes(url.pathname)) {
       const asset=path.join(__dirname,'../static',url.pathname.slice(1));
       if(fs.existsSync(asset))return route.fulfill({contentType:url.pathname.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(asset,'utf8')});
     }
@@ -49,6 +49,16 @@ async function fixture(t, session = saved, options = {}) {
     if (url.pathname === '/auth/session' || url.pathname === '/auth/logout') return route.fulfill({status:404, body:''});
     let data;
     if (url.pathname === '/api/community') data = { meta: {}, players: [{ user: 'cerro', display: 'Cerro' }, { user: 'hill', display: 'Hill' }] };
+    else if (url.pathname.startsWith('/api/friend-nudges/')) {
+      requests.push({url:url.pathname,auth:request.headers().authorization,method:request.method(),body:request.postDataJSON()});
+      if(control.hold)await control.hold;
+      if(request.method()==='POST') {
+        if(url.pathname.endsWith('/receiving'))control.receiving=request.postDataJSON().enabled;
+        else control.nudged=true;
+        return route.fulfill({status:204});
+      }
+      data={receiving:control.receiving,friends:[{user:'hill',display:'Hill',enabled:true,sent_today:control.nudged},{user:'friend',display:'Friend',enabled:false,sent_today:false}]};
+    }
     else if (url.pathname.startsWith('/api/activity/')) {
       data = {items:[{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}], unread_count:1,next_before:null};
     }
@@ -191,4 +201,34 @@ test('a first null native event clears private Community views already loaded wi
   assert.equal(await page.locator('#reminder-form').count(),0);
   assert.equal(await page.locator('.activity-item').count(),0);
   await page.locator('#view-reminders [data-connect]').waitFor();
+});
+
+test('friend nudges select the recipient and show opt-out and daily limits', async t => {
+  const {page,requests}=await fixture(t);
+  await page.evaluate(()=>showView('challenges'));
+  await page.getByRole('button',{name:'Nudge friends',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Nudge your friends',exact:true});
+  await dialog.locator('[data-nudge-user="hill"]').waitFor();
+  assert.equal(await dialog.locator('[data-nudge-user="friend"]').isEnabled(),false);
+  await dialog.locator('[data-nudge-receiving]').check();
+  await dialog.getByText('Preference saved.',{exact:true}).waitFor();
+  await dialog.locator('[data-nudge-user="hill"]').click();
+  await dialog.getByText('Nudge sent!',{exact:true}).waitFor();
+  assert.equal(await dialog.locator('[data-nudge-user="hill"]').isEnabled(),false);
+  const posts=requests.filter(request=>request.method==='POST'&&request.url.startsWith('/api/friend-nudges/'));
+  assert.deepEqual(posts.map(request=>request.body),[{enabled:true},{recipient:'hill'}]);
+  assert.ok(posts.every(request=>request.auth==='Bearer saved-token'));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});
+
+test('friend nudge dialog discards pending private data when the account changes', async t => {
+  const {page,control,deliver}=await fixture(t);
+  await page.evaluate(()=>showView('challenges'));
+  let release;control.hold=new Promise(resolve=>release=resolve);
+  await page.getByRole('button',{name:'Nudge friends',exact:true}).click();
+  await page.getByText('Loading friends…',{exact:true}).waitFor();
+  await deliver(null);release();control.hold=null;
+  await page.waitForTimeout(100);
+  assert.equal(await page.getByRole('dialog',{name:'Nudge your friends',exact:true}).count(),0);
+  assert.equal(await page.locator('[data-nudge-user]').count(),0);
 });

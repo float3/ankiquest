@@ -256,7 +256,7 @@ function renderChallenges(banner) {
   const active = challenges.filter(item => !challengeEnded(item) && !invited.includes(item));
   const ended = challenges.filter(challengeEnded).slice().reverse();
   const group = (title, items, description) => `<section class="challenge-group" aria-label="${esc(title)}"><div class="card-head"><div><h2>${title}</h2><p>${description}</p></div></div><div class="stack">${items.map(item => renderChallenge(item)).join("")}</div></section>`;
-  $("view-challenges").innerHTML = banner + `<div class="card-head friend-heading"><div><h2>Your friend goals</h2><p>Your own decks, a little encouragement.</p></div><button class="primary" type="button" data-create-challenge>Start a friend goal</button><button type="button" data-private-retry class="link-button">Refresh</button></div>${feedback}` +
+  $("view-challenges").innerHTML = banner + `<div class="card-head friend-heading"><div><h2>Your friend goals</h2><p>Your own decks, a little encouragement.</p></div><button class="primary" type="button" data-create-challenge>Start a friend goal</button><button type="button" data-nudge-friends>Nudge friends</button><button type="button" data-private-retry class="link-button">Refresh</button></div>${feedback}` +
     (invited.length ? group("Invitations", invited, "Choose what fits your week. Joining is always optional.") : "") +
     (active.length ? group("In progress", active, "Only studying after you join counts toward your goal.") : "") +
     (!invited.length && !active.length ? `<article class="card">${empty("A little progress with a friend.", "Invite someone to study alongside you. Your own decks and pace stay yours.")}</article>` : "") +
@@ -538,5 +538,6 @@ showView(location.hash.slice(1)||"challenges");
 loadData();
 restoreMember();
 </script>
+<script src="/friend-nudges.js"></script>
 </body>
 </html>
