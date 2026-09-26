@@ -261,7 +261,11 @@ function renderChallenges(banner) {
     (active.length ? group("In progress", active, "Only studying after you join counts toward your goal.") : "") +
     (!invited.length && !active.length ? `<article class="card">${empty("A little progress with a friend.", "Invite someone to study alongside you. Your own decks and pace stay yours.")}</article>` : "") +
     `<p class="settings-hint">New goals start with three study days over the next seven days. You can customize the target and invite the people you choose.</p>` +
-    (ended.length ? `<details class="card challenge-history"><summary>Previous goals (${number(ended.length)})</summary><div class="stack">${ended.map(item => renderChallenge(item)).join("")}</div></details>` : "");
+    (ended.length ? `<details class="card challenge-history"><summary>Previous goals (${number(ended.length)})</summary><div class="stack">${ended.map(item => renderChallenge(item)).join("")}</div></details>` : "") + renderFriendAchievements();
+}
+function renderFriendAchievements() {
+  const items = (state.activity?.items || []).filter(item => item.kind === "completion" && item.sender && item.sender !== state.session.user);
+  return `<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and chose to share with you.</p></div><button type="button" data-activity-refresh ${state.activityLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.activityError ? `<p class="notice error" role="alert">${esc(state.activityError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => `<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div><span class="chip green">Deck complete</span></div><p>${esc(item.body)}</p>${item.replied ? '<p class="settings-hint">Congratulations sent</p>' : '<button type="button" data-congratulate>Congratulate</button>'}<p class="status" role="status"></p></article>`).join("") : state.activityLoading ? '<p role="status">Loading achievements…</p>' : empty("Your next shared celebration is ahead.","Friends can share daily deck completions with you in their deck notification settings.")}</div>${state.activity?.next_before ? `<button type="button" data-activity-more ${state.activityLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.activity?.legacy ? "The last 7 days" : `The last ${state.activityDays} days`}. Only completions shared with your account appear here.</p></section>`;
 }
 function renderChallenge(challenge, detail = false) {
   const me = challenge.members.find(member => member.user === state.session.user), ended = challengeEnded(challenge);
@@ -286,6 +290,7 @@ function openChallengeCreator() {
   $("challenge-dialog").showModal();
 }
 function renderActivity(banner) {
+  if(state.session && state.challenges && !state.privateLoading && !state.privateError) renderChallenges(accountBanner());
   if (state.activityLoading && !state.activity) { $("view-activity").innerHTML = banner + '<p role="status" class="loading-copy">Loading your activity…</p>'; return; }
   const payload = state.activity, items = payload?.items || [];
   const unread = Number(payload?.unread_count) || 0;
@@ -472,6 +477,7 @@ document.addEventListener("click",event=>{
   if(button.hasAttribute("data-activity-more"))loadActivity(true);
   if(button.dataset.markRead||button.dataset.activityChallenge)handleActivity(button);
   if(button.dataset.cheer)sendActivityReply(button.closest("form"),"Good job!");
+  if(button.hasAttribute("data-congratulate"))sendActivityReply(button.closest(".friend-achievement"),"Good job!");
 });
 for(const nav of [$("tabs"),$("history-tabs")])nav.addEventListener("keydown",event=>{const buttons=[...nav.querySelectorAll("[role=tab]")],index=buttons.indexOf(event.target);if(index<0)return;let next=index;if(event.key==="ArrowRight")next=(index+1)%buttons.length;else if(event.key==="ArrowLeft")next=(index-1+buttons.length)%buttons.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;event.preventDefault();showView(buttons[next].dataset.view);buttons[next].focus();});
 $("player-filter").addEventListener("change",event=>{state.player=event.target.value;state.matchupA=state.player||state.matchupA;renderAll();});
