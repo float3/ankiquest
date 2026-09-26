@@ -23,6 +23,11 @@ test('Spanish tagged labels preserve authored substitutions and placeholder-like
   assert.equal(html`<input placeholder="Say something kind" value="${'Friends'}">`,'<input placeholder="Di algo amable" value="Friends">');
   assert.equal(t`Review ${15} cards`,'Repasa 15 tarjetas');
 });
+
+test('the new crop editor file hint has a Spanish translation',()=>{
+  const {context}=fixture();
+  assert.equal(context.AnkiQuestI18n.html`<p>JPEG or PNG, up to 20 MB.</p>`, '<p>JPEG o PNG, hasta 20 MB.</p>');
+});
 test('language headers go only to same-origin API requests and preserve authentication',async()=>{
   const {context,requests}=fixture();
   await context.fetch('/api/profile/cerro',{headers:{Authorization:'Bearer private'}});
