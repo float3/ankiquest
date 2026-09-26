@@ -61,11 +61,11 @@ async function main() {
   records.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','bob','A note from Bob','Nice work on your studying!',Math.floor(Date.now()/86400000),Date.now(),'message');
   records.close();
   browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
-  const context=await browser.newContext({viewport:{width:390,height:844}});
+  const context=await browser.newContext({locale:"en-US",viewport:{width:390,height:844}});
   if(sourceAssets)await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
     const file=url.pathname==='/community'?'community.html':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index.html':url.pathname==='/site.js'?'site.js':url.pathname==='/site.css'?'site.css':url.pathname==='/login'?'login.html':null;
-    if(file)await route.fulfill({status:200,contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:fs.readFileSync(path.join(repo,'static',file),'utf8')});else await route.continue();
+    if(file)await route.fulfill({status:200,contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:file==='site.js'?require('./site_assets.cjs').siteScript():fs.readFileSync(path.join(repo,'static',file),'utf8')});else await route.continue();
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await signIn(page,password);

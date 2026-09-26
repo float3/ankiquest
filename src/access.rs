@@ -519,7 +519,12 @@ pub(crate) async fn site_css() -> impl IntoResponse {
 pub(crate) async fn site_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../static/site.js"),
+        format!(
+            "window.AnkiQuestSpanish={};\n{}\n{}",
+            include_str!("../static/translations-es.json"),
+            include_str!("../static/i18n.js"),
+            include_str!("../static/site.js")
+        ),
     )
 }
 

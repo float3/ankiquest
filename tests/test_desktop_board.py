@@ -100,6 +100,10 @@ class NotifyTests(unittest.TestCase):
 
 
 class WebTests(unittest.TestCase):
+    def test_webview_receives_the_selected_anki_language(self):
+        script = web.session_script("https://quest.example", "hill", "token", "es-ES")
+        self.assertIn('window.ankiquestLanguage = "es-ES"', script)
+
     base = "https://anki.example.com"
 
     def test_only_the_servers_own_pages_are_signed_in(self):

@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const script = fs.readFileSync(path.join(root, 'static/avatars.js'), 'utf8');
 const stylesheet = fs.readFileSync(path.join(root, 'static/avatars.css'), 'utf8');
 const siteStyles = fs.readFileSync(path.join(root, 'static/site.css'), 'utf8');
-const siteScript = fs.readFileSync(path.join(root, 'static/site.js'), 'utf8');
+const siteScript = require('./site_assets.cjs').siteScript();
 
 async function main() {
   const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
@@ -17,7 +17,7 @@ async function main() {
   const metadata = Object.create(null), broken = new Set();
   let image, imageRequests = 0, pauseWrite = null, pauseMetadata = null, pauseStatus = null, cookieUser = null;
   try {
-    const page = await browser.newPage({ viewport: { width: Number(process.env.ANKIQUEST_AVATAR_WIDTH || 390), height: 844 }, colorScheme: process.env.ANKIQUEST_AVATAR_THEME || 'light' });
+    const page = await browser.newPage({ locale:"en-US", viewport: { width: Number(process.env.ANKIQUEST_AVATAR_WIDTH || 390), height: 844 }, colorScheme: process.env.ANKIQUEST_AVATAR_THEME || 'light' });
     page.on('pageerror', error => errors.push(error.message));
     await page.addInitScript(() => {
       window.ankiquestSession = { user: 'cerro', token: 'initial-native-token' };

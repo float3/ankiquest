@@ -9,7 +9,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const repository = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(repository, 'static/community.html'), 'utf8');
 const siteStyles = fs.readFileSync(path.join(repository, 'static/site.css'), 'utf8');
-const siteScript = fs.readFileSync(path.join(repository, 'static/site.js'), 'utf8');
+const siteScript = require('./site_assets.cjs').siteScript();
 const styles = siteStyles + '\n' + [...source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
 const sharedStylePath = path.join(repository, 'static/avatars.css');
 const sharedScriptPath = path.join(repository, 'static/avatars.js');
@@ -33,7 +33,7 @@ async function main() {
   try {
     for (const width of [390, 1440]) {
       for (const colorScheme of ['light', 'dark']) {
-        const page = await browser.newPage();
+        const page = await browser.newPage({locale:"en-US"});
         // The fixture contains synthetic users and must never contact a real server.
         await page.route('**/*', route => route.abort());
         await page.setViewportSize({ width, height: 1000 });

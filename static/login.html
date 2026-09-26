@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101418">
 <meta name="robots" content="noindex,nofollow">
-<title>Welcome back · ankiquest</title>
+<title data-i18n="Welcome back · ankiquest">Welcome back · ankiquest</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/site.css">
 <style>
@@ -15,24 +15,26 @@ body{margin:0;padding:0;min-height:100vh;background:var(--bg);color:var(--ink);f
 </head>
 <body>
 <div class="login-shell">
-<a class="login-brand" href="/"><img src="/icon.svg" alt="">ankiquest</a>
+<a class="login-brand" href="/"><img src="/icon.svg" alt=""><span data-i18n="ankiquest">ankiquest</span></a>
 <main class="login-card card">
-<div class="login-kicker">Your private study circle</div>
-<h1>Welcome back.</h1>
-<p class="login-description">Sign in to see your community, celebrate progress, and keep your study streak going.</p>
+<div class="login-kicker"><span data-i18n="Your private study circle">Your private study circle</span></div>
+<h1><span data-i18n="Welcome back.">Welcome back.</span></h1>
+<p class="login-description"><span data-i18n="Sign in to see your community, celebrate progress, and keep your study streak going.">Sign in to see your community, celebrate progress, and keep your study streak going.</span></p>
 <form id="login-form">
-<label for="password">Community password or personal token</label>
+<label for="password"><span data-i18n="Community password or personal token">Community password or personal token</span></label>
 <input class="field" id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024" autofocus aria-describedby="login-status">
-<button class="login-submit primary" type="submit">Enter community <span aria-hidden="true">→</span></button>
+<button class="login-submit primary" type="submit"><span data-i18n="Enter community">Enter community </span><span aria-hidden="true">→</span></button>
 <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
 </form>
-<p class="login-note">Use the password shared by your server owner, or your existing ankiquest token. Your personal token also connects your friend goals, activity and preferences. The shared password gives viewing access only.</p>
+<p class="login-note"><span data-i18n="Use the password shared by your server owner, or your existing ankiquest token. Your personal token also connects your friend goals, activity and preferences. The shared password gives viewing access only.">Use the password shared by your server owner, or your existing ankiquest token. Your personal token also connects your friend goals, activity and preferences. The shared password gives viewing access only.</span></p>
 </main>
-<footer class="login-footer">Small sessions. Shared progress.</footer>
+<footer class="login-footer"><span data-i18n="Small sessions. Shared progress.">Small sessions. Shared progress.</span></footer>
 </div>
+<script src="/site.js"></script>
 <script>
 (function(){
 'use strict';
+var aqText=AnkiQuestI18n.t;
 var form=document.getElementById('login-form'),field=document.getElementById('password'),status=document.getElementById('login-status'),button=form.querySelector('button');
 function destination(){
   var next=new URLSearchParams(location.search).get('next')||'/';
@@ -42,14 +44,14 @@ function destination(){
   return next;
 }
 form.addEventListener('submit',async function(event){
-  event.preventDefault();button.disabled=true;status.textContent='Signing in…';
+  event.preventDefault();button.disabled=true;status.textContent=aqText("Signing in…");
   var password=field.value;field.value='';
   try{
     var response=await fetch('/auth/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Ankiquest-CSRF':'1'},body:JSON.stringify({password:password})});
     password='';
     if(response.ok){location.replace(destination());return;}
-    status.textContent=response.status===429?'Too many attempts. Wait one minute and try again.':response.status===401?'That password or token was not recognized. Please try again.':'Could not sign in. Please try again.';
-  }catch(_){password='';status.textContent='Could not reach the server. Check your connection and try again.';}
+    status.textContent=response.status===429?aqText("Too many attempts. Wait one minute and try again."):response.status===401?aqText("That password or token was not recognized. Please try again."):aqText("Could not sign in. Please try again.");
+  }catch(_){password='';status.textContent=aqText("Could not reach the server. Check your connection and try again.");}
   button.disabled=false;field.focus();
 });
 })();

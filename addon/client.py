@@ -24,18 +24,19 @@ def rows_to_reviews(rows):
 
 
 class Client:
-    def __init__(self, url, user, token):
+    def __init__(self, url, user, token, language="en"):
         self.base = url.strip().rstrip("/")
         self.name = user.strip()
         self.user = urllib.parse.quote(self.name, safe="")
         self.token = token.strip()
+        self.language = language
 
     @property
     def configured(self):
         return bool(self.base and self.user and self.token)
 
     def _request(self, path, body=None):
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept-Language": self.language}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
         request = urllib.request.Request(
