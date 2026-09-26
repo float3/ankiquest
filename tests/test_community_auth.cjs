@@ -25,7 +25,7 @@ async function fixture(t, session = saved, options = {}) {
   page.setDefaultTimeout(10000);
   page.setDefaultNavigationTimeout(15000);
   const errors = [], requests = [];
-  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null };
+  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null, replies: [] };
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(session => {
     window.storageWrites = [];
@@ -50,7 +50,11 @@ async function fixture(t, session = saved, options = {}) {
     let data;
     if (url.pathname === '/api/community') data = { meta: {}, players: [{ user: 'cerro', display: 'Cerro' }, { user: 'hill', display: 'Hill' }] };
     else if (url.pathname.startsWith('/api/activity/')) {
-      data = {items:[{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}], unread_count:1,next_before:null};
+      data = {items:options.activityItems || [{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}], unread_count:1,next_before:options.activityBefore||null};
+    }
+    else if (url.pathname.startsWith('/api/reply/')) {
+      control.replies.push({auth:request.headers().authorization,body:request.postDataJSON()});
+      data = {to:'hill'};
     }
     else if (url.pathname.startsWith('/api/community/')) {
       requests.push({ url: url.pathname, auth: request.headers().authorization, csrf: request.headers()['x-ankiquest-csrf'], method: request.method(), body: request.postDataJSON() });
@@ -191,4 +195,35 @@ test('a first null native event clears private Community views already loaded wi
   assert.equal(await page.locator('#reminder-form').count(),0);
   assert.equal(await page.locator('.activity-item').count(),0);
   await page.locator('#view-reminders [data-connect]').waitFor();
+});
+
+test('friends achievements show only shared friend completions and congratulate once', async t => {
+  const now=Math.floor(Date.now()/1000);
+  const {page,control}=await fixture(t,saved,{activityItems:[
+    {id:1,sender:'hill',kind:'completion',title:'Deck complete',body:'Hill finished Spanish.',created_at:now,read_at:null},
+    {id:2,sender:'hill',kind:'reply',title:'Encouragement',body:'Good job!',created_at:now,read_at:null},
+    {id:3,sender:'cerro',kind:'completion',title:'Deck complete',body:'Cerro finished Geography.',created_at:now,read_at:null},
+  ]});
+  await page.getByRole('tab',{name:'Friends',exact:true}).click();
+  const feed=page.getByRole('region',{name:"Friends' achievements",exact:true});
+  await feed.getByText('Hill finished Spanish.',{exact:true}).waitFor();
+  assert.equal(await feed.locator('.friend-achievement').count(),1);
+  assert.equal(await feed.getByText('Cerro finished Geography.',{exact:true}).count(),0);
+  await feed.getByRole('button',{name:'Congratulate',exact:true}).click();
+  await feed.getByText('Congratulations sent',{exact:true}).waitFor();
+  assert.deepEqual(control.replies,[{auth:'Bearer saved-token',body:{notification:1,message:'Good job!'}}]);
+  assert.equal(await feed.getByRole('button',{name:'Congratulate',exact:true}).count(),0);
+  await page.getByRole('tab',{name:'Activity',exact:false}).click();
+  assert.equal(await page.locator('.activity-item[data-notice="1"]').getByText('Reply sent',{exact:true}).count(),1);
+});
+
+test('friends achievements show an honest empty state and clear on account removal', async t => {
+  const {page,deliver}=await fixture(t);
+  await page.getByRole('tab',{name:'Friends',exact:true}).click();
+  const feed=page.getByRole('region',{name:"Friends' achievements",exact:true});
+  await feed.getByText('Your next shared celebration is ahead.',{exact:true}).waitFor();
+  assert.equal(await feed.getByRole('button',{name:'Congratulate',exact:true}).count(),0);
+  await deliver(null);
+  assert.equal(await page.locator('.friend-achievement').count(),0);
+  assert.equal(await page.getByRole('region',{name:"Friends' achievements",exact:true}).count(),0);
 });

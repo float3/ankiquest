@@ -59,6 +59,7 @@ async function main() {
   await api('/api/community/challenges/alice',{title:'Our shared review goal',kind:'reviews',cooperative:true,target:50,duration_days:7,recipients:['cleo'],request_id:'fixture-active'});
   const records=new DatabaseSync(path.join(run,'ankiquest.db'));
   records.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','bob','A note from Bob','Nice work on your studying!',Math.floor(Date.now()/86400000),Date.now(),'message');
+  records.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','bob','Deck complete','Bob Rivera finished Spanish for today.',Math.floor(Date.now()/86400000),Date.now(),'completion');
   records.close();
   browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
   const context=await browser.newContext({viewport:{width:390,height:844}});
@@ -75,7 +76,14 @@ async function main() {
   await page.locator('#auth-user').selectOption('alice');await page.locator('#auth-token').fill(token);await page.locator('#auth-submit').click();
   await page.locator('[data-challenge-action=accept]').waitFor();
   assert.equal((await (await page.request.get(base+'/auth/status')).json()).member.user,'alice');
-  const groups=await page.locator('.challenge-group h2').allTextContents();assert.deepEqual(groups,['Invitations','In progress']);
+  const groups=await page.locator('.challenge-group h2').allTextContents();assert.deepEqual(groups,['Invitations','In progress',"Friends' achievements"]);
+  const achievements=page.getByRole('region',{name:"Friends' achievements",exact:true});
+  await achievements.getByText('Bob Rivera finished Spanish for today.',{exact:true}).waitFor();
+  assert.equal(await achievements.locator('.friend-achievement').count(),1);
+  await achievements.getByRole('button',{name:'Congratulate',exact:true}).click();
+  await achievements.getByText('Congratulations sent',{exact:true}).waitFor();
+  assert((await api('/api/activity/bob',undefined,bobToken)).items.some(item=>item.body.includes('Good job!')));
+  checks.push('private shared deck achievements and a real congratulations reply');
   assert.equal(await page.locator('#challenge-form').count(),0,'creator is absent until requested');
   await screenshot(page,'invitation-390-light');
   checks.push('read-only password, owner connection, invitations before active goals, creation behind explicit action');
@@ -131,7 +139,7 @@ async function main() {
   await page.goto(base+'/community#activity');await page.locator('.activity-item').first().waitFor();
   for(const code of [401,403]) {
     await page.route('**/api/activity/alice?*',route=>route.fulfill({status:code,body:'Forbidden'}));
-    await page.locator('[data-activity-refresh]').click();await page.locator('#view-activity [data-connect]').waitFor();
+    await page.locator('#view-activity [data-activity-refresh]').click();await page.locator('#view-activity [data-connect]').waitFor();
     assert.equal(await page.locator('.activity-item').count(),0);assert.equal(await page.locator('[data-goal]').count(),0);
     await page.unroute('**/api/activity/alice?*');
     await page.reload();await page.locator('.activity-item').first().waitFor();
@@ -140,7 +148,7 @@ async function main() {
   assert.match(mismatch,/selected player/);assert.equal((await (await page.request.get(base+'/auth/status')).json()).member.user,'alice');
   checks.push('owner401/403 clears cached personal data; mismatched token cannot switch browser owner');
   await page.goto(base+'/community#activity');await page.locator('.activity-item').first().waitFor();
-  await context.setOffline(true);await page.locator('[data-activity-refresh]').click();await page.locator('#view-activity [role=alert]').waitFor();assert((await page.locator('.activity-item').count())>0,'failed refresh preserves existing activity');await context.setOffline(false);
+  await context.setOffline(true);await page.locator('#view-activity [data-activity-refresh]').click();await page.locator('#view-activity [role=alert]').waitFor();assert((await page.locator('.activity-item').count())>0,'failed refresh preserves existing activity');await context.setOffline(false);
   const saved=await page.evaluate(()=>({local:JSON.stringify(localStorage),session:JSON.stringify(sessionStorage),cookies:document.cookie}));for(const v of Object.values(saved))assert(!v.includes(token)&&!v.includes(password)&&!v.includes('ankiquest_session'));
   await page.getByRole('button',{name:'Lock site'}).click();await page.waitForURL('**/login?*');assert.equal((await page.request.get(base+'/api/activity/alice')).status(),401);
   checks.push('offline retry preserves activity; no secrets in JS storage; logout revokes owner access');
