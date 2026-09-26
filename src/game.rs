@@ -504,7 +504,7 @@ pub struct QuestView {
 #[derive(Serialize, Clone, Debug)]
 pub struct AchievementView {
     pub id: String,
-    pub title: &'static str,
+    pub title: String,
     pub description: String,
     pub reward: u64,
     pub progress: u64,
@@ -1199,7 +1199,7 @@ pub fn compute_with_freezes(
             }
             AchievementView {
                 id,
-                title: d.title,
+                title: d.title.into(),
                 description: describe(d.metric, d.threshold),
                 reward,
                 progress: totals.value(d.metric).min(d.threshold),

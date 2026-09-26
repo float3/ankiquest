@@ -31,14 +31,15 @@ def allowed(base, url):
     return actual.path in {expected.path + route for route in ROUTES}
 
 
-def session_script(base, user, token):
+def session_script(base, user, token, language="en"):
     origin = "%s://%s" % urllib.parse.urlsplit(base)[:2]
     session = json.dumps({"user": user, "token": token}) if token else "null"
     return (
         "(() => { if (location.origin !== %s) return;"
         " window.ankiquestSession = %s;"
+        " window.ankiquestLanguage = %s;"
         " window.dispatchEvent(new CustomEvent('ankiquest-auth')); })();"
-        % (json.dumps(origin), session)
+        % (json.dumps(origin), session, json.dumps(language))
     )
 
 
@@ -65,7 +66,7 @@ def session_cookie(base, token):
     raise ValueError("The ankiquest server did not return a session")
 
 
-def _build(parent, base, user, token, cookie, open_link):
+def _build(parent, base, user, token, cookie, open_link, language="en"):
     from PyQt6.QtNetwork import QNetworkCookie
     from aqt.qt import (
         QByteArray,
@@ -100,7 +101,7 @@ def _build(parent, base, user, token, cookie, open_link):
 
     def signed_in(ok):
         if ok and allowed(base, view.url().toString()):
-            page.runJavaScript(session_script(base, user, token))
+            page.runJavaScript(session_script(base, user, token, language))
 
     view.loadFinished.connect(signed_in)
     layout = QVBoxLayout(dialog)
@@ -112,7 +113,8 @@ def _build(parent, base, user, token, cookie, open_link):
 
 def open_page(mw, api, path, open_link, say):
     """Shows `path` in the ankiquest window, signing in first when the account changed."""
-    account = (api.base, api.name, api.token)
+    language = getattr(api, "language", "en")
+    account = (api.base, api.name, api.token, language)
     window = state["window"]
     if window is not None and state["account"] == account:
         _show(window, api.base, path)
@@ -125,11 +127,12 @@ def open_page(mw, api, path, open_link, say):
         try:
             cookie = future.result()
         except Exception as error:
-            say("ankiquest: could not sign in to the website (%s)" % error)
+            from .language import tr
+            say(tr("ankiquest: could not sign in to the website (%s)", language) % error)
             return
         if state["window"] is not None:
             state["window"].close()
-        state["window"] = _build(mw, api.base, api.name, api.token, cookie, open_link)
+        state["window"] = _build(mw, api.base, api.name, api.token, cookie, open_link, language)
         state["account"] = account
         _show(state["window"], api.base, path)
 

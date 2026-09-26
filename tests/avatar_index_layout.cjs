@@ -12,7 +12,7 @@ const renderer = source.slice(0, source.indexOf('async function render()'));
 const sharedStyles = fs.readFileSync(path.join(root, 'static/avatars.css'), 'utf8');
 const sharedScript = fs.readFileSync(path.join(root, 'static/avatars.js'), 'utf8');
 const siteStyles = fs.readFileSync(path.join(root, 'static/site.css'), 'utf8');
-const siteScript = fs.readFileSync(path.join(root, 'static/site.js'), 'utf8');
+const siteScript = require('./site_assets.cjs').siteScript();
 const scaffold = html.match(/<body\b[^>]*>([\s\S]*?)<script>/)[1];
 const evidence = process.env.ANKIQUEST_AVATAR_EVIDENCE;
 if (evidence) fs.mkdirSync(evidence, { recursive: true });
@@ -22,7 +22,7 @@ async function main() {
   const results = [], failures = [];
   try {
     for (const width of [320, 390, 1440]) for (const colorScheme of ['light', 'dark']) {
-      const page = await browser.newPage({ viewport: { width, height: 1100 }, colorScheme });
+      const page = await browser.newPage({ locale:"en-US", viewport: { width, height: 1100 }, colorScheme });
       await page.route('**/*', route => route.abort());
       await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${siteStyles}</style><style>${styles}</style><style>${sharedStyles}</style></head><body>${scaffold}</body></html>`);
       await page.addScriptTag({ content: sharedScript });

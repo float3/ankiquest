@@ -76,7 +76,7 @@ fn unlocked(profile: &Profile) -> BTreeSet<&str> {
         .achievements
         .iter()
         .filter(|achievement| achievement.unlocked.is_some())
-        .map(|achievement| achievement.title)
+        .map(|achievement| achievement.title.as_str())
         .collect()
 }
 

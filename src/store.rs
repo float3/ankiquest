@@ -75,6 +75,7 @@ impl Store {
              ) without rowid;",
         )?;
         crate::avatars::initialize(&conn)?;
+        crate::i18n::initialize(&conn)?;
         crate::decks::initialize(&conn)?;
         crate::subscriptions::initialize(&conn)?;
         crate::freezes::initialize(&conn)?;

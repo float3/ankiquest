@@ -135,6 +135,10 @@ An ntfy push is marked delivered only after a successful HTTP response. Urgent s
 
 The server and the client used to study must both be updated. Clients only report progress for decks you share, so players who never enable a deck send no deck data. Sending the deck list again replaces the stored one, which removes deleted decks.
 
+AnkiQuest supports English and Spanish. Updated Android and desktop clients pass the language selected in Anki, including when it differs from the phone's language. Standalone browsers use their preferred language. Other languages currently fall back to English. The Spanish catalog is in `static/translations-es.json`; Android strings are in `values-es/ankiquest*.xml`. Names, deck names, goal titles and written messages are kept as authored.
+
+Authenticated profile, upload and inbox requests remember the owner's `Accept-Language` for later server pushes. Public profile views do not change it. `GET` and `POST /api/language/<user>` also require the owner's bearer token or personal session; cookie writes require CSRF protection. A POST accepts `{"language":"es-ES"}`. Stored notification text remains unchanged so each recipient can receive their own translation.
+
 Clients may include a `decks` array in the review upload. Each entry has `id` (a string), `name`, `remaining`, `reviewed_today`, and `day` (the local Anki day number, days since the Unix epoch after applying timezone and rollover). Omit this field when a reliable snapshot is unavailable. Initial silent uploads populate the deck list without announcing completions. Set `"catalog": true` when `decks` is the full deck list; decks missing from it are removed.
 
 `GET /api/decks/<user>` with the user's bearer token returns private deck preferences and available recipients. `POST` to the same endpoint accepts `{"decks":[{"id":"123","enabled":true,"recipients":["hill"]}]}`. `GET /api/notifications/<user>` with the recipient's bearer token returns their recent completion announcements, with `id`, `title`, `body`, `day`, and `created_at` (Unix seconds). These endpoints never expose another player's deck settings or notification inbox without that player's token.

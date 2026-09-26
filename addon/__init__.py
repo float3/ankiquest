@@ -1,10 +1,12 @@
 import time
+import anki.lang
 
 from aqt import gui_hooks, mw
 from aqt.qt import QAction
 from aqt.utils import openLink, tooltip
 
 from . import board, notify, ui, web
+from .language import tr
 from .client import (
     MAX_PENDING,
     PENDING_SQL,
@@ -49,7 +51,7 @@ def save_config(values):
 
 def client():
     settings = config()
-    return Client(settings.get("url", ""), settings.get("user", ""), settings.get("token", ""))
+    return Client(settings.get("url", ""), settings.get("user", ""), settings.get("token", ""), anki.lang.current_lang)
 
 
 def refresh(show_feedback, resync=False):
@@ -204,7 +206,7 @@ def on_deck_browser(deck_browser, content):
     if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
     waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
-    content.stats += board.html(state["profile"], state["place"], waiting)
+    content.stats += board.html(state["profile"], state["place"], waiting, tr)
 
 
 def on_js_message(handled, message, context):
@@ -219,7 +221,7 @@ def on_js_message(handled, message, context):
 def open_page(path):
     api = client()
     if not api.base:
-        tooltip("Set the server in ankiquest settings first.")
+        tooltip(tr("Set the server in ankiquest settings first."))
         return
     web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
 
@@ -241,13 +243,13 @@ def open_settings():
     state["place"] = None
     refresh_shared_decks()
     poll(quiet=True)
-    tooltip("ankiquest settings saved.")
+    tooltip(tr("ankiquest settings saved."))
 
 
 def test_connection(values):
-    api = Client(values["url"], values["user"], values["token"])
+    api = Client(values["url"], values["user"], values["token"], anki.lang.current_lang)
     if not api.configured:
-        tooltip("Fill in the server, player and token first.")
+        tooltip(tr("Fill in the server, player and token first."))
         return
 
     def done(future):
@@ -256,7 +258,7 @@ def test_connection(values):
         except Exception as e:
             tooltip("ankiquest: %s" % e)
             return
-        tooltip("Connected as %s, level %d." % (values["user"], profile.get("level", 1)))
+        tooltip(tr("Connected as %s, level %d.") % (values["user"], profile.get("level", 1)))
 
     mw.taskman.run_in_background(api.profile, done)
 
@@ -265,13 +267,13 @@ def upload_everything():
     mw.pm.profile[MARK_KEY] = 0
     mw.pm.profile[RECENT_KEY] = []
     refresh(False, resync=True)
-    tooltip("Uploading your whole review history…")
+    tooltip(tr("Uploading your whole review history…"))
 
 
 def open_deck_notifications():
     api = client()
     if mw.col is None or not api.configured:
-        tooltip("Set the server, player and token in ankiquest settings first.")
+        tooltip(tr("Set the server, player and token in ankiquest settings first."))
         return
     rollover = int(mw.col.get_config("rollover", 4))
 
@@ -285,14 +287,14 @@ def open_deck_notifications():
         try:
             settings = future.result()
         except Exception as e:
-            tooltip("ankiquest: could not load your decks (%s)" % e)
+            tooltip(tr("ankiquest: could not load your decks (%s)") % e)
             return
         choice = ui.deck_dialog(mw, settings)
         if choice is None:
             return
         shared, unshared, recipients, nudges = choice
         if shared and not recipients:
-            tooltip("Pick at least one person to notify, or share no decks.")
+            tooltip(tr("Pick at least one person to notify, or share no decks."))
             return
         save_deck_choice(api, shared, unshared, recipients, nudges)
 
@@ -308,9 +310,9 @@ def save_deck_choice(api, shared, unshared, recipients, nudges):
         try:
             mw.pm.profile[SHARED_KEY] = future.result()
         except Exception as e:
-            tooltip("ankiquest: could not save your decks (%s)" % e)
+            tooltip(tr("ankiquest: could not save your decks (%s)") % e)
             return
-        tooltip("%d deck%s shared." % (len(shared), "" if len(shared) == 1 else "s"))
+        tooltip(tr("%d deck shared." if len(shared) == 1 else "%d decks shared.") % len(shared))
 
     mw.taskman.run_in_background(work, done)
 
@@ -349,10 +351,10 @@ def add_action(title, handler):
     mw.form.menuTools.addAction(action)
 
 
-add_action("ankiquest settings…", open_settings)
-add_action("ankiquest deck notifications…", open_deck_notifications)
-add_action("ankiquest inbox…", open_inbox)
-add_action("ankiquest on the web…", open_website)
+add_action(tr("ankiquest settings…"), open_settings)
+add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
+add_action(tr("ankiquest inbox…"), open_inbox)
+add_action(tr("ankiquest on the web…"), open_website)
 
 
 gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))

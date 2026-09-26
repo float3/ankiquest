@@ -6,6 +6,7 @@ mod decks;
 mod feedback;
 mod freezes;
 mod game;
+mod i18n;
 mod reminders;
 mod store;
 mod subscriptions;
@@ -213,8 +214,21 @@ async fn leaderboard(
 async fn profile(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Profile>, StatusCode> {
-    app.profile(&user).map(Json).ok_or(StatusCode::NOT_FOUND)
+    let owner = authorized(&app, &user, &headers);
+    let language = {
+        let store = app.store.lock().unwrap();
+        if owner {
+            i18n::owned(&headers, &store, &user)
+        } else {
+            i18n::selected(&headers, &store, &user)
+        }
+    }
+    .map_err(store_error)?;
+    let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
+    i18n::profile(&mut profile, &language);
+    Ok(Json(profile))
 }
 
 #[derive(Debug, Serialize)]
@@ -295,12 +309,13 @@ struct Pending {
 async fn preview(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
     Json(pending): Json<Pending>,
 ) -> Result<Json<UploadResponse>, StatusCode> {
     if pending.reviews.len() > MAX_PENDING {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
-    let profile = app
+    let mut profile = app
         .preview(&user, &pending.reviews)
         .ok_or(StatusCode::NOT_FOUND)?;
     let before = pending.seen_through.and_then(|seen| {
@@ -312,7 +327,11 @@ async fn preview(
             .collect();
         app.preview(&user, &shown)
     });
-    let feedback = feedback::feedback(before.as_ref(), &profile, &[]);
+    let mut feedback = feedback::feedback(before.as_ref(), &profile, &[]);
+    let language =
+        i18n::selected(&headers, &app.store.lock().unwrap(), &user).map_err(store_error)?;
+    i18n::profile(&mut profile, &language);
+    i18n::feedback(&mut feedback, &language);
     Ok(Json(UploadResponse {
         profile,
         announced: Vec::new(),
@@ -336,8 +355,11 @@ struct RankResponse {
 async fn rank(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
     Json(query): Json<RankQuery>,
 ) -> Json<RankResponse> {
+    let language =
+        i18n::selected(&headers, &app.store.lock().unwrap(), &user).unwrap_or_else(|_| "en".into());
     let Json(board) = leaderboard(State(app), Query(BoardQuery { period: None })).await;
     let places: Vec<feedback::Place> = board
         .iter()
@@ -347,7 +369,10 @@ async fn rank(
             week_xp: standing.week_xp,
         })
         .collect();
-    let change = feedback::rank_change(&query.previous, &places, &user);
+    let mut change = feedback::rank_change(&query.previous, &places, &user);
+    if let Some(change) = &mut change {
+        i18n::notice(change, &language);
+    }
     Json(RankResponse {
         order: board.iter().map(|standing| standing.user.clone()).collect(),
         change,
@@ -428,13 +453,16 @@ async fn upload(
     let player = load_player(&store, &user).map_err(store_error)?;
     app.players.write().unwrap().insert(user.clone(), player);
     challenges::refresh(&mut store, &app.participants(), now_ms()).map_err(store_error)?;
-    let profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
+    let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
     if silent {
         for event in &profile.events {
             store.mark_seen(&user, &event.key).map_err(store_error)?;
         }
     }
-    let feedback = feedback::feedback(before.as_ref(), &profile, &announced);
+    let mut feedback = feedback::feedback(before.as_ref(), &profile, &announced);
+    let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
+    i18n::profile(&mut profile, &language);
+    i18n::feedback(&mut feedback, &language);
     Ok(Json(UploadResponse {
         profile,
         announced,
@@ -655,6 +683,7 @@ async fn notifications(
             .map_err(store_error)?;
     }
     let mut result = Vec::new();
+    let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
     for mut notice in store.notifications(&user, now).map_err(store_error)? {
         if notice.kind.starts_with("reminder_") {
             let (Some(profile), Some(clock)) = (&profile, &clock) else {
@@ -668,6 +697,8 @@ async fn notifications(
             }
             notice.body = reminders::current_body(&notice, profile, clock, &app.week, now);
         }
+        let sender_display = app.display(&notice.sender);
+        i18n::notification(&mut notice, &language, &sender_display);
         result.push(notice);
     }
     Ok(Json(result))
@@ -701,10 +732,14 @@ async fn activity(
     let mut store = app.store.lock().unwrap();
     let now = now_ms();
     challenges::refresh(&mut store, &app.participants(), now).map_err(store_error)?;
-    store
+    let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
+    let mut activity = store
         .activity(&user, now, days, query.before, limit)
-        .map(Json)
-        .map_err(store_error)
+        .map_err(store_error)?;
+    for notice in &mut activity.items {
+        i18n::notification(notice, &language, &app.display(&notice.sender));
+    }
+    Ok(Json(activity))
 }
 
 #[derive(Deserialize)]
@@ -922,6 +957,7 @@ fn refresh_community(
 async fn community_dashboard(
     State(app): State<Arc<App>>,
     Query(query): Query<CommunityQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let now = now_ms();
     let date = app.week.competition_date(now);
@@ -939,9 +975,11 @@ async fn community_dashboard(
     }
     let participants = app.participants();
     refresh_community(&app, &mut store, &participants, now).map_err(store_error)?;
-    competition::dashboard(&store, &participants, &app.week, now, year, month)
-        .map(Json)
-        .map_err(store_error)
+    let language = i18n::selected(&headers, &store, "").map_err(store_error)?;
+    let mut dashboard = competition::dashboard(&store, &participants, &app.week, now, year, month)
+        .map_err(store_error)?;
+    i18n::community(&mut dashboard, &language);
+    Ok(Json(dashboard))
 }
 
 async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -1330,7 +1368,7 @@ fn tick(app: &App) -> Result<(), Error> {
 fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
     let deliveries = app.store.lock().unwrap().take_deck_deliveries(now_ms())?;
     let started = std::time::Instant::now();
-    for delivery in deliveries {
+    for mut delivery in deliveries {
         let remaining = budget.saturating_sub(started.elapsed());
         if remaining.is_zero() {
             break;
@@ -1400,13 +1438,17 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
         if !app.store.lock().unwrap().begin_push(id, now_ms())? {
             continue;
         }
+        let language = app.store.lock().unwrap().language(&delivery.user)?;
+        if let Some(body) = current_warning {
+            delivery.notification.body = body;
+        }
+        let sender_display = app.display(&delivery.notification.sender);
+        i18n::notification(&mut delivery.notification, &language, &sender_display);
         let result = push(
             &app.config,
             &delivery.user,
             &delivery.notification.title,
-            current_warning
-                .as_deref()
-                .unwrap_or(&delivery.notification.body),
+            &delivery.notification.body,
             match delivery.notification.kind.as_str() {
                 "event" => "tada",
                 "risk" | "reminder_urgent" => "fire",
@@ -1695,6 +1737,7 @@ fn router(app: Arc<App>) -> Router {
             "/api/streak-freezes/{user}",
             get(get_freezes).post(set_freezes),
         )
+        .route("/api/language/{user}", get(i18n::get).post(i18n::set))
         .route("/api/notifications/{user}", get(notifications))
         .route(
             "/api/notification-preferences/{user}",
@@ -1747,6 +1790,178 @@ mod tests {
             format!("Bearer {user}-secret").parse().unwrap(),
         );
         headers
+    }
+
+    #[tokio::test]
+    async fn languages_require_owner_auth_and_public_views_do_not_change_preferences() {
+        let (app, _path) = fixture();
+        let preference = || {
+            Json(i18n::Preference {
+                language: "es-AR".into(),
+            })
+        };
+        assert_eq!(
+            i18n::set(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("hill"),
+                preference()
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            i18n::get(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                HeaderMap::new()
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            i18n::set(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                preference()
+            )
+            .await
+            .unwrap()
+            .0
+            .language,
+            "es"
+        );
+        assert_eq!(
+            i18n::set(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(i18n::Preference {
+                    language: "es\r\nx".into()
+                })
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::BAD_REQUEST
+        );
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(sample_upload(2, false)),
+        )
+        .await
+        .unwrap();
+        let mut public = HeaderMap::new();
+        public.insert(header::ACCEPT_LANGUAGE, "en-US".parse().unwrap());
+        let viewed = profile(State(app.clone()), UrlPath("cerro".into()), public)
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            viewed
+                .quests
+                .iter()
+                .any(|quest| quest.title.contains("Review"))
+        );
+        assert_eq!(app.store.lock().unwrap().language("cerro").unwrap(), "es");
+        let mut owner = headers("cerro");
+        owner.insert(header::ACCEPT_LANGUAGE, "en-US".parse().unwrap());
+        let _ = profile(State(app.clone()), UrlPath("cerro".into()), owner)
+            .await
+            .unwrap();
+        assert_eq!(app.store.lock().unwrap().language("cerro").unwrap(), "en");
+        assert_eq!(app.store.lock().unwrap().language("hill").unwrap(), "en");
+    }
+
+    #[tokio::test]
+    async fn spanish_inbox_preserves_names_decks_and_authored_messages() {
+        let (app, _path) = fixture();
+        let now = now_ms();
+        {
+            let mut store = app.store.lock().unwrap();
+            for (kind, title, body) in [
+                (
+                    "completion",
+                    "Deck complete",
+                    "Cerro has finished their Friends::{0} studies for today.",
+                ),
+                ("message", "Deck complete", "Good job!"),
+                ("reply", "Thanks!", "Good job!"),
+                (
+                    "nudge",
+                    "Time for Anki?",
+                    "Cerro is cheering you on. Make a little time for Anki today!",
+                ),
+            ] {
+                store
+                    .send(
+                        &decks::Outgoing {
+                            to: "hill",
+                            from: "cerro",
+                            title,
+                            body,
+                            kind,
+                        },
+                        1,
+                        now,
+                    )
+                    .unwrap();
+            }
+        }
+        let mut owner = headers("hill");
+        owner.insert(header::ACCEPT_LANGUAGE, "es-ES,es;q=0.9".parse().unwrap());
+        let inbox = notifications(State(app.clone()), UrlPath("hill".into()), owner)
+            .await
+            .unwrap()
+            .0;
+        let completion = inbox
+            .iter()
+            .find(|notice| notice.kind == "completion")
+            .unwrap();
+        assert_eq!(completion.title, "Mazo completado");
+        assert_eq!(
+            completion.body,
+            "Cerro ha terminado su estudio de Friends::{0} por hoy."
+        );
+        for notice in inbox
+            .iter()
+            .filter(|notice| matches!(notice.kind.as_str(), "message" | "reply"))
+        {
+            assert_eq!(notice.body, "Good job!");
+        }
+        assert!(
+            inbox
+                .iter()
+                .find(|notice| notice.kind == "nudge")
+                .unwrap()
+                .body
+                .starts_with("Cerro te anima.")
+        );
+        assert_eq!(app.store.lock().unwrap().language("hill").unwrap(), "es");
+        let english = {
+            let mut h = headers("hill");
+            h.insert(header::ACCEPT_LANGUAGE, "en".parse().unwrap());
+            h
+        };
+        let inbox = notifications(State(app.clone()), UrlPath("hill".into()), english)
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            inbox
+                .iter()
+                .find(|notice| notice.kind == "completion")
+                .unwrap()
+                .body
+                .contains("has finished their Friends::{0}")
+        );
     }
 
     #[tokio::test]
@@ -1951,10 +2166,14 @@ mod tests {
     #[tokio::test]
     async fn community_empty_history_has_no_invented_champions_and_rejects_bad_filters() {
         let (app, path) = fixture();
-        let board = community_dashboard(State(app.clone()), Query(CommunityQuery::default()))
-            .await
-            .unwrap()
-            .0;
+        let board = community_dashboard(
+            State(app.clone()),
+            Query(CommunityQuery::default()),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap()
+        .0;
         assert!(board["calendar"].as_array().unwrap().is_empty());
         assert_eq!(board["players"].as_array().unwrap().len(), 3);
         assert_eq!(
@@ -1963,7 +2182,8 @@ mod tests {
                 Query(CommunityQuery {
                     year: Some(2026),
                     month: Some(13)
-                })
+                }),
+                HeaderMap::new()
             )
             .await
             .err()
@@ -2049,7 +2269,7 @@ mod tests {
         }
         community_collection(&base, "hill", &reviews);
 
-        let board = community_dashboard(State(app.clone()), community_query(day))
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
             .await
             .unwrap()
             .0;
@@ -2095,7 +2315,7 @@ mod tests {
             .unwrap();
         assert_eq!(champion["day_wins"], 1);
         assert_eq!(history["waiting_players"][0]["user"], "friend");
-        let board = community_dashboard(State(app.clone()), community_query(day))
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
             .await
             .unwrap()
             .0;
@@ -2125,7 +2345,7 @@ mod tests {
             assert_eq!(store.reviews("cerro").unwrap().len(), 2);
         }
         assert_eq!(
-            community_dashboard(State(app.clone()), community_query(day))
+            community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
                 .await
                 .unwrap_err(),
             StatusCode::SERVICE_UNAVAILABLE
@@ -2153,7 +2373,7 @@ mod tests {
             std::fs::remove_file(base.join(user).join("collection.anki2")).unwrap();
             community_collection(&base, user, &reviews[..count]);
         }
-        let board = community_dashboard(State(app.clone()), community_query(day))
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
             .await
             .unwrap()
             .0;
@@ -2181,9 +2401,13 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         assert_eq!(
-            community_dashboard(State(app.clone()), Query(CommunityQuery::default()))
-                .await
-                .unwrap_err(),
+            community_dashboard(
+                State(app.clone()),
+                Query(CommunityQuery::default()),
+                HeaderMap::new()
+            )
+            .await
+            .unwrap_err(),
             StatusCode::SERVICE_UNAVAILABLE
         );
         tick(&app).unwrap();
@@ -2325,6 +2549,7 @@ mod tests {
         let projected = preview(
             State(app.clone()),
             UrlPath("cerro".into()),
+            HeaderMap::new(),
             Json(Pending {
                 reviews: reviews.clone(),
                 seen_through: None,
@@ -2856,6 +3081,47 @@ mod tests {
             2
         );
         drop(store);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn push_uses_the_recipients_saved_language_without_rewriting_the_stored_notice() {
+        let (mut app, path) = fixture();
+        let (base, server) = local_push(200);
+        let config = &mut Arc::get_mut(&mut app).unwrap().config;
+        config.ntfy = Some(base);
+        config.users.get_mut("hill").unwrap().ntfy_topic = Some("hill-topic".into());
+        let id = {
+            let mut store = app.store.lock().unwrap();
+            store.set_language("hill", "es-AR").unwrap();
+            store
+                .send(
+                    &decks::Outgoing {
+                        to: "hill",
+                        from: "cerro",
+                        title: "Deck complete",
+                        body: "Cerro has finished their Friends studies for today.",
+                        kind: "completion",
+                    },
+                    1,
+                    now_ms(),
+                )
+                .unwrap()
+        };
+        deliver_notifications(&app, PUSH_BUDGET).unwrap();
+        let request = server.join().unwrap();
+        assert!(request.ends_with("Cerro ha terminado su estudio de Friends por hoy."));
+        assert!(was_pushed(&app, id));
+        assert!(
+            app.store
+                .lock()
+                .unwrap()
+                .notifications("hill", now_ms())
+                .unwrap()[0]
+                .body
+                .contains("has finished")
+        );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -4242,6 +4508,7 @@ mod tests {
         let _ = preview(
             State(app.clone()),
             UrlPath("cerro".into()),
+            HeaderMap::new(),
             Json(Pending {
                 reviews: vec![],
                 seen_through: None,
@@ -4342,6 +4609,7 @@ mod tests {
                 preview(
                     State(app),
                     UrlPath("hill".into()),
+                    HeaderMap::new(),
                     Json(Pending {
                         reviews,
                         seen_through,
@@ -4370,6 +4638,7 @@ mod tests {
         let answer = rank(
             State(app.clone()),
             UrlPath("cerro".into()),
+            HeaderMap::new(),
             Json(RankQuery {
                 previous: vec!["hill".into(), "cerro".into()],
             }),
@@ -4383,6 +4652,7 @@ mod tests {
         let first_look = rank(
             State(app.clone()),
             UrlPath("cerro".into()),
+            HeaderMap::new(),
             Json(RankQuery { previous: vec![] }),
         )
         .await

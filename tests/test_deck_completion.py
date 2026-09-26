@@ -208,8 +208,14 @@ class RefreshTests(unittest.TestCase):
         utils.openLink = Mock()
         qt = ModuleType("aqt.qt")
         qt.__getattr__ = lambda name: Mock()
-        with patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt}):
-            self.addon = load_module("ankiquest_test_addon", ADDON / "__init__.py", package=True)
+        anki = ModuleType("anki")
+        language = ModuleType("anki.lang")
+        language.current_lang = "en"
+        anki.lang = language
+        modules = patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt, "anki": anki, "anki.lang": language})
+        modules.start()
+        self.addCleanup(modules.stop)
+        self.addon = load_module("ankiquest_test_addon", ADDON / "__init__.py", package=True)
         self.addon.ui = SimpleNamespace(settings_dialog=Mock(return_value=None), deck_dialog=Mock())
         self.addon.web = SimpleNamespace(open_page=Mock())
         self.addon.client = lambda: self.api

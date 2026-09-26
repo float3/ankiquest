@@ -18,6 +18,7 @@ from aqt.qt import (
 from aqt.qt import Qt
 
 from .decks import label, ordered
+from .language import tr
 
 
 def _enum(owner, group, name):
@@ -51,7 +52,7 @@ def _buttons(dialog, accept_text, extra=()):
     for widget in extra:
         row.addWidget(widget)
     row.addStretch(1)
-    cancel = QPushButton("Cancel")
+    cancel = QPushButton(tr("Cancel"))
     cancel.clicked.connect(dialog.reject)
     accept = QPushButton(accept_text)
     accept.setDefault(True)
@@ -72,11 +73,11 @@ def settings_dialog(parent, config, on_test, on_upload_all):
     user = QLineEdit(config.get("user", ""))
     token = QLineEdit(config.get("token", ""))
     token.setEchoMode(_enum(QLineEdit, "EchoMode", "Password"))
-    for title, field in (("Server", url), ("Player", user), ("Token", token)):
+    for title, field in ((tr("Server"), url), (tr("Player"), user), (tr("Token"), token)):
         layout.addWidget(QLabel(title))
         layout.addWidget(field)
 
-    rank = QCheckBox("Tell me when my place on the leaderboard changes")
+    rank = QCheckBox(tr("Tell me when my place on the leaderboard changes"))
     rank.setChecked(bool(config.get("notify_rank", True)))
     layout.addWidget(rank)
 
@@ -84,13 +85,13 @@ def settings_dialog(parent, config, on_test, on_upload_all):
     hours.setRange(0, 12)
     hours.setValue(int(config.get("streak_hours", 2) or 0))
     hours.setSuffix(" h")
-    layout.addWidget(_row(QLabel("Warn me before my streak ends"), hours))
+    layout.addWidget(_row(QLabel(tr("Warn me before my streak ends")), hours))
 
-    test = QPushButton("Test connection")
+    test = QPushButton(tr("Test connection"))
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours)))
-    upload = QPushButton("Upload everything again")
+    upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
-    layout.addLayout(_buttons(dialog, "Save", (test, upload)))
+    layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
 
     if not dialog.exec():
         return None
@@ -112,11 +113,11 @@ def deck_dialog(parent, settings):
     decks = ordered(settings.get("decks") or [])
     people = settings.get("recipients") or []
     dialog = QDialog(parent)
-    dialog.setWindowTitle("Deck completion notifications")
+    dialog.setWindowTitle(tr("Deck completion notifications"))
     dialog.resize(680, 520)
     layout = QVBoxLayout(dialog)
     layout.addWidget(
-        QLabel("The people you pick hear once a day when you finish a shared deck.")
+        QLabel(tr("The people you pick hear once a day when you finish a shared deck."))
     )
 
     tree = QTreeWidget()
@@ -167,18 +168,18 @@ def deck_dialog(parent, settings):
         recipients[person["user"]] = box
 
     columns = QHBoxLayout()
-    columns.addWidget(_titled("Decks", tree), 2)
+    columns.addWidget(_titled(tr("Decks"), tree), 2)
     columns.addWidget(
-        _titled("Notify", _scroller(list(recipients.values()) or [QLabel("Nobody else plays yet.")])),
+        _titled(tr("Notify"), _scroller(list(recipients.values()) or [QLabel(tr("Nobody else plays yet."))])),
         1,
     )
     layout.addLayout(columns)
 
-    nudges = QCheckBox("Nudge me when a place, my best day or the next level is within reach")
+    nudges = QCheckBox(tr("Nudge me when a place, my best day or the next level is within reach"))
     nudges.setChecked(bool(settings.get("nudges")))
     layout.addWidget(nudges)
 
-    every = QPushButton("All / none")
+    every = QPushButton(tr("All / none"))
 
     def toggle_all():
         checked = _enum(Qt, "CheckState", "Checked")
@@ -187,7 +188,7 @@ def deck_dialog(parent, settings):
             item.setCheckState(0, _enum(Qt, "CheckState", "Checked" if select else "Unchecked"))
 
     every.clicked.connect(toggle_all)
-    layout.addLayout(_buttons(dialog, "Save", (every,)))
+    layout.addLayout(_buttons(dialog, tr("Save"), (every,)))
 
     if not dialog.exec():
         return None

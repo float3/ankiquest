@@ -7,7 +7,7 @@ const { test, before, after } = require('node:test');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const html = fs.readFileSync(path.join(__dirname, '../static/community.html'), 'utf8');
-const siteScript = fs.readFileSync(path.join(__dirname, '../static/site.js'), 'utf8');
+const siteScript = require('./site_assets.cjs').siteScript();
 const origin = 'http://ankiquest.test';
 const saved = { user: 'cerro', token: 'saved-token' };
 let browser;
@@ -19,7 +19,7 @@ before(async () => {
 after(async () => browser?.close());
 
 async function fixture(t, session = saved, options = {}) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: options.locale || 'en-US' });
   t.after(() => context.close());
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
@@ -73,6 +73,16 @@ async function fixture(t, session = saved, options = {}) {
     },
   };
 }
+
+test('Spanish community labels follow the selected language without translating player names or authored messages', async t => {
+  const {page} = await fixture(t, saved, {locale:'es-ES'});
+  assert.equal(await page.locator('#tab-challenges').innerText(), 'Amigos');
+  assert.equal(await page.locator('#tab-reminders').innerText(), 'Recordatorios');
+  await page.locator('#reminder-form').waitFor();
+  assert.equal(await page.locator('#view-reminders .auth-status strong').innerText(), 'Cerro');
+  await page.locator('#tab-activity').click();
+  await page.getByText('Nice studying!', {exact:true}).waitFor();
+});
 
 test('community reminders reuse the saved account, including saves, without persisting its token', async t => {
   const { page, requests } = await fixture(t);

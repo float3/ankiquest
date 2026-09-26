@@ -7,7 +7,7 @@ const { test, before, after } = require('node:test');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
-const siteScript = fs.readFileSync(path.join(__dirname, '../static/site.js'), 'utf8');
+const siteScript = require('./site_assets.cjs').siteScript();
 const origin = 'http://ankiquest.test';
 const savedSession = { user: 'cerro', token: 'saved-token' };
 const dialogs = [
@@ -25,7 +25,7 @@ before(async () => {
 after(async () => browser?.close());
 
 async function fixture(t, session = savedSession, user = 'cerro', options = {}) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
+  const context = await browser.newContext({ locale:"en-US", viewport: { width: 390, height: 844 }, colorScheme: 'dark' });
   const pendingReleases = [];
   t.after(async () => {
     pendingReleases.forEach(release => release());
