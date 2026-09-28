@@ -964,6 +964,8 @@ struct ActivityQuery {
     days: Option<u32>,
     before: Option<i64>,
     limit: Option<u32>,
+    category: Option<decks::ActivityCategory>,
+    unread_only: Option<bool>,
 }
 
 async fn activity(
@@ -987,10 +989,26 @@ async fn activity(
     let now = now_ms();
     challenges::refresh(&mut store, &app.participants(), now).map_err(store_error)?;
     let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
-    let mut activity = store
-        .activity(&user, now, days, query.before, limit)
-        .map_err(store_error)?;
+    let mut activity = if query.category.is_none() && query.unread_only != Some(true) {
+        store.activity(&user, now, days, query.before, limit)
+    } else {
+        store.activity_filtered(
+            &user,
+            now,
+            decks::ActivityOptions {
+                days,
+                before: query.before,
+                limit,
+                category: query.category,
+                unread_only: query.unread_only.unwrap_or(false),
+            },
+        )
+    }
+    .map_err(store_error)?;
     for notice in &mut activity.items {
+        i18n::notification(notice, &language, &app.display(&notice.sender));
+    }
+    for notice in &mut activity.attention {
         i18n::notification(notice, &language, &app.display(&notice.sender));
     }
     Ok(Json(activity))

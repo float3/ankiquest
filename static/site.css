@@ -360,6 +360,18 @@ input:not([type=checkbox]):not([type=radio]), select { min-height:48px; }
 .reply-context small { color:var(--dim);margin-bottom:4px; }
 .activity-item .actions { display:flex;gap:8px;flex-wrap:wrap;margin-top:12px; }
 .activity-box { display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:12px 0; }
+#view-activity { grid-template-columns:minmax(0,1fr); }
+.activity-filters { display:flex;align-items:center;gap:10px;margin:14px 0;min-width:0; }
+.activity-categories { display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin;white-space:nowrap;flex:1;min-width:0;padding:2px 0 7px; }
+.activity-categories button,.activity-unread-filter { min-height:42px;border-radius:999px;padding:8px 14px;white-space:nowrap; }
+.activity-categories button[aria-pressed=true],.activity-unread-filter[aria-pressed=true] { background:var(--accent);color:var(--card);border-color:var(--accent); }
+.activity-unread-filter { flex:none; }
+.activity-attention { background:var(--soft);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0 18px; }
+.activity-attention .card-head { margin-bottom:12px; }
+.activity-attention .card-head p { margin:4px 0 0;color:var(--dim);font-size:13px; }
+.activity-attention-item { padding:14px; }
+.activity-attention-item p { margin:8px 0;overflow-wrap:anywhere; }
+.activity-day { font-size:14px;color:var(--dim);margin:16px 0 2px; }
 .activity-reply { border-top:1px solid var(--line);margin-top:18px;padding-top:18px; }
 .activity-reply input { width:100%; }
 .load-more { margin-top:20px;width:100%; }

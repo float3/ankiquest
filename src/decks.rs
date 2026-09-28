@@ -13,6 +13,48 @@ const PUSH_LEASE_MS: i64 = 60_000;
 const MAX_SEPARATE_PUSHES: usize = 3;
 pub const MAX_MESSAGE: usize = 200;
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityCategory {
+    Messages,
+    Challenges,
+    DeckCompletions,
+    StudyUpdates,
+    NeedsAction,
+}
+
+impl ActivityCategory {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Messages => "messages",
+            Self::Challenges => "challenges",
+            Self::DeckCompletions => "deck_completions",
+            Self::StudyUpdates => "study_updates",
+            Self::NeedsAction => "needs_action",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ActivityOptions {
+    pub days: u32,
+    pub before: Option<i64>,
+    pub limit: u32,
+    pub category: Option<ActivityCategory>,
+    pub unread_only: bool,
+}
+
+const ACTIVITY_CATEGORY_SQL: &str = "case
+    when n.kind in ('message','reply','nudge') then 'messages'
+    when n.kind glob 'challenge_*' then 'challenges'
+    when n.kind='completion' then 'deck_completions'
+    else 'study_updates' end";
+
+const ACTION_REQUIRED_SQL: &str = "exists(select 1 from community_members m
+    join community_challenges c on c.id=m.challenge where c.id=n.challenge_id
+    and n.kind='challenge_invite' and m.user=n.recipient and m.status='invited'
+    and c.cancelled=0 and c.end_at>?2)";
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
@@ -118,8 +160,10 @@ pub struct SentPage {
 #[derive(Debug, Serialize)]
 pub struct Activity {
     pub items: Vec<Notification>,
+    pub attention: Vec<Notification>,
     pub unread_count: u64,
     pub action_count: u64,
+    pub latest_id: Option<i64>,
     pub retention_days: u32,
     pub window_days: u32,
     pub next_before: Option<i64>,
@@ -725,7 +769,34 @@ impl Store {
         before: Option<i64>,
         limit: u32,
     ) -> Result<Activity, Error> {
+        self.activity_filtered(
+            user,
+            now_ms,
+            ActivityOptions {
+                days,
+                before,
+                limit,
+                category: None,
+                unread_only: false,
+            },
+        )
+    }
+
+    pub fn activity_filtered(
+        &self,
+        user: &str,
+        now_ms: i64,
+        options: ActivityOptions,
+    ) -> Result<Activity, Error> {
+        let ActivityOptions {
+            days,
+            before,
+            limit,
+            category,
+            unread_only,
+        } = options;
         let cutoff = now_ms - i64::from(days) * 86_400_000;
+        let category = category.map(ActivityCategory::as_str);
         let mut stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n
             where n.recipient=?1 and n.push_only=0 and n.created_at>=?3 and (?4 is null or n.id<?4)
@@ -734,11 +805,22 @@ impl Store {
                 and not exists (select 1 from (select recipient,sender from incoming_muted_senders
                          union all select recipient,sender from sender_unsubscriptions)
                                 where recipient = ?1 and sender = n.sender)))
+            and (?6 is null or (?6='needs_action' and {ACTION_REQUIRED_SQL})
+                or (?6!='needs_action' and ({ACTIVITY_CATEGORY_SQL})=?6))
+            and (?7=0 or n.read_at is null)
             order by n.id desc limit ?5"
         ))?;
         let mut items = stmt
             .query_map(
-                params![user, now_ms, cutoff, before, i64::from(limit) + 1],
+                params![
+                    user,
+                    now_ms,
+                    cutoff,
+                    before,
+                    i64::from(limit) + 1,
+                    category,
+                    unread_only
+                ],
                 notification,
             )?
             .collect::<Result<Vec<_>, _>>()?;
@@ -748,11 +830,20 @@ impl Store {
         } else {
             None
         };
-        let (unread_count, action_count) = self.conn.query_row(
+        let mut attention_stmt = self.conn.prepare(&format!(
+            "select {NOTICE_COLUMNS} from notifications n
+             where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
+             and {ACTION_REQUIRED_SQL}
+             order by n.id desc limit 3"
+        ))?;
+        let attention = attention_stmt
+            .query_map(params![user, now_ms, cutoff], notification)?
+            .collect::<Result<Vec<_>, _>>()?;
+        let (unread_count, action_count, latest_id) = self.conn.query_row(
             "select coalesce(sum(n.read_at is null),0),coalesce(sum(exists(
               select 1 from community_members m join community_challenges c on c.id=m.challenge
               where c.id=n.challenge_id and n.kind='challenge_invite' and m.user=n.recipient
-              and m.status='invited' and c.cancelled=0 and c.end_at>?2)),0)
+              and m.status='invited' and c.cancelled=0 and c.end_at>?2)),0),max(n.id)
              from notifications n where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
              and (n.kind != 'completion' or (n.completion_cancelled = 0
                  and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
@@ -760,12 +851,20 @@ impl Store {
                          union all select recipient,sender from sender_unsubscriptions)
                                  where recipient = ?1 and sender = n.sender)))",
             params![user, now_ms, cutoff],
-            |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)? as u64,
+                    r.get::<_, i64>(1)? as u64,
+                    r.get(2)?,
+                ))
+            },
         )?;
         Ok(Activity {
             items,
+            attention,
             unread_count,
             action_count,
+            latest_id,
             retention_days: ACTIVITY_DAYS,
             window_days: days,
             next_before,
@@ -1227,6 +1326,171 @@ impl Store {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn activity_categories_filter_before_pagination_and_keep_global_unread_count() {
+        let (mut store, _path) = temporary_store();
+        let mut sent = Vec::new();
+        for kind in [
+            "message",
+            "completion",
+            "reply",
+            "challenge_complete",
+            "reminder_daily",
+            "message",
+        ] {
+            sent.push(
+                store
+                    .send(
+                        &Outgoing {
+                            to: "hill",
+                            from: "friend",
+                            title: kind,
+                            body: kind,
+                            kind,
+                        },
+                        DAY,
+                        NOW,
+                    )
+                    .unwrap(),
+            );
+        }
+        store.read_activity("hill", &[sent[2]], NOW).unwrap();
+        let options = ActivityOptions {
+            days: 90,
+            before: None,
+            limit: 1,
+            category: Some(ActivityCategory::Messages),
+            unread_only: false,
+        };
+        let page = store.activity_filtered("hill", NOW, options).unwrap();
+        assert_eq!(page.items[0].id, sent[5]);
+        assert_eq!(page.next_before, Some(sent[5]));
+        assert_eq!(page.unread_count, 5);
+        assert_eq!(page.latest_id, Some(sent[5]));
+        let older = store
+            .activity_filtered(
+                "hill",
+                NOW,
+                ActivityOptions {
+                    before: page.next_before,
+                    ..options
+                },
+            )
+            .unwrap();
+        assert_eq!(older.items[0].id, sent[2]);
+        let unread = store
+            .activity_filtered(
+                "hill",
+                NOW,
+                ActivityOptions {
+                    unread_only: true,
+                    limit: 100,
+                    ..options
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            unread.items.iter().map(|n| n.id).collect::<Vec<_>>(),
+            [sent[5], sent[0]]
+        );
+        for (category, expected) in [
+            (ActivityCategory::DeckCompletions, sent[1]),
+            (ActivityCategory::Challenges, sent[3]),
+            (ActivityCategory::StudyUpdates, sent[4]),
+        ] {
+            let page = store
+                .activity_filtered(
+                    "hill",
+                    NOW,
+                    ActivityOptions {
+                        category: Some(category),
+                        ..options
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                page.items.iter().map(|n| n.id).collect::<Vec<_>>(),
+                [expected]
+            );
+        }
+        assert!(page.attention.is_empty());
+    }
+
+    #[test]
+    fn read_invitation_stays_actionable_until_the_member_responds() {
+        let (mut store, _path) = temporary_store();
+        store
+            .conn
+            .execute(
+                "insert into community_challenges (id,creator,title,kind,cooperative,target,start_at,end_at)
+                 values (1,'friend','Study together','reviews',0,10,?1,?2)",
+                params![NOW, NOW + 86_400_000],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "insert into community_members (challenge,user,status) values (1,'hill','invited')",
+                [],
+            )
+            .unwrap();
+        let id = store
+            .send(
+                &Outgoing {
+                    to: "hill",
+                    from: "friend",
+                    title: "Join me",
+                    body: "Study together",
+                    kind: "challenge_invite",
+                },
+                DAY,
+                NOW,
+            )
+            .unwrap();
+        store
+            .conn
+            .execute("update notifications set challenge_id=1 where id=?1", [id])
+            .unwrap();
+        store.read_activity("hill", &[id], NOW).unwrap();
+        let options = ActivityOptions {
+            days: 90,
+            before: None,
+            limit: 20,
+            category: Some(ActivityCategory::NeedsAction),
+            unread_only: false,
+        };
+        let pending = store.activity_filtered("hill", NOW, options).unwrap();
+        assert_eq!(pending.items[0].id, id);
+        assert_eq!(pending.attention[0].id, id);
+        assert_eq!(pending.action_count, 1);
+        assert_eq!(pending.unread_count, 0);
+        assert!(
+            store
+                .activity_filtered(
+                    "hill",
+                    NOW,
+                    ActivityOptions {
+                        unread_only: true,
+                        ..options
+                    }
+                )
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        store
+            .conn
+            .execute(
+                "update community_members set status='accepted' where challenge=1 and user='hill'",
+                [],
+            )
+            .unwrap();
+        let resolved = store.activity_filtered("hill", NOW, options).unwrap();
+        assert!(resolved.items.is_empty());
+        assert!(resolved.attention.is_empty());
+        assert_eq!(resolved.action_count, 0);
+    }
 
     #[test]
     fn read_all_stops_at_what_the_reader_saw() {

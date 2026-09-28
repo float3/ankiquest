@@ -1045,5 +1045,20 @@
   "Disconnect account": "Konto trennen",
   "Saved across your devices.": "Auf allen deinen Geräten gespeichert.",
   "Choose at least one friend for each shared deck.": "Wähle für jeden geteilten Stapel mindestens einen Freund.",
-  "Account disconnected.": "Konto getrennt."
+  "Account disconnected.": "Konto getrennt.",
+  "All": "Alle",
+  "Needs action": "Handlungsbedarf",
+  "Messages": "Nachrichten",
+  "Challenges": "Herausforderungen",
+  "Deck completions": "Abgeschlossene Stapel",
+  "Study updates": "Lernupdates",
+  "Unread only": "Nur ungelesene",
+  "Yesterday": "Gestern",
+  "No unread notifications here.": "Hier gibt es keine ungelesenen Benachrichtigungen.",
+  "No invitations need a response.": "Keine Einladungen warten auf eine Antwort.",
+  "Nothing in this category yet.": "In dieser Kategorie gibt es noch nichts.",
+  "Everything else is up to date.": "Alles andere ist auf dem neuesten Stand.",
+  "New activity will appear here.": "Neue Aktivitäten erscheinen hier.",
+  "Invitations stay here until you respond, even after you read them.": "Einladungen bleiben hier, bis du antwortest, auch nachdem du sie gelesen hast.",
+  "View all invitations": "Alle Einladungen ansehen"
 }

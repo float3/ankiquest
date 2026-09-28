@@ -25,7 +25,8 @@ async function fixture(t, session = saved, options = {}) {
   page.setDefaultTimeout(10000);
   page.setDefaultNavigationTimeout(15000);
   const errors = [], requests = [];
-  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false };
+  const control = { reject: false, hold: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false,
+    activityItems:(options.activityItems || [{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}]).map(item=>({...item})) };
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(session => {
     window.storageWrites = [];
@@ -62,7 +63,21 @@ async function fixture(t, session = saved, options = {}) {
       data={receiving:control.receiving,automatic_receiving:control.automatic,friends:[{user:'hill',display:'Hill',enabled:true,sent_today:control.nudged,muted_by_me:!!control.muted.hill},{user:'friend',display:'Friend',enabled:false,sent_today:false,muted_by_me:!!control.muted.friend}]};
     }
     else if (url.pathname.startsWith('/api/activity/')) {
-      data = {items:options.activityItems || [{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}], unread_count:1,next_before:options.activityBefore||null};
+      if(url.pathname.endsWith('/read')&&request.method()==='POST') {
+        const body=request.postDataJSON(),ids=new Set(body.ids||[]);
+        for(const item of control.activityItems)if(ids.has(item.id)||(body.through&&item.id<=body.through))item.read_at=Date.now()/1000;
+        return route.fulfill({status:204});
+      }
+      const all=control.activityItems.slice().sort((a,b)=>b.id-a.id),attention=all.filter(item=>item.action_required);
+      let items=all.filter(item=>!url.searchParams.has('before')||item.id<Number(url.searchParams.get('before')));
+      const category=url.searchParams.get('category');
+      if(category==='needs_action')items=items.filter(item=>item.action_required);
+      else if(category==='messages')items=items.filter(item=>['message','reply','nudge'].includes(item.kind));
+      else if(category==='challenges')items=items.filter(item=>item.kind?.startsWith('challenge_'));
+      else if(category==='deck_completions')items=items.filter(item=>item.kind==='completion');
+      else if(category==='study_updates')items=items.filter(item=>!['message','reply','nudge','completion'].includes(item.kind)&&!item.kind?.startsWith('challenge_'));
+      if(url.searchParams.get('unread_only')==='true')items=items.filter(item=>!item.read_at);
+      data={items,attention:attention.slice(0,3),action_count:attention.length,latest_id:all[0]?.id||null,unread_count:all.filter(item=>!item.read_at).length,next_before:options.activityBefore||null};
     }
     else if (url.pathname.startsWith('/api/reply/')) {
       control.replies.push({auth:request.headers().authorization,body:request.postDataJSON()});
@@ -166,6 +181,46 @@ test('activity suggests congratulations only for deck completions and thanks for
   await reply.getByRole('button',{name:'Thanks!'}).click();
   await page.locator('#activity-action-status').filter({hasText:'reply was sent'}).waitFor();
   assert.deepEqual(control.replies.at(-1).body,{notification:2,message:'Thanks!'});
+});
+
+test('activity filters keep read invitations actionable and mark all across categories', async t => {
+  const now=Math.floor(Date.now()/1000);
+  const {page,control}=await fixture(t,saved,{activityItems:[
+    {id:1,sender:'hill',kind:'message',title:'A message',body:'Hello',created_at:now,read_at:null},
+    {id:2,sender:'hill',kind:'completion',title:'Deck complete',body:'Spanish done',created_at:now,read_at:null},
+    {id:3,sender:'hill',kind:'challenge_invite',title:'Study together',body:'Join me',created_at:now,read_at:now,challenge_id:42,action_required:true},
+    {id:4,sender:'',kind:'reminder_daily',title:'Study reminder',body:'Keep going',created_at:now,read_at:now},
+  ]});
+  await page.goto(`${origin}/community#activity`);
+  const inbox=page.locator('#view-activity');
+  await inbox.getByRole('heading',{name:/Needs action/}).waitFor();
+  for(const width of [320,390,1440]){
+    await page.setViewportSize({width,height:844});
+    const overflow=await page.evaluate(()=>({viewport:innerWidth,content:document.documentElement.scrollWidth}));
+    assert(overflow.content<=overflow.viewport,`Activity must fit ${width}px: ${JSON.stringify(overflow)}`);
+  }
+  assert.equal(await inbox.locator('.activity-attention-item').count(),1,'read invitation still needs action');
+  await inbox.locator('[data-activity-category=deck_completions]').click();
+  await inbox.locator('.activity-item[data-notice="2"]').waitFor();
+  assert.equal(await inbox.locator('.activity-item[data-notice="1"]').count(),0);
+  await inbox.locator('[data-activity-unread]').click();
+  await inbox.locator('.activity-item[data-notice="2"]').waitFor();
+  await inbox.locator('[data-activity-category=study_updates]').click();
+  await inbox.getByText('No unread notifications here.',{exact:true}).waitFor();
+  await page.getByRole('tab',{name:'Friends',exact:true}).click();
+  await page.getByRole('region',{name:"Friends' achievements",exact:true}).getByText('Spanish done',{exact:true}).waitFor();
+  await page.getByRole('tab',{name:'Activity',exact:false}).click();
+  await inbox.locator('[data-activity-unread]').click();
+  await inbox.locator('.activity-item[data-notice="4"]').waitFor();
+  await inbox.locator('[data-activity-category=needs_action]').click();
+  await inbox.locator('.activity-item[data-notice="3"]').waitFor();
+  await inbox.locator('[data-activity-category=deck_completions]').click();
+  await inbox.locator('.activity-item[data-notice="2"]').waitFor();
+  await inbox.locator('[data-activity-read-all]').click();
+  await inbox.locator('[data-activity-read-all]').waitFor({state:'detached'});
+  assert(control.activityItems.every(item=>item.read_at),'mark all includes notifications outside the selected category');
+  await inbox.locator('[data-activity-category=all]').click();
+  await inbox.getByRole('heading',{name:/Needs action/}).waitFor();
 });
 
 test('late native credentials connect, while explicit disconnect survives repeated auth events', async t => {

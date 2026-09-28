@@ -1041,5 +1041,20 @@
   "Disconnect account": "Desconectar cuenta",
   "Saved across your devices.": "Guardado en todos tus dispositivos.",
   "Choose at least one friend for each shared deck.": "Elige al menos un amigo por cada mazo compartido.",
-  "Account disconnected.": "Cuenta desconectada."
+  "Account disconnected.": "Cuenta desconectada.",
+  "All": "Todas",
+  "Needs action": "Requieren acción",
+  "Messages": "Mensajes",
+  "Challenges": "Desafíos",
+  "Deck completions": "Mazos completados",
+  "Study updates": "Novedades de estudio",
+  "Unread only": "Solo sin leer",
+  "Yesterday": "Ayer",
+  "No unread notifications here.": "No hay notificaciones sin leer aquí.",
+  "No invitations need a response.": "No hay invitaciones pendientes de respuesta.",
+  "Nothing in this category yet.": "Todavía no hay nada en esta categoría.",
+  "Everything else is up to date.": "Todo lo demás está al día.",
+  "New activity will appear here.": "La actividad nueva aparecerá aquí.",
+  "Invitations stay here until you respond, even after you read them.": "Las invitaciones permanecen aquí hasta que respondas, aunque ya las hayas leído.",
+  "View all invitations": "Ver todas las invitaciones"
 }

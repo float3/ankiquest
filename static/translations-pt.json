@@ -1045,5 +1045,20 @@
   "Disconnect account": "Desligar conta",
   "Saved across your devices.": "Guardado em todos os teus dispositivos.",
   "Choose at least one friend for each shared deck.": "Escolhe pelo menos um amigo para cada baralho partilhado.",
-  "Account disconnected.": "Conta desligada."
+  "Account disconnected.": "Conta desligada.",
+  "All": "Todas",
+  "Needs action": "Precisam de ação",
+  "Messages": "Mensagens",
+  "Challenges": "Desafios",
+  "Deck completions": "Baralhos concluídos",
+  "Study updates": "Atualizações de estudo",
+  "Unread only": "Apenas não lidas",
+  "Yesterday": "Ontem",
+  "No unread notifications here.": "Não há notificações não lidas aqui.",
+  "No invitations need a response.": "Não há convites à espera de resposta.",
+  "Nothing in this category yet.": "Ainda não há nada nesta categoria.",
+  "Everything else is up to date.": "Tudo o resto está em dia.",
+  "New activity will appear here.": "As novas atividades aparecerão aqui.",
+  "Invitations stay here until you respond, even after you read them.": "Os convites permanecem aqui até responderes, mesmo depois de os leres.",
+  "View all invitations": "Ver todos os convites"
 }

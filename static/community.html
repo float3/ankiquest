@@ -62,7 +62,8 @@ const amount = value => Math.max(0, Number(value) || 0);
 const months = Array.from({length:12}, (_, i) => new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",timeZone:"UTC"}).format(new Date(Date.UTC(2024,i,1))));
 const now = new Date();
 const initialPeriod = new URLSearchParams(location.search).get("period");
-const state = { data:null, view:"challenges", challengeId:null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day", recordScope:"all", matchupA:"", matchupB:"", request:0, session:null, nativeSession:false, nativeDisconnected:false, reminders:null, reminderDraft:null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null, activity:null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox", sent:null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null, challengeStatus:"", challengeError:false };
+const state = { data:null, view:"challenges", challengeId:null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day", recordScope:"all", matchupA:"", matchupB:"", request:0, session:null, nativeSession:false, nativeDisconnected:false, reminders:null, reminderDraft:null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null, activity:null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox", activityCategory:"all", activityUnreadOnly:false, friendAchievements:null, achievementError:"", achievementLoading:false, achievementEpoch:0, sent:null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null, challengeStatus:"", challengeError:false };
+const activityCategories = [["all",aqText("All")],["needs_action",aqText("Needs action")],["messages",aqText("Messages")],["challenges",aqText("Challenges")],["deck_completions",aqText("Deck completions")],["study_updates",aqText("Study updates")]];
 let nativeAccountCleared = false;
 const reminderDefinitions = [
   ["gentle_daily",aqText("Gentle daily reminder"),aqText("A friendly nudge when you haven’t studied yet.")],
@@ -106,6 +107,7 @@ function showView(view,focus=false) {
   if(focus) $("tab-"+view).focus();
   if(["challenges","reminders","activity"].includes(view)) renderPrivate();
   if(view==="activity"&&state.session&&!state.activity&&!state.activityLoading)loadActivity();
+  if(view==="challenges"&&state.session&&!state.friendAchievements&&!state.achievementLoading)loadFriendAchievements();
 }
 function renderOverview() {
   const data=state.data, players=selectedPlayers(), summaries=yearly(), awards=data.awards.filter(item=>!state.player||item.user===state.player);
@@ -277,8 +279,8 @@ function renderChallenges(banner) {
     (ended.length ? aqHtml`<details class="card challenge-history"><summary>Previous goals (${number(ended.length)})</summary><div class="stack">${ended.map(item => renderChallenge(item)).join("")}</div></details>` : "") + renderFriendAchievements();
 }
 function renderFriendAchievements() {
-  const items = (state.activity?.items || []).filter(item => item.kind === "completion" && item.sender && item.sender !== state.session.user);
-  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and chose to share with you.</p></div><button type="button" data-activity-refresh ${state.activityLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.activityError ? aqHtml`<p class="notice error" role="alert">${esc(state.activityError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div><span class="chip green">Deck complete</span></div><p>${esc(item.body)}</p>${item.replied ? aqHtml(['<p class="settings-hint">Congratulations sent</p>']) : aqHtml(['<button type="button" data-congratulate>Congratulate</button>'])}<p class="status" role="status"></p></article>`).join("") : state.activityLoading ? aqHtml(['<p role="status">Loading achievements…</p>']) : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.activity?.next_before ? aqHtml`<button type="button" data-activity-more ${state.activityLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.activity?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only completions shared with your account appear here.</p></section>`;
+  const items = (state.friendAchievements?.items || []).filter(item => item.kind === "completion" && item.sender && item.sender !== state.session.user);
+  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and chose to share with you.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div><span class="chip green">Deck complete</span></div><p>${esc(item.body)}</p>${item.replied ? aqHtml(['<p class="settings-hint">Congratulations sent</p>']) : aqHtml(['<button type="button" data-congratulate>Congratulate</button>'])}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml(['<p role="status">Loading achievements…</p>']) : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.friendAchievements?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only completions shared with your account appear here.</p></section>`;
 }
 function renderChallenge(challenge, detail = false) {
   const me = challenge.members.find(member => member.user === state.session.user), ended = challengeEnded(challenge);
@@ -315,7 +317,23 @@ function renderActivity(banner) {
   $("view-activity").innerHTML = banner + aqHtml`<div class="card-head friend-heading"><div><h2>Your activity</h2><p>Invitations, encouragement, and study updates.</p></div><button type="button" data-activity-refresh ${state.activityLoading ? "disabled" : ""}>Refresh</button></div>${state.activityError ? aqHtml`<p class="notice error" role="alert">${esc(state.activityError)}</p>` : ""}<p id="activity-action-status" class="status" role="status"></p>${renderMailbox(payload, unread)}${state.activityBox === "sent" ? renderSent() : renderInbox(payload, items)}`;
 }
 function renderInbox(payload, items) {
-  return aqHtml`${payload?.legacy ? aqHtml(['<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>']) : aqHtml(['<label class="activity-window">Show <select id="activity-window"><option value="30" ']) + (state.activityDays === 30 ? "selected" : "") + aqHtml(['>Last 30 days</option><option value="90" ']) + (state.activityDays === 90 ? "selected" : "") + aqHtml(['>Last 90 days</option></select></label>'])}<div class="stack activity-list">${items.length ? items.map(renderActivityItem).join("") : state.activityLoading ? aqHtml(['<p role="status">Loading…</p>']) : empty(aqText("You're all caught up."), aqText("Invitations and encouragement will stay here after you dismiss a phone notification."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
+  const attention=Array.isArray(payload?.attention)?payload.attention:[];
+  const showAttention=state.activityCategory==="all"&&attention.length>0;
+  const visible=showAttention?items.filter(item=>!attention.some(important=>important.id===item.id)):items;
+  const categories=payload?.legacy?"":aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories.map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
+  const emptyText=state.activityUnreadOnly?aqText("No unread notifications here."):state.activityCategory==="needs_action"?aqText("No invitations need a response."):state.activityCategory!=="all"?aqText("Nothing in this category yet."):showAttention?aqText("Everything else is up to date."):aqText("You're all caught up.");
+  return aqHtml`${renderAttention(payload)}${categories}${payload?.legacy ? aqHtml(['<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>']) : aqHtml(['<label class="activity-window">Show <select id="activity-window"><option value="30" ']) + (state.activityDays === 30 ? "selected" : "") + aqHtml(['>Last 30 days</option><option value="90" ']) + (state.activityDays === 90 ? "selected" : "") + aqHtml(['>Last 90 days</option></select></label>'])}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml(['<p role="status">Loading…</p>']) : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
+}
+function renderAttention(payload) {
+  if(!payload?.action_count || state.activityCategory==="needs_action")return "";
+  const count=Number(payload.action_count),attention=Array.isArray(payload.attention)?payload.attention:[];
+  if(state.activityCategory!=="all")return "";
+  return aqHtml`<section class="activity-attention" aria-labelledby="activity-attention-title"><div class="card-head"><div><h3 id="activity-attention-title">${aqText("Needs action")} <span class="count-badge">${number(count)}</span></h3><p>${aqText("Invitations stay here until you respond, even after you read them.")}</p></div></div><div class="stack">${attention.map(item=>aqHtml`<article class="card activity-attention-item"><strong>${esc(item.title)}</strong><p>${esc(item.body)}</p><button type="button" class="primary" data-activity-challenge="${Number(item.challenge_id)}" data-notice-id="${Number(item.id)}">${aqText("View invitation")}</button></article>`).join("")}</div>${count>attention.length?aqHtml`<button type="button" data-activity-category="needs_action">${aqText("View all invitations")}</button>`:""}</section>`;
+}
+function renderActivityDays(items) {
+  let previous="";
+  const today=new Date(),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
+  return items.map(item=>{const date=new Date(Number(item.created_at)*1000),key=date.toDateString();const heading=key!==previous?aqHtml`<h3 class="activity-day">${esc(key===today.toDateString()?aqText("Today"):key===yesterday.toDateString()?aqText("Yesterday"):new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",day:"numeric",year:"numeric"}).format(date))}</h3>`:"";previous=key;return heading+renderActivityItem(item);}).join("");
 }
 function renderMailbox(payload, unread) {
   const box = state.activityBox;
@@ -377,9 +395,9 @@ function connect() {
 addEventListener("ankiquest:locked",()=>{state.nativeDisconnected=true;if(!state.disconnecting)delete window.ankiquestSession;clearPrivate();});
 function clearPrivate() {
   AnkiQuestAvatars.close();
-  state.authEpoch++;state.privateEpoch++;state.reminderEpoch++;state.activityEpoch++;
+  state.authEpoch++;state.privateEpoch++;state.reminderEpoch++;state.activityEpoch++;state.achievementEpoch++;
   state.nativeSession=false;state.session=null;state.reminders=null;state.reminderDraft=null;state.reminderSaving=false;state.reminderStatus="";state.reminderError=false;
-  state.challenges=null;state.activity=null;state.activityError="";state.activityLoading=false;state.activityBox="inbox";state.sent=null;state.sentError="";state.sentLoading=false;state.sentEpoch++;state.privateLoading=false;state.privateError="";
+  state.challenges=null;state.activity=null;state.activityError="";state.activityLoading=false;state.activityBox="inbox";state.activityCategory="all";state.activityUnreadOnly=false;state.friendAchievements=null;state.achievementError="";state.achievementLoading=false;state.sent=null;state.sentError="";state.sentLoading=false;state.sentEpoch++;state.privateLoading=false;state.privateError="";
   state.challengeStatus="";state.challengeError=false;state.challengeSaving=false;state.connectionError="";
   $("activity-count").hidden=true;$("connect-button").textContent=aqText("Connect account");
   if($("auth-dialog").open)$("auth-dialog").close();
@@ -398,7 +416,7 @@ function connectNativeSession() {
   if(state.session&&(!state.nativeSession||(state.session.user===candidate.user&&state.session.token===candidate.token)))return true;
   clearPrivate();state.session=candidate;state.nativeSession=true;
   $("connect-button").textContent=name(candidate.user);$("connect-button").className="auth-name";
-  loadPrivate();loadActivity();
+  loadPrivate();loadActivity();loadFriendAchievements();
   return true;
 }
 addEventListener("ankiquest-auth",()=>{const saved=window.ankiquestSession;nativeAccountCleared=!(typeof saved?.user==="string"&&saved.user&&typeof saved.token==="string"&&saved.token.trim());if(nativeAccountCleared)clearPrivate();else connectNativeSession();});
@@ -411,20 +429,42 @@ async function restoreMember() {
   if(!session){if(state.session&&!state.session.token)clearPrivate();return;}
   if(state.session?.user===session.user)return;
   clearPrivate();state.session=session;$("connect-button").textContent=name(session.user);
-  await Promise.all([loadPrivate(),loadActivity()]);
+  await Promise.all([loadPrivate(),loadActivity(),loadFriendAchievements()]);
 }
 addEventListener("ankiquest:identity",()=>{if(!state.connecting)restoreMember();});
+async function loadFriendAchievements(more=false) {
+  const session=state.session;if(!session||state.achievementLoading)return;
+  const epoch=++state.achievementEpoch,before=more?state.friendAchievements?.next_before:null;
+  state.achievementLoading=true;state.achievementError="";
+  if(state.challenges)renderChallenges(accountBanner());
+  try {
+    const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
+    let payload;
+    try { payload=await ownerRequest(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
+    catch(error) {
+      if(error.status===400)payload=await ownerRequest(base+(before?"&before="+encodeURIComponent(before):""),undefined,session);
+      else if(error.status===404){const items=await ownerRequest(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);payload={items:items.slice().reverse(),next_before:null,legacy:true};}
+      else throw error;
+    }
+    if(state.session!==session||epoch!==state.achievementEpoch)return;
+    const items=(Array.isArray(payload.items)?payload.items:[]).filter(item=>item.kind==="completion");
+    state.friendAchievements={...payload,items:before?[...(state.friendAchievements?.items||[]),...items.filter(item=>!state.friendAchievements.items.some(old=>old.id===item.id))]:items};
+  } catch(error) { if(state.session===session&&epoch===state.achievementEpoch)state.achievementError=error instanceof TypeError?aqText("Could not refresh activity. Check your connection; nothing has been marked read."):error.message; }
+  finally { if(state.session===session&&epoch===state.achievementEpoch){state.achievementLoading=false;if(state.challenges)renderChallenges(accountBanner());} }
+}
 async function loadActivity(more=false) {
   const session=state.session;if(!session||state.activityLoading)return;
   const epoch=++state.activityEpoch,before=more?state.activity?.next_before:null;
   state.activityLoading=true;state.activityError="";renderActivity(accountBanner());
   try {
     let payload;
-    try { payload=await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
+    const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
+    const filters=`${state.activityCategory!=="all"?"&category="+encodeURIComponent(state.activityCategory):""}${state.activityUnreadOnly?"&unread_only=true":""}`;
+    try { payload=await ownerRequest(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session); }
     catch(error) {
-      if(error.status!==404)throw error;
-      const items=await ownerRequest(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);
-      payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};
+      if(error.status===400&&filters){state.activityCategory="all";state.activityUnreadOnly=false;payload=await ownerRequest(base,undefined,session);}
+      else if(error.status===404){const items=await ownerRequest(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);state.activityCategory="all";state.activityUnreadOnly=false;payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};}
+      else throw error;
     }
     if(state.session!==session||epoch!==state.activityEpoch)return;
     const items=Array.isArray(payload.items)?payload.items:[];
@@ -445,13 +485,13 @@ async function loadSent(more=false) {
   finally { if(state.session===session&&epoch===state.sentEpoch){state.sentLoading=false;renderActivity(accountBanner());} }
 }
 async function markAllRead(button) {
-  const session=state.session,through=Math.max(0,...(state.activity?.items||[]).map(item=>Number(item.id)).filter(Number.isSafeInteger));
+  const session=state.session,through=Number(state.activity?.latest_id)||Math.max(0,...(state.activity?.items||[]).map(item=>Number(item.id)).filter(Number.isSafeInteger));
   if(!session||!through||state.activity?.legacy)return;
   button.disabled=true;
   try {
     await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{through},session);
     if(state.session!==session)return;
-    const readAt=Date.now()/1000;for(const item of state.activity.items)if(!item.read_at)item.read_at=readAt;
+    const readAt=Date.now()/1000;for(const item of [...state.activity.items,...(state.activity.attention||[]),...(state.friendAchievements?.items||[])])if(!item.read_at&&Number(item.id)<=through)item.read_at=readAt;
     await loadActivity();
   } catch(error) { if(state.session!==session)return;button.disabled=false;const status=$("activity-action-status");if(status){status.className="status error";status.textContent=aqText("Could not mark everything read.")+" "+error.message;} }
 }
@@ -459,8 +499,10 @@ async function markRead(id,rerender=true) {
   const session=state.session;if(!session||state.activity?.legacy)return;
   await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{ids:[Number(id)]},session);
   if(state.session!==session)return;
-  const item=state.activity?.items.find(item=>Number(item.id)===Number(id));
-  if(item&&!item.read_at){item.read_at=Date.now()/1000;state.activity.unread_count=Math.max(0,(state.activity.unread_count||0)-1);}
+  const matches=[...(state.activity?.items||[]),...(state.activity?.attention||[]),...(state.friendAchievements?.items||[])].filter(item=>Number(item.id)===Number(id));
+  if(matches.some(item=>!item.read_at)&&state.activity)state.activity.unread_count=Math.max(0,(state.activity.unread_count||0)-1);
+  for(const item of matches)item.read_at=Date.now()/1000;
+  if(state.activityUnreadOnly&&state.activity)state.activity.items=state.activity.items.filter(item=>Number(item.id)!==Number(id));
   if(rerender)renderActivity(accountBanner());
 }
 async function handleActivity(button) {
@@ -488,10 +530,10 @@ async function sendActivityReply(form,message) {
   try {
     await ownerRequest(`/api/reply/${encodeURIComponent(session.user)}`,{notification:id,message},session);
     if(state.session!==session)return;
-    const item=state.activity?.items.find(item=>Number(item.id)===id);if(item)item.replied=true;
+    for(const item of [...(state.activity?.items||[]),...(state.friendAchievements?.items||[])])if(Number(item.id)===id)item.replied=true;
     // Sending a reply succeeded even if a separate read-status request fails.
     try { await markRead(id,false); } catch(_) {}
-    if(state.session===session){renderActivity(accountBanner());$("activity-action-status").textContent=aqText("Your reply was sent.");}
+    if(state.session===session){renderActivity(accountBanner());if(state.challenges)renderChallenges(accountBanner());$("activity-action-status").textContent=aqText("Your reply was sent.");}
   } catch(error) { if(state.session===session){status.className="status error";status.textContent="Reply not sent. "+error.message;} }
   finally { delete form.dataset.sending;form.querySelectorAll("button,input").forEach(control=>control.disabled=false); }
 }
@@ -537,7 +579,11 @@ document.addEventListener("click",event=>{
   if(button.hasAttribute("data-create-challenge"))openChallengeCreator();
   if(button.hasAttribute("data-activity-refresh")){loadActivity();if(state.activityBox==="sent")loadSent();}
   if(button.hasAttribute("data-activity-more"))loadActivity(true);
+  if(button.hasAttribute("data-achievements-refresh"))loadFriendAchievements();
+  if(button.hasAttribute("data-achievements-more"))loadFriendAchievements(true);
   if(button.dataset.activityBox){state.activityBox=button.dataset.activityBox==="sent"?"sent":"inbox";if(state.activityBox==="sent"&&!state.sent)loadSent();else renderActivity(accountBanner());}
+  if(button.dataset.activityCategory&&button.dataset.activityCategory!==state.activityCategory){state.activityCategory=button.dataset.activityCategory;state.activity=null;loadActivity();}
+  if(button.hasAttribute("data-activity-unread")){state.activityUnreadOnly=!state.activityUnreadOnly;state.activity=null;loadActivity();}
   if(button.hasAttribute("data-activity-read-all"))markAllRead(button);
   if(button.hasAttribute("data-sent-more"))loadSent(true);
   if(button.dataset.markRead||button.dataset.activityChallenge)handleActivity(button);
@@ -549,7 +595,7 @@ $("player-filter").addEventListener("change",event=>{state.player=event.target.v
 $("year-filter").addEventListener("change",event=>{state.year=Number(event.target.value);loadData();});
 $("month-filter").addEventListener("change",event=>{state.month=Number(event.target.value);loadData();});
 document.addEventListener("change",event=>{
-  if(event.target.id==="activity-window"){state.activityDays=Number(event.target.value);state.activity=null;loadActivity();}
+  if(event.target.id==="activity-window"){state.activityDays=Number(event.target.value);state.activityEpoch++;state.activityLoading=false;state.achievementEpoch++;state.achievementLoading=false;state.activity=null;state.friendAchievements=null;loadActivity();loadFriendAchievements();}
   if(event.target.form?.id==="reminder-form"&&!state.reminderSaving){state.reminderDraft=reminderFormValues(event.target.form);state.reminderStatus="";state.reminderError=false;$("reminder-status").textContent="";}
   if(event.target.id==="matchup-a"){state.matchupA=event.target.value;renderMatchup();}
   if(event.target.id==="matchup-b"){state.matchupB=event.target.value;renderMatchup();}
@@ -566,7 +612,7 @@ $("auth-dialog").addEventListener("close",()=>{state.authEpoch++;$("auth-token")
 $("auth-form").addEventListener("submit",async event=>{
   event.preventDefault();const user=$("auth-user").value,token=$("auth-token").value.trim();if(!user||!token)return;
   const epoch=++state.authEpoch;state.connecting=true;$("auth-token").value="";$("auth-submit").disabled=true;$("auth-message").className="status";$("auth-message").textContent=aqText("Connecting…");
-  try { const candidate={user,token},reminders=await privateRequest("reminders",undefined,candidate);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;const session=await AnkiQuestSite.connectMember(user,token,()=>epoch===state.authEpoch&&$("auth-dialog").open);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;state.session=session;state.reminders=reminders;$("auth-dialog").close();$("connect-button").textContent=name(user);$("connect-button").className="auth-name";await Promise.all([loadPrivate(),loadActivity()]); }
+  try { const candidate={user,token},reminders=await privateRequest("reminders",undefined,candidate);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;const session=await AnkiQuestSite.connectMember(user,token,()=>epoch===state.authEpoch&&$("auth-dialog").open);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;state.session=session;state.reminders=reminders;$("auth-dialog").close();$("connect-button").textContent=name(user);$("connect-button").className="auth-name";await Promise.all([loadPrivate(),loadActivity(),loadFriendAchievements()]); }
   catch(error){if(epoch===state.authEpoch&&$("auth-dialog").open){$("auth-message").className="status error";$("auth-message").textContent=error.message.replace(aqText("Disconnect and connect again with the correct token."),aqText("Check the token and try again."));}}
   finally{state.connecting=false;$("auth-submit").disabled=false;}
 });
