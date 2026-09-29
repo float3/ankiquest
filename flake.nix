@@ -52,6 +52,7 @@
         week_timezone = cfg.weekTimezone;
         week_rollover_hour = cfg.weekRolloverHour;
         competition_start_date = cfg.competitionStartDate;
+        review_weighting = cfg.reviewWeighting;
         private_site = cfg.privateSite;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
@@ -150,6 +151,11 @@
           type = lib.types.nullOr lib.types.str;
           default = null;
           description = "Optional YYYY-MM-DD competition start date. Null uses the earliest available review history.";
+        };
+        reviewWeighting = lib.mkOption {
+          type = lib.types.enum ["flat" "diminishing"];
+          default = "flat";
+          description = "How review XP is weighted. \"flat\" pays every answer its full rate, with 6 XP learning and relearning steps. \"diminishing\" pays 9 XP learning steps and halves the XP of each further answer of the same card on the same day. XP is recalculated from history, so changing this rewrites past XP.";
         };
         users = lib.mkOption {
           type = lib.types.attrsOf user;

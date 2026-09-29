@@ -1,7 +1,8 @@
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::sync::OnceLock;
 
 pub(crate) const SESSION_GAP_MS: i64 = 300_000;
 const MATURE_IVL: i64 = 21;
@@ -9,6 +10,10 @@ pub const MAX_FREEZES: u32 = 3;
 const QUEST_XP: u64 = 50;
 const ALL_QUESTS_XP: u64 = 100;
 const RECENT_DAYS: usize = 14;
+/// Under diminishing weighting, each further answer of the same card on the same
+/// day is worth this much of the last one, so repeating a card you keep failing
+/// cannot out-earn learning it once.
+const REPEAT_DECAY: f64 = 0.5;
 /// How close something has to be before a nudge mentions it, in XP.
 const WITHIN_REACH: u64 = 150;
 const NUDGE_FROM_HOUR: i64 = 9;
@@ -933,13 +938,42 @@ fn gen_quests(seed: u64, day: i64, recent: &VecDeque<DayStats>) -> Vec<Quest> {
     quests
 }
 
+/// How review XP is weighted, chosen once per server with `review_weighting`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewWeighting {
+    /// Every answer earns its full type rate; learning and relearning steps are 6 XP.
+    #[default]
+    Flat,
+    /// Learning steps are 9 XP, and answering the same card again on the same day
+    /// is worth half as much each time.
+    Diminishing,
+}
+
+static REVIEW_WEIGHTING: OnceLock<ReviewWeighting> = OnceLock::new();
+
+/// Sets the server's review weighting. Only the first call has any effect.
+pub fn set_review_weighting(weighting: ReviewWeighting) {
+    let _ = REVIEW_WEIGHTING.set(weighting);
+}
+
+fn review_weighting() -> ReviewWeighting {
+    REVIEW_WEIGHTING.get().copied().unwrap_or_default()
+}
+
+#[cfg(test)]
 fn review_base_xp(r: &Review) -> f64 {
+    review_base_xp_with(r, ReviewWeighting::Flat)
+}
+
+fn review_base_xp_with(r: &Review, weighting: ReviewWeighting) -> f64 {
     if r.time_ms < 500 {
         return 1.0;
     }
-    let base = match r.kind {
-        1 => 10.0,
-        0 | 2 => 6.0,
+    let base = match (r.kind, weighting) {
+        (1, _) => 10.0,
+        (0, ReviewWeighting::Diminishing) => 9.0,
+        (0 | 2, _) => 6.0,
         _ => 2.0,
     };
     if r.last_ivl >= MATURE_IVL {
@@ -954,13 +988,22 @@ fn collect_days(
     reviews: &[Review],
     clock: &Clock,
 ) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
-    collect_days_with_quests(reviews, clock, 0)
+    collect_days_weighted(reviews, clock, 0, ReviewWeighting::Flat)
 }
 
 fn collect_days_with_quests(
     reviews: &[Review],
     clock: &Clock,
     seed: u64,
+) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
+    collect_days_weighted(reviews, clock, seed, review_weighting())
+}
+
+fn collect_days_weighted(
+    reviews: &[Review],
+    clock: &Clock,
+    seed: u64,
+    weighting: ReviewWeighting,
 ) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
     let mut days: BTreeMap<i64, DayStats> = BTreeMap::new();
     let mut earned: Vec<(i64, f64)> = Vec::new();
@@ -971,10 +1014,12 @@ fn collect_days_with_quests(
     let mut counted_day = None;
     let mut recent = VecDeque::new();
     let mut quests = Vec::new();
+    let mut answers: HashMap<i64, i32> = HashMap::new();
     for r in reviews {
         let day = clock.day(r.id);
         let hour = clock.hour(r.id);
         if counted_day != Some(day) {
+            answers.clear();
             if let Some(previous) = counted_day.and_then(|d| days.get(&d)) {
                 recent.push_back(previous.clone());
                 if recent.len() > RECENT_DAYS {
@@ -1022,7 +1067,15 @@ fn collect_days_with_quests(
         if hour >= 23 || !morning {
             s.late = true;
         }
-        let xp = review_base_xp(r) * (1.0 + combo.min(100) as f64 / 200.0);
+        let decay = match weighting {
+            ReviewWeighting::Flat => 1.0,
+            ReviewWeighting::Diminishing => {
+                let again = answers.entry(r.cid).or_insert(0);
+                *again += 1;
+                REPEAT_DECAY.powi(*again - 1)
+            }
+        };
+        let xp = review_base_xp_with(r, weighting) * decay * (1.0 + combo.min(100) as f64 / 200.0);
         s.review_xp += xp;
         earned.push((r.id, xp));
         if s.quests_completed_at.is_none() && quests.iter().all(|q| q.progress(s) >= q.target) {
@@ -2265,6 +2318,92 @@ mod tests {
                 assert!((xp - 6.03).abs() < 1e-9, "kind {kind} earned {xp}");
             }
         }
+    }
+
+    #[test]
+    fn diminishing_weighting_pays_less_for_each_repeat_of_a_card() {
+        let answer = |day: i64, index: i64, cid: i64| Review {
+            id: day * DAY_MS + NOON + index * 10_000,
+            cid,
+            last_ivl: 0,
+            time_ms: 5_000,
+            kind: 1,
+        };
+        let run = |reviews: &[Review]| {
+            collect_days_weighted(reviews, &utc(), 0, ReviewWeighting::Diminishing).2
+        };
+        let total = |earned: &[(i64, f64)]| earned.iter().map(|(_, xp)| xp).sum::<f64>();
+
+        let stuck: Vec<Review> = (0..6).map(|i| answer(1, i, 7)).collect();
+        let repeated = run(&stuck);
+        for index in 1..repeated.len() {
+            assert!(
+                repeated[index].1 < repeated[index - 1].1,
+                "answer {index} should pay less than the one before it"
+            );
+        }
+        assert!(
+            total(&repeated) < 3.0 * repeated[0].1,
+            "one card cannot be farmed"
+        );
+
+        let varied: Vec<Review> = (0..6).map(|i| answer(1, i, 7 + i)).collect();
+        assert!(
+            total(&run(&varied)) > 2.0 * total(&repeated),
+            "studying six cards must beat answering one card six times"
+        );
+
+        let fresh = run(&[answer(1, 0, 7), answer(2, 0, 7)]);
+        assert_eq!(fresh[0].1, fresh[1].1, "a new day starts the card over");
+    }
+
+    #[test]
+    fn diminishing_weighting_pays_learning_about_as_much_as_a_review() {
+        let answer = |index: i64, kind: u8, last_ivl: i64| Review {
+            id: DAY_MS + NOON + index * 600_000,
+            cid: 7,
+            last_ivl,
+            time_ms: 5_000,
+            kind,
+        };
+        let run = |reviews: &[Review]| {
+            collect_days_weighted(reviews, &utc(), 0, ReviewWeighting::Diminishing).2
+        };
+        let learning = run(&[answer(0, 0, 0), answer(1, 0, 0), answer(2, 0, 0)]);
+        let learned: f64 = learning.iter().map(|(_, xp)| xp).sum();
+        let known = run(&[answer(0, 1, 30)])[0].1;
+        assert!(
+            (learned - known).abs() < 2.0,
+            "learning {learned}, knowing {known}"
+        );
+        assert!(
+            learning[0].1 < known,
+            "a single learning step is not a whole review"
+        );
+
+        let lapse = run(&[answer(0, 1, 30), answer(1, 2, 0), answer(2, 2, 0)]);
+        let relearning: f64 = lapse[1..].iter().map(|(_, xp)| xp).sum();
+        assert!(
+            relearning < lapse[0].1 / 2.0,
+            "relearning {relearning} vs {}",
+            lapse[0].1
+        );
+    }
+
+    #[test]
+    fn review_weighting_defaults_to_flat_in_config() {
+        #[derive(Deserialize)]
+        struct C {
+            #[serde(default)]
+            w: ReviewWeighting,
+        }
+        let parse = |s: &str| serde_json::from_str::<C>(s).unwrap().w;
+        assert_eq!(parse("{}"), ReviewWeighting::Flat);
+        assert_eq!(parse(r#"{"w":"flat"}"#), ReviewWeighting::Flat);
+        assert_eq!(
+            parse(r#"{"w":"diminishing"}"#),
+            ReviewWeighting::Diminishing
+        );
     }
 
     #[test]
