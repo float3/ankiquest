@@ -108,19 +108,26 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki"):
     hours.setSuffix(" h")
     layout.addWidget(_row(QLabel(tr("Warn me before my streak ends")), hours))
 
+    channel = QComboBox()
+    for value, title in (("stable", tr("Stable releases")), ("nightly", tr("Nightly builds (untested)"))):
+        channel.addItem(title, value)
+    channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
+    layout.addWidget(_row(QLabel(tr("Update channel")), channel))
+
     test = QPushButton(tr("Test connection"))
-    test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours)))
+    test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
     upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
     layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
 
     if not dialog.exec():
         return None
-    return _values(url, user, token, rank, hours)
+    return _values(url, user, token, rank, hours, channel)
 
 
-def _values(url, user, token, rank, hours):
+def _values(url, user, token, rank, hours, channel):
     return {
+        "update_channel": channel.currentData() or "stable",
         "url": url.text().strip(),
         "user": user.text().strip(),
         "token": token.text().strip(),

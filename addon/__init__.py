@@ -1,11 +1,14 @@
+import tempfile
 import time
+from pathlib import Path
+
 import anki.lang
 
 from aqt import gui_hooks, mw
 from aqt.qt import QAction
 from aqt.utils import openLink, tooltip
 
-from . import board, notify, ui, web
+from . import board, notify, ui, updates, web
 from .language import tr
 from .client import (
     MAX_PENDING,
@@ -25,6 +28,8 @@ SHARED_KEY = "ankiquestSharedDecks"
 ORDER_KEY = "ankiquestLastOrder"
 INBOX_KEY = "ankiquestInboxCursor"
 STREAK_DAY_KEY = "ankiquestStreakDay"
+UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
+ADDON_DIR = Path(__file__).resolve().parent
 RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
 
@@ -250,6 +255,8 @@ def open_settings():
     values = ui.settings_dialog(mw, config(), test_connection, upload_everything, state["companion"])
     if values is None:
         return
+    if values.get("update_channel") != config().get("update_channel", "stable"):
+        mw.pm.profile[UPDATE_CHECK_KEY] = 0
     save_config(values)
     state["profile"] = None
     state["place"] = None
@@ -385,6 +392,67 @@ def on_profile_open():
     refresh_shared_decks()
     refresh(False, resync=True)
     poll(quiet=True)
+    maybe_check_updates()
+
+
+def check_updates(quiet=True):
+    current = updates.installed(ADDON_DIR)
+    if current is None:
+        if not quiet:
+            tooltip(tr("This ankiquest is a local copy; it does not update itself."))
+        return
+    channel = config().get("update_channel", "stable")
+
+    def done(future):
+        try:
+            candidate = future.result()
+        except Exception as e:
+            if not quiet:
+                tooltip(tr("ankiquest: could not check for updates (%s)") % e)
+            return
+        if updates.newer(candidate, current):
+            offer_update(candidate)
+        elif not quiet:
+            tooltip(tr("ankiquest is up to date (%s).") % updates.label(current))
+
+    mw.taskman.run_in_background(lambda: updates.available(channel), done)
+
+
+def maybe_check_updates():
+    now_ms = int(time.time() * 1000)
+    if not updates.due(mw.pm.profile.get(UPDATE_CHECK_KEY, 0), now_ms):
+        return
+    mw.pm.profile[UPDATE_CHECK_KEY] = now_ms
+    check_updates(quiet=True)
+
+
+def offer_update(candidate):
+    from aqt.utils import askUser
+
+    if not askUser(tr("%s is available. Install it now? Anki needs a restart afterwards.") % updates.label(candidate)):
+        return
+    target = Path(tempfile.gettempdir()) / "ankiquest-update.ankiaddon"
+
+    def done(future):
+        try:
+            path = future.result()
+        except Exception as e:
+            tooltip(tr("ankiquest: could not download the update (%s)") % e)
+            return
+        install_update(path)
+
+    mw.taskman.run_in_background(lambda: updates.download(candidate["url"], target), done)
+
+
+def install_update(path):
+    from aqt.addons import InstallError
+    from aqt.utils import showInfo
+
+    result = mw.addonManager.install(str(path))
+    if isinstance(result, InstallError):
+        tooltip(tr("ankiquest: the update could not be installed (%s)") % result.errmsg)
+        return
+    showInfo(tr("ankiquest was updated. Restart Anki to use the new version."))
 
 
 def on_sync():
@@ -404,6 +472,7 @@ add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
 add_action(tr("ankiquest inbox…"), open_inbox)
 add_action(tr("ankiquest on the web…"), open_website)
+add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
 
 
 gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))

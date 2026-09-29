@@ -6,3 +6,4 @@ ankiquest.json
 __pycache__
 *.ankiaddon
 node_modules
+addon/version.json

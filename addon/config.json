@@ -3,5 +3,6 @@
     "user": "",
     "token": "",
     "notify_rank": true,
-    "streak_hours": 2
+    "streak_hours": 2,
+    "update_channel": "stable"
 }
