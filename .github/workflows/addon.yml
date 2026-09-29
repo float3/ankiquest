@@ -3,16 +3,43 @@ name: Desktop add-on
 on:
   push:
     tags: ["addon-*"]
+    branches: [master]
+    paths: ["addon/**", ".github/workflows/addon.yml"]
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: addon-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   package:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        run: |
+          nightly=0
+          if [[ "$GITHUB_REF" == refs/tags/addon-* ]]; then
+            release="${GITHUB_REF#refs/tags/addon-}"
+            [[ "$release" =~ ^[1-9][0-9]*$ ]] || { echo "::error::tag must be addon-<number>"; exit 1; }
+          elif tag=$(git describe --tags --match 'addon-[0-9]*' --abbrev=0 HEAD 2>/dev/null); then
+            release="${tag#addon-}"
+            nightly=$(git rev-list --count --first-parent "$tag..HEAD")
+          else
+            echo "::error::no addon-<number> tag before this commit"
+            exit 1
+          fi
+          jq -n --argjson release "$release" --argjson nightly "$nightly" --arg commit "$GITHUB_SHA" \
+            '{release: $release, nightly: $nightly, commit: $commit}' > addon/version.json
+          cat addon/version.json
+          echo "release=$release" >> "$GITHUB_OUTPUT"
 
       - name: Package
         run: cd addon && zip -r ../ankiquest.ankiaddon . -x '__pycache__/*' '*.pyc' 'meta.json'
@@ -25,3 +52,16 @@ jobs:
           gh release create "$GITHUB_REF_NAME" ankiquest.ankiaddon \
             --title "Desktop add-on ${GITHUB_REF_NAME#addon-}" \
             --notes "Double-click ankiquest.ankiaddon, or use Tools → Add-ons → Install from file in Anki. Then set url, user and token under Tools → Add-ons → ankiquest → Config and restart Anki."
+
+      - name: Publish nightly
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE: ${{ steps.version.outputs.release }}
+        run: |
+          jq --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {built_at: $built_at}' addon/version.json > addon-nightly.json
+          gh release delete addon-nightly --yes --cleanup-tag || true
+          gh release create addon-nightly ankiquest.ankiaddon addon-nightly.json \
+            --prerelease --latest=false --target "$GITHUB_SHA" \
+            --title "Desktop add-on nightly" \
+            --notes "Built from $GITHUB_SHA after addon-$RELEASE. Untested: choose the nightly update channel in ankiquest settings to get these."

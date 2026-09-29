@@ -5,6 +5,9 @@ Everything here is also under **Tools → ankiquest settings…**, which is easi
 - `token`: your upload token
 - `notify_rank`: say something when your place on the leaderboard changes
 - `streak_hours`: warn you this many hours before your streak ends (0 turns it off)
+- `update_channel`: `stable` for `addon-<n>` releases, `nightly` for the build of every change (untested)
+
+Once a day, and from **Tools → ankiquest: check for updates…**, the add-on looks for a newer build on that channel and offers to install it; restart Anki afterwards. Copies not installed from a release package never update themselves.
 
 A line under the deck list shows your weekly place, level and streak. Its links, **Tools → ankiquest on the web…** and **Tools → ankiquest inbox…** open the website in a window inside Anki, already signed in with your token, where you can see the leaderboard, reply to messages and join challenges.
 
