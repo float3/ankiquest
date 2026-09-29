@@ -1,3 +1,5 @@
+#[macro_use]
+mod admin;
 mod access;
 mod aki;
 mod avatars;
@@ -69,8 +71,14 @@ struct Config {
     competition_start_date: Option<String>,
     #[serde(default)]
     review_weighting: game::ReviewWeighting,
+    #[serde(default = "default_log_retention_days")]
+    log_retention_days: u32,
     #[serde(default)]
     users: HashMap<String, UserConfig>,
+}
+
+fn default_log_retention_days() -> u32 {
+    admin::DEFAULT_LOG_RETENTION_DAYS
 }
 
 fn default_week_timezone() -> String {
@@ -101,6 +109,15 @@ struct App {
     week: Week,
     store: Mutex<Store>,
     players: RwLock<HashMap<String, Player>>,
+}
+
+impl Config {
+    fn settings(&self) -> admin::Settings {
+        admin::Settings {
+            review_weighting: self.review_weighting,
+            log_retention_days: self.log_retention_days,
+        }
+    }
 }
 
 impl App {
@@ -392,7 +409,7 @@ async fn get_freezes(
     freeze_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(|e| {
-            eprintln!("streak freeze settings for {user} failed: {e}");
+            log_error!(user: user, "streak freeze settings for {user} failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
@@ -407,7 +424,7 @@ async fn set_freezes(
         return Err(StatusCode::UNAUTHORIZED);
     }
     let store_error = |e: Error| {
-        eprintln!("streak freeze settings for {user} failed: {e}");
+        log_error!(user: user, "streak freeze settings for {user} failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     };
     let mut store = app.store.lock().unwrap();
@@ -552,7 +569,7 @@ async fn upload(
     }
     let reviews: Vec<Review> = upload.reviews.into_iter().filter(|r| r.kind < 4).collect();
     let store_error = |e: Error| {
-        eprintln!("upload for {user} failed: {e}");
+        log_error!(user: user, "upload for {user} failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     };
     let mut store = app.store.lock().unwrap();
@@ -645,7 +662,7 @@ async fn get_decks(
     deck_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(|e| {
-            eprintln!("deck settings for {user} failed: {e}");
+            log_error!(user: user, "deck settings for {user} failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })
 }
@@ -786,7 +803,7 @@ async fn set_decks(
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
     let store_error = |e: Error| {
-        eprintln!("deck settings for {user} failed: {e}");
+        log_error!(user: user, "deck settings for {user} failed: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     };
     let mut store = app.store.lock().unwrap();
@@ -811,7 +828,7 @@ async fn set_decks(
 }
 
 fn store_error(error: Error) -> StatusCode {
-    eprintln!("community storage failed: {error}");
+    log_error!("community storage failed: {error}");
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
@@ -1198,7 +1215,7 @@ async fn reply(
             now_ms(),
         )
         .map_err(|e| {
-            eprintln!("reply from {user} failed: {e}");
+            log_error!(user: user, "reply from {user} failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -1295,7 +1312,7 @@ async fn community_dashboard(
     let mut store = app.store.lock().unwrap();
     if let Some(base) = &app.config.sync_base {
         import(&app, &mut store, base).map_err(|error| {
-            eprintln!("community sync import incomplete: {error}");
+            log_error!("community sync import incomplete: {error}");
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
@@ -1312,7 +1329,7 @@ async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>,
     let mut store = app.store.lock().unwrap();
     if let Some(base) = &app.config.sync_base {
         import(&app, &mut store, base).map_err(|error| {
-            eprintln!("winner history sync import incomplete: {error}");
+            log_error!("winner history sync import incomplete: {error}");
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
@@ -1377,7 +1394,7 @@ fn challenge_error(error: challenges::Error) -> ChallengeFailure {
         challenges::Error::Forbidden => (StatusCode::FORBIDDEN, "This challenge is private."),
         challenges::Error::NotFound => (StatusCode::NOT_FOUND, "Challenge not found."),
         challenges::Error::Storage(error) => {
-            eprintln!("challenge storage failed: {error}");
+            log_error!("challenge storage failed: {error}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "The challenge could not be saved. Please try again.",
@@ -1670,6 +1687,12 @@ fn streak_warning_body(profile: &Profile) -> String {
 
 fn tick(app: &App) -> Result<(), Error> {
     let mut store = app.store.lock().unwrap();
+    let settings = app.config.settings().effective(&store.conn)?;
+    if settings.review_weighting != game::review_weighting() {
+        game::set_review_weighting(settings.review_weighting);
+        log_info!("review weighting is now {:?}", settings.review_weighting);
+    }
+    admin::flush(&store.conn, now_ms(), settings.log_retention_days)?;
     let import_complete =
         app.config
             .sync_base
@@ -1677,7 +1700,7 @@ fn tick(app: &App) -> Result<(), Error> {
             .is_none_or(|base| match import(app, &mut store, base) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("competition refresh deferred until sync import succeeds: {error}");
+                    log_error!("competition refresh deferred until sync import succeeds: {error}");
                     false
                 }
             });
@@ -1849,7 +1872,8 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
             .unwrap()
             .finish_push(id, result.is_ok(), now_ms())?;
         if let Err(e) = result {
-            eprintln!(
+            log_error!(
+                user: delivery.user,
                 "ntfy push for {} failed; queued for retry: {e}",
                 delivery.user
             );
@@ -1858,8 +1882,7 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
     Ok(())
 }
 
-const USAGE: &str =
-    "usage: ankiquest [config.json] [message <player> <text> [--from <player>] [--title <text>]]";
+const USAGE: &str = "usage: ankiquest [config.json] [message <player> <text> [--from <player>] [--title <text>]]\n       ankiquest [config.json] admin <command>   (see ankiquest admin help)";
 
 #[derive(Debug, PartialEq)]
 struct Message {
@@ -1985,13 +2008,39 @@ fn inherited_listener() -> Option<std::net::TcpListener> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (given, message) = parse_args(&args)?;
+    let admin_at = args.iter().position(|a| a == "admin").filter(|&i| i <= 1);
+    let (given, message) = match admin_at {
+        Some(at) => (args[..at].first().cloned(), None),
+        None => parse_args(&args)?,
+    };
     let path = given
         .or_else(|| std::env::var("ANKIQUEST_CONFIG").ok())
         .unwrap_or_else(|| "ankiquest.json".into());
     let mut config: Config = serde_json::from_slice(
         &std::fs::read(&path).map_err(|e| format!("cannot read config {path}: {e}"))?,
     )?;
+
+    if let Some(at) = admin_at {
+        let command = match &args[at + 1..] {
+            [] => None,
+            [help] if matches!(help.as_str(), "help" | "--help" | "-h") => None,
+            rest => Some(admin::parse(rest)),
+        };
+        let output = match command {
+            None => Ok(format!("{}\n", admin::USAGE)),
+            Some(command) => {
+                command.and_then(|c| admin::run(&config.state_dir, config.settings(), c, now_ms()))
+            }
+        };
+        match output {
+            Ok(output) => print!("{output}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+        }
+        return Ok(());
+    }
 
     game::set_review_weighting(config.review_weighting);
 
@@ -2052,7 +2101,7 @@ async fn main() -> Result<(), Error> {
     std::thread::spawn(move || {
         loop {
             if let Err(e) = tick(&worker) {
-                eprintln!("tick failed: {e}");
+                log_error!("tick failed: {e}");
             }
             std::thread::sleep(POLL);
         }

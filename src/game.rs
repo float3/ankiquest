@@ -2,7 +2,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) const SESSION_GAP_MS: i64 = 300_000;
 const MATURE_IVL: i64 = 21;
@@ -950,15 +950,20 @@ pub enum ReviewWeighting {
     Diminishing,
 }
 
-static REVIEW_WEIGHTING: OnceLock<ReviewWeighting> = OnceLock::new();
+static DIMINISHING: AtomicBool = AtomicBool::new(false);
 
-/// Sets the server's review weighting. Only the first call has any effect.
+/// Sets the server's review weighting. XP is computed from history on demand,
+/// so every profile follows a change from the next request on.
 pub fn set_review_weighting(weighting: ReviewWeighting) {
-    let _ = REVIEW_WEIGHTING.set(weighting);
+    DIMINISHING.store(weighting == ReviewWeighting::Diminishing, Ordering::Relaxed);
 }
 
-fn review_weighting() -> ReviewWeighting {
-    REVIEW_WEIGHTING.get().copied().unwrap_or_default()
+pub fn review_weighting() -> ReviewWeighting {
+    if DIMINISHING.load(Ordering::Relaxed) {
+        ReviewWeighting::Diminishing
+    } else {
+        ReviewWeighting::Flat
+    }
 }
 
 #[cfg(test)]
