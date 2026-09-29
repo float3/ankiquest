@@ -1,16 +1,16 @@
-// @ts-nocheck
 /* Shared profile pictures. Tokens and selected photos live only in the open editor. */
 (() => {
   "use strict";
   const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
-  let revisions = Object.create(null), generation = 0, pending = null, editor = null, closeEditor = null, locked = false;
-  const failed = new Set();
-  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-  const imageUrl = (user, revision) => `/api/avatar/${encodeURIComponent(user)}?v=${encodeURIComponent(revision)}`;
-  const key = (user, revision) => JSON.stringify([user, revision]);
+  let revisions: Record<string, string> = Object.create(null), generation = 0, pending: Promise<void> | null = null, editor: HTMLDialogElement | null = null, closeEditor: (() => void) | null = null, locked = false;
+  const failed = new Set<string>();
+  const entities: Record<string, string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+  const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
+  const imageUrl = (user: string, revision: string) => `/api/avatar/${encodeURIComponent(user)}?v=${encodeURIComponent(revision)}`;
+  const key = (user: string, revision: string) => JSON.stringify([user, revision]);
 
-  function markup(user, display = user) {
+  function markup(user: string, display = user) {
     const initials = String(display || user).trim().split(/\s+/).map(part => Array.from(part)[0] || "").slice(0, 2).join("").toUpperCase();
     let hash = 0;
     for (const char of String(user)) hash = (hash * 31 + char.charCodeAt(0)) | 0;
@@ -18,9 +18,9 @@
   }
 
   function hydrate() {
-    document.querySelectorAll(".avatar[data-avatar-user]").forEach(element => {
-      const user = element.dataset.avatarUser, revision = revisions[user];
-      const existing = element.querySelector(".avatar-photo");
+    document.querySelectorAll<HTMLElement>(".avatar[data-avatar-user]").forEach(element => {
+      const user = element.dataset.avatarUser!, revision = revisions[user];
+      const existing = element.querySelector<HTMLElement>(".avatar-photo");
       if (!revision || failed.has(key(user, revision))) { delete element.dataset.avatarLoaded; existing?.remove(); return; }
       if (existing?.dataset.revision === revision) return;
       delete element.dataset.avatarLoaded;
@@ -43,7 +43,7 @@
     });
   }
 
-  async function refresh() {
+  async function refresh(): Promise<void> {
     if (locked) return;
     if (pending) return pending;
     const epoch = generation;
@@ -54,9 +54,9 @@
           if ([401, 403, 404].includes(response.status) && epoch === generation) { revisions = Object.create(null); hydrate(); }
           return;
         }
-        const data = await response.json();
+        const data: unknown = await response.json();
         if (!data || typeof data !== "object" || Array.isArray(data) || epoch !== generation) return;
-        const next = Object.create(null);
+        const next: Record<string, string> = Object.create(null);
         for (const [user, revision] of Object.entries(data)) {
           if (typeof revision === "string" && /^\d{1,20}$/.test(revision)) next[user] = revision;
         }
@@ -70,7 +70,7 @@
     return pending;
   }
 
-  async function decode(file) {
+  async function decode(file: File) {
     if (file.size > 20 * 1024 * 1024) throw new Error(aqText("Choose a picture smaller than 20 MB."));
     const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
     const png = [137,80,78,71,13,10,26,10].every((byte, index) => bytes[index] === byte);
@@ -81,7 +81,7 @@
     } catch (_) { throw new Error(aqText("Could not read this picture. Try another JPEG or PNG.")); }
   }
 
-  function open({ user, display = user, token = "" }) {
+  function open({ user, display = user, token = "" }: AvatarEditorOptions) {
     if (editor || locked) return;
     const native = nativeAccount();
     token = typeof token === "string" ? token.trim() : "";
@@ -92,21 +92,21 @@
     dialog.setAttribute("aria-labelledby", "avatar-editor-title");
     dialog.innerHTML = aqHtml`<form><h2 id="avatar-editor-title">Profile picture</h2><p>Choose a picture for ${esc(display)}. It will appear wherever your AnkiQuest community sees your profile.</p><div class="avatar-preview">${markup(user, display)}</div><div class="avatar-crop-controls" hidden><p>Drag the picture to position it, or use the arrow keys.</p><label>Zoom<input name="zoom" type="range" min="1" max="4" step="0.01" value="1"></label><button type="button" data-reset-crop>Reset crop</button></div><label>Choose a picture<input name="picture" type="file" accept="image/jpeg,image/png"></label><p>JPEG or PNG, up to 20 MB.</p><div data-avatar-auth></div><p class="avatar-status" role="status" aria-live="polite"></p><div class="avatar-actions"><button type="button" data-remove>Remove picture</button><button type="button" data-close>Close</button><button type="submit">Save picture</button></div></form>`;
     document.body.append(dialog);
-    const form = dialog.querySelector("form"), fileInput = form.elements.picture;
-    const preview = dialog.querySelector(".avatar-preview");
-    const status = dialog.querySelector(".avatar-status"), save = dialog.querySelector('[type="submit"]');
-    const remove = dialog.querySelector("[data-remove]");
-    let selected = null, canvas = null, busy = false, closed = false, selection = 0;
+    const form = dialog.querySelector("form")!, fileInput = form.elements.namedItem("picture") as HTMLInputElement;
+    const preview = dialog.querySelector<HTMLElement>(".avatar-preview")!;
+    const status = dialog.querySelector<HTMLElement>(".avatar-status")!, save = dialog.querySelector<HTMLButtonElement>('[type="submit"]')!;
+    const remove = dialog.querySelector<HTMLButtonElement>("[data-remove]")!;
+    let selected: ImageBitmap | null = null, canvas: HTMLCanvasElement | null = null, busy = false, closed = false, selection = 0;
     let zoom = 1, offsetX = 0, offsetY = 0;
-    const cropControls = dialog.querySelector(".avatar-crop-controls"), zoomInput = form.elements.zoom;
-    let password = null, cookieOwner = false, checkingSession = !token && !native;
+    const cropControls = dialog.querySelector<HTMLElement>(".avatar-crop-controls")!, zoomInput = form.elements.namedItem("zoom") as HTMLInputElement;
+    let password: HTMLInputElement | null = null, cookieOwner = false, checkingSession = !token && !native;
     const controller = new AbortController();
-    function message(text, error = false) { status.textContent = text; status.classList.toggle("error", error); }
-    function controls() { const waiting = busy || checkingSession; save.disabled = waiting || !selected; remove.disabled = waiting || !revisions[user]; fileInput.disabled = waiting; zoomInput.disabled = waiting || !selected; dialog.querySelector("[data-reset-crop]").disabled = waiting || !selected; if (password) password.disabled = waiting; }
+    function message(text: string, error = false) { status.textContent = text; status.classList.toggle("error", error); }
+    function controls() { const waiting = busy || checkingSession; save.disabled = waiting || !selected; remove.disabled = waiting || !revisions[user]; fileInput.disabled = waiting; zoomInput.disabled = waiting || !selected; dialog.querySelector<HTMLButtonElement>("[data-reset-crop]")!.disabled = waiting || !selected; if (password) password.disabled = waiting; }
     function requestToken() {
       if (password) return;
-      dialog.querySelector("[data-avatar-auth]").innerHTML = aqHtml(['<label>Your AnkiQuest token<input name="token" type="password" autocomplete="off" spellcheck="false" required></label><p>Your token stays only in this window’s memory.</p>']);
-      password = form.elements.token;
+      dialog.querySelector("[data-avatar-auth]")!.innerHTML = aqHtml`<label>Your AnkiQuest token<input name="token" type="password" autocomplete="off" spellcheck="false" required></label><p>Your token stays only in this window’s memory.</p>`;
+      password = form.elements.namedItem("token") as HTMLInputElement;
     }
     function releasePreview() { selected?.close(); selected = null; canvas = null; cropControls.hidden = true; }
     function renderCrop() {
@@ -116,17 +116,17 @@
       const width = selected.width * scale, height = selected.height * scale;
       offsetX = Math.max((size - width) / 2, Math.min((width - size) / 2, offsetX));
       offsetY = Math.max((size - height) / 2, Math.min((height - size) / 2, offsetY));
-      const context = canvas.getContext("2d");
+      const context = canvas.getContext("2d")!;
       context.clearRect(0, 0, size, size);
       context.imageSmoothingQuality = "high";
       context.drawImage(selected, (size - width) / 2 + offsetX, (size - height) / 2 + offsetY, width, height);
     }
-    function setZoom(value) {
+    function setZoom(value: number) {
       zoom = Math.max(1, Math.min(4, value));
       zoomInput.value = String(zoom);
       renderCrop();
     }
-    function prepareCanvas(bitmap) {
+    function prepareCanvas(bitmap: ImageBitmap) {
       selected = bitmap; zoom = 1; offsetX = offsetY = 0; zoomInput.value = "1";
       canvas = document.createElement("canvas");
       canvas.width = canvas.height = 256;
@@ -134,11 +134,11 @@
       canvas.tabIndex = 0;
       canvas.setAttribute("role", "img");
       canvas.setAttribute("aria-label", aqText("Profile picture crop. Drag to reposition, use arrow keys to move, or use the zoom slider."));
-      const pointers = new Map();
-      let pinch = null;
+      const pointers = new Map<number, { x: number, y: number }>();
+      let pinch: { distance: number, zoom: number } | null = null;
       canvas.addEventListener("pointerdown", event => {
         if (busy) return;
-        canvas.setPointerCapture(event.pointerId);
+        canvas!.setPointerCapture(event.pointerId);
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pointers.size === 2) {
           const [a, b] = [...pointers.values()];
@@ -147,19 +147,19 @@
       });
       canvas.addEventListener("pointermove", event => {
         if (!pointers.has(event.pointerId) || busy) return;
-        const before = pointers.get(event.pointerId);
+        const before = pointers.get(event.pointerId)!;
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pointers.size === 2 && pinch) {
           const [a, b] = [...pointers.values()];
           if (pinch.distance > 0) setZoom(pinch.zoom * Math.hypot(a.x - b.x, a.y - b.y) / pinch.distance);
         } else {
-          const ratio = canvas.width / canvas.getBoundingClientRect().width;
+          const ratio = canvas!.width / canvas!.getBoundingClientRect().width;
           offsetX += (event.clientX - before.x) * ratio;
           offsetY += (event.clientY - before.y) * ratio;
           renderCrop();
         }
       });
-      function endPointer(event) {
+      function endPointer(event: PointerEvent) {
         pointers.delete(event.pointerId);
         pinch = null;
       }
@@ -198,7 +198,7 @@
     }
     closeEditor = close;
     fileInput.addEventListener("change", async () => {
-      const version = ++selection, file = fileInput.files[0];
+      const version = ++selection, file = fileInput.files![0];
       releasePreview(); preview.innerHTML = markup(user, display); hydrate(); controls();
       if (!file) { message(""); return; }
       message(aqText("Preparing preview…"));
@@ -206,15 +206,15 @@
         const bitmap = await decode(file);
         if (closed || version !== selection) { bitmap.close(); return; }
         prepareCanvas(bitmap); message(aqText("Ready to save.")); controls();
-      } catch (error) { if (!closed && version === selection) { message(error.message, true); controls(); } }
+      } catch (error) { if (!closed && version === selection) { message((error as Error).message, true); controls(); } }
     });
-    async function update(deleting) {
+    async function update(deleting: boolean) {
       if (busy || checkingSession || closed || (!deleting && !selected)) return;
       const credential = token || password?.value.trim();
       if (!credential && !cookieOwner) { message(aqText("Enter your AnkiQuest token to change your picture."), true); password?.focus(); return; }
       busy = true; controls(); message(deleting ? aqText("Removing picture…") : aqText("Saving picture…"));
       try {
-        const image = deleting ? null : await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        const image = deleting ? null : await new Promise<Blob | null>(resolve => canvas!.toBlob(resolve, "image/png"));
         if (!deleting && !image) throw new Error("Could not prepare this picture. Try another JPEG or PNG.");
         if (closed) return;
         const response = await fetch(`/api/avatar/${encodeURIComponent(user)}`, {
@@ -224,26 +224,26 @@
         });
         if (closed) return;
         if (response.status === 401 || response.status === 403) {
-          token = ""; cookieOwner = false; requestToken(); password.value = "";
+          token = ""; cookieOwner = false; requestToken(); password!.value = "";
           throw new Error(credential ? aqText("That token was not accepted for this player. Enter your token to try again.") : aqText("Your member session expired or changed. Enter your token to reconnect and try again."));
         }
         if (!response.ok) throw new Error(response.status === 413 ? aqText("The picture is too large. Choose a smaller one.") : aqText("The picture could not be saved. Please try again."));
-        const result = deleting ? null : await response.json();
+        const result: { revision: string } | null = deleting ? null : await response.json();
         if (closed) return;
         if (!deleting && (typeof result?.revision !== "string" || !/^\d{1,20}$/.test(result.revision))) throw new Error(aqText("The server returned an invalid picture response. Please try again."));
         generation++;
-        if (deleting) delete revisions[user]; else revisions[user] = result.revision;
+        if (deleting) delete revisions[user]; else revisions[user] = result!.revision;
         failed.clear(); fileInput.value = ""; releasePreview();
         preview.innerHTML = markup(user, display); hydrate();
         message(deleting ? aqText("Picture removed. Your initials are shown again.") : aqText("Profile picture saved."));
-      } catch (error) { if (!closed) message(error.message, true); }
+      } catch (error) { if (!closed) message((error as Error).message, true); }
       finally { if (!closed) { busy = false; controls(); } }
     }
     form.addEventListener("submit", event => { event.preventDefault(); update(false); });
     zoomInput.addEventListener("input", () => setZoom(Number(zoomInput.value)));
-    dialog.querySelector("[data-reset-crop]").addEventListener("click", () => { offsetX = offsetY = 0; setZoom(1); });
+    dialog.querySelector("[data-reset-crop]")!.addEventListener("click", () => { offsetX = offsetY = 0; setZoom(1); });
     remove.addEventListener("click", () => update(true));
-    dialog.querySelector("[data-close]").addEventListener("click", close);
+    dialog.querySelector("[data-close]")!.addEventListener("click", close);
     dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
     dialog.addEventListener("close", close);
     window.addEventListener("pagehide", close);

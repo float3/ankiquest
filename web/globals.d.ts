@@ -40,8 +40,8 @@ declare global {
     status(fresh?: boolean, notify?: boolean): Promise<Access | null>;
     member(user?: string): Promise<{user: string} | null>;
     ownerHeaders(session: OwnerSession | null | undefined, body?: unknown): Record<string, string>;
-    connectMember(user: string, token: string, current?: () => boolean): Promise<Access | null>;
-    disconnectMember(): Promise<void>;
+    connectMember(user: string, token: string, current?: () => boolean): Promise<OwnerSession>;
+    disconnectMember(): Promise<Access | null>;
   }
 
   /** The parts of a profile the companion reacts to. */

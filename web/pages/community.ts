@@ -1,18 +1,56 @@
-// @ts-nocheck
 "use strict";
+import {friendNudges} from "./friend-nudges";
+
+/* Payloads from /api/community (src/competition.rs) and the private community APIs. */
+interface Standing { user:string; display:string; xp:number; reviews:number; time_ms:number; new_cards:number; days_active:number; best_streak:number; freezes_used:number; }
+interface Period { key:string; start:string; end:string; kind:string; status:string; reconstructed:boolean; partial:boolean; winners:string[]; winning_margin:number; standings:Standing[]; }
+interface Trophy { id:string; title:string; date:string; }
+interface YearReview { year:number; xp:number; reviews:number; study_days:number; best_streak:number; days_won:number; weeks_won:number; months?:{month:string; xp:number; reviews:number; study_days:number}[]; }
+interface Player { user:string; display:string; day_wins:number; week_wins:number; season_wins:number; shared_wins:number; longest_winning_streak:number; trophies?:Trophy[]; year_review?:YearReview; }
+interface Award { kind:string; title:string; date:string; user:string; display:string; value:number; previous?:number; reconstructed:boolean; }
+interface CompetitionRecord { scope:string; metric:string; date:string; user:string; display:string; value:number; reconstructed:boolean; }
+interface HeadToHead { a:string; b:string; days_a:number; days_b:number; days_tied:number; weeks_a:number; weeks_b:number; weeks_tied:number; }
+interface WinnerTotals { user:string; display:string; history_start:string|null; day_wins:number; week_wins:number; month_wins:number; }
+interface WinnerScope { start_date?:string|null; player_count?:number; periods?:{day:number; week:number; month:number}; players?:WinnerTotals[]; }
+interface WinnerHistory { meta?:{start_date?:string|null; start_source?:string}; shared?:WinnerScope; lifetime?:WinnerScope; waiting_players?:{user:string; display:string}[]; }
+interface CommunityMeta { year:number; month:number; start_date?:string|null; start_source?:string; time_zone?:string; rollover_hour?:number; grace_hours?:number; scoring_note?:string; }
+interface CommunityData { meta:CommunityMeta; players:Player[]; calendar:Period[]; weeks:Period[]; seasons:Period[]; awards:Award[]; records:CompetitionRecord[]; head_to_head:HeadToHead[]; winner_history?:WinnerHistory; }
+type WinMetric = "day"|"week"|"month";
+type ReminderKey = "gentle_daily"|"urgent_streak"|"freeze_used"|"freeze_refill"|"milestone"|"weekly_closing"|"weekly_recap";
+type ReminderSettings = Record<ReminderKey,boolean> & { reminder_hour:number; quiet_start:number; quiet_end:number; daily_limit:number; };
+interface Recipient { user:string; display:string; }
+interface ChallengeMember { user:string; display:string; status:string; progress:number; }
+interface Challenge { id:number; title:string; kind:string; cooperative:boolean; creator:string; start_at:number; end_at:number; target:number; members:ChallengeMember[]; progress:number; status:string; weekly:boolean; started:boolean; start_when_ready:boolean; }
+interface WeeklySuggestion { week_start:number; expires_at:number; friend:Recipient; target:number; duration_days:number; dismissed:boolean; challenge_id:number|null; }
+interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion?:WeeklySuggestion|null; }
+/** An activity item (src/decks.rs `Notification`); `legacy` pages come from the older /api/notifications. */
+interface Notice { id:number; title:string; body:string; created_at:number; sender:string; replied:boolean; kind:string; read_at?:number|null; challenge_id?:number|null; route?:string|null; action_required?:boolean; reply_to?:{title:string; body:string}; }
+interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; legacy?:boolean; }
+interface SentNotice extends Notice { recipient:string; }
+interface SentPage { items:SentNotice[]; next_before?:number|null; }
+interface NewChallenge { title:string; kind:FormDataEntryValue|null; cooperative:boolean; target:number; duration_days:number; recipients:FormDataEntryValue[]; start_when_ready:boolean; request_id?:string|null; }
+
   const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
-const $ = id => document.getElementById(id);
-const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-const number = value => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
-const amount = value => Math.max(0, Number(value) || 0);
-const months = Array.from({length:12}, (_, i) => new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",timeZone:"UTC"}).format(new Date(Date.UTC(2024,i,1))));
+const $ = <T extends HTMLElement = HTMLElement>(id:string) => document.getElementById(id) as T;
+function formField<T extends Element>(form:HTMLFormElement,name:string,type:abstract new()=>T):T { const item=form.elements.namedItem(name);if(item instanceof type)return item;throw new TypeError(`The form has no ${name} field.`); }
+const entities:Record<string,string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+const esc = (value:unknown) => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
+const number = (value:unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
+const amount = (value:unknown) => Math.max(0, Number(value) || 0);
+const errorMessage = (error:unknown) => error instanceof Error ? error.message : String(error);
+const errorStatus = (error:unknown) => error instanceof Error && "status" in error ? error.status : undefined;
+// Set with the first render, once translations are ready (see the end of this file).
+let translated = false;
 const now = new Date();
 const initialPeriod = new URLSearchParams(location.search).get("period");
-const state = { data:null, view:"challenges", challengeId:null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day", recordScope:"all", matchupA:"", matchupB:"", request:0, session:null, nativeSession:false, nativeDisconnected:false, reminders:null, reminderDraft:null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null, activity:null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox", activityCategory:"all", activityUnreadOnly:false, friendAchievements:null, achievementError:"", achievementLoading:false, achievementEpoch:0, sent:null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null, challengeStatus:"", challengeError:false };
-const activityCategories = [["all",aqText("All")],["needs_action",aqText("Needs action")],["messages",aqText("Messages")],["challenges",aqText("Challenges")],["deck_completions",aqText("Deck completions")],["study_updates",aqText("Study updates")]];
+const state = { data:null as CommunityData|null, view:"challenges", challengeId:null as string|null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:initialPeriod&&["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day" as WinMetric, recordScope:"all", matchupA:"", matchupB:"", request:0, session:null as OwnerSession|null, nativeSession:false, nativeDisconnected:false, reminders:null as ReminderSettings|null, reminderDraft:null as ReminderSettings|null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null as ChallengeList|null, activity:null as ActivityPage|null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox" as "inbox"|"sent", activityCategory:"all", activityUnreadOnly:false, friendAchievements:null as ActivityPage|null, achievementError:"", achievementLoading:false, achievementEpoch:0, sent:null as SentPage|null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null as string|null, challengeStatus:"", challengeError:false, connectionError:"", connecting:false, disconnecting:false, challengeBodyKey:null as string|null };
 let nativeAccountCleared = false;
-const reminderDefinitions = [
+// Translated once, on first use; rendering waits for translations.
+let monthNames:string[]|undefined, categoryLabels:[string,string][]|undefined, reminderLabels:[ReminderKey,string,string][]|undefined;
+const months = () => monthNames ??= Array.from({length:12}, (_, i) => new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",timeZone:"UTC"}).format(new Date(Date.UTC(2024,i,1))));
+const activityCategories = () => categoryLabels ??= [["all",aqText("All")],["needs_action",aqText("Needs action")],["messages",aqText("Messages")],["challenges",aqText("Challenges")],["deck_completions",aqText("Deck completions")],["study_updates",aqText("Study updates")]];
+const reminderDefinitions = () => reminderLabels ??= [
   ["gentle_daily",aqText("Gentle daily reminder"),aqText("A friendly nudge when you haven’t studied yet.")],
   ["urgent_streak",aqText("Unprotected streak warning"),aqText("An urgent reminder near your cutoff when no freeze is left or freeze protection is switched off.")],
   ["freeze_used",aqText("Freeze used"),aqText("Know when a freeze protected your streak and how many remain.")],
@@ -21,32 +59,34 @@ const reminderDefinitions = [
   ["weekly_closing",aqText("Weekly competition closing"),aqText("An optional nudge before the weekly competition ends.")],
   ["weekly_recap",aqText("Weekly recap"),aqText("Your study days, XP, daily wins, weekly position, and improvement.")]
 ];
-function date(value, options={month:"short",day:"numeric",year:"numeric"}) { if(!value) return "—"; const parsed=new Date(String(value).slice(0,10)+"T12:00:00Z"); return Number.isNaN(parsed.getTime())?String(value):new Intl.DateTimeFormat(AnkiQuestI18n.language,{...options,timeZone:"UTC"}).format(parsed); }
-function dayBefore(value) { const parsed=new Date(value+"T12:00:00Z"); parsed.setUTCDate(parsed.getUTCDate()-1); return parsed.toISOString().slice(0,10); }
-function monthName(value) { if(!value) return aqText("No study month yet"); return date(value+"-01",{month:"long",year:"numeric"}); }
-function name(user) { return state.data?.players.find(player=>player.user===user)?.display || user; }
-function avatar(user, display=name(user)) { return AnkiQuestSite.avatar(user, display); }
-function empty(title, detail="") { return aqHtml`<div class="empty"><strong>${esc(title)}</strong>${esc(detail)}</div>`; }
-function kpi(label, value, detail, tone="") { return AnkiQuestSite.kpi(label, value, detail, tone); }
-function chip(text,tone="") { return aqHtml`<span class="chip ${tone}">${esc(text)}</span>`; }
-function playerCell(user,display=name(user)) { return aqHtml`<span class="table-player">${avatar(user,display)}<button type="button" data-select-player="${esc(user)}">${esc(display)}</button></span>`; }
-function isFinal(period) { return period.status==="final"; }
-function periodBadges(period) { return chip(isFinal(period)?aqText("Final"):period.status==="provisional"?aqText("Awaiting finalization"):aqText("Live"),isFinal(period)?"green":"blue")+(period.reconstructed?" "+chip(aqText("Reconstructed"),"outline"):"")+(period.partial?" "+chip(aqText("Partial period"),"outline"):""); }
-function periodName(period) { if(period.kind==="month" || period.key.length===7) return monthName(period.key); if(period.kind==="week") return `${date(period.start,{month:"short",day:"numeric"})} – ${date(dayBefore(period.end),{month:"short",day:"numeric"})}`; return date(period.key); }
+/** Runs `work` now, or after the first render if translations are still loading. */
+function afterReady(work:()=>void) { if(translated)work();else void AnkiQuestI18n.ready.then(work); }
+function date(value:unknown, options:Intl.DateTimeFormatOptions={month:"short",day:"numeric",year:"numeric"}) { if(!value) return "—"; const parsed=new Date(String(value).slice(0,10)+"T12:00:00Z"); return Number.isNaN(parsed.getTime())?String(value):new Intl.DateTimeFormat(AnkiQuestI18n.language,{...options,timeZone:"UTC"}).format(parsed); }
+function dayBefore(value:string) { const parsed=new Date(value+"T12:00:00Z"); parsed.setUTCDate(parsed.getUTCDate()-1); return parsed.toISOString().slice(0,10); }
+function monthName(value:string) { if(!value) return aqText("No study month yet"); return date(value+"-01",{month:"long",year:"numeric"}); }
+function name(user:string) { return state.data?.players.find(player=>player.user===user)?.display || user; }
+function avatar(user:string, display=name(user)) { return AnkiQuestSite.avatar(user, display); }
+function empty(title:string, detail="") { return aqHtml`<div class="empty"><strong>${esc(title)}</strong>${esc(detail)}</div>`; }
+function kpi(label:string, value:unknown, detail:unknown, tone="") { return AnkiQuestSite.kpi(label, value, detail, tone); }
+function chip(text:string,tone="") { return aqHtml`<span class="chip ${tone}">${esc(text)}</span>`; }
+function playerCell(user:string,display=name(user)) { return aqHtml`<span class="table-player">${avatar(user,display)}<button type="button" data-select-player="${esc(user)}">${esc(display)}</button></span>`; }
+function isFinal(period:Period) { return period.status==="final"; }
+function periodBadges(period:Period) { return chip(isFinal(period)?aqText("Final"):period.status==="provisional"?aqText("Awaiting finalization"):aqText("Live"),isFinal(period)?"green":"blue")+(period.reconstructed?" "+chip(aqText("Reconstructed"),"outline"):"")+(period.partial?" "+chip(aqText("Partial period"),"outline"):""); }
+function periodName(period:Period) { if(period.kind==="month" || period.key.length===7) return monthName(period.key); if(period.kind==="week") return `${date(period.start,{month:"short",day:"numeric"})} – ${date(dayBefore(period.end),{month:"short",day:"numeric"})}`; return date(period.key); }
 function selectedPlayers() { return (state.data?.players||[]).filter(player=>!state.player||player.user===state.player); }
-function matchesPeriod(period) { return !state.player || period.standings.some(row=>row.user===state.player && row.reviews>0); }
-function sum(rows,key) { return rows.reduce((total,row)=>total+amount(row[key]),0); }
-function yearly() { return selectedPlayers().map(player=>player.year_review||{}); }
-function showView(view,focus=false) {
+function matchesPeriod(period:Period) { return !state.player || period.standings.some(row=>row.user===state.player && row.reviews>0); }
+function sum<T>(rows:readonly T[],key:keyof T) { return rows.reduce((total,row)=>total+amount(row[key]),0); }
+function yearly():Partial<YearReview>[] { return selectedPlayers().map(player=>player.year_review||{}); }
+function showView(view:string,focus=false) {
   const detail=/^challenge-([1-9]\d*)$/.exec(view);
   state.challengeId=detail?detail[1]:null;
   if(detail)view="challenges";
   if(!["overview","calendar","trophies","challenges","activity","records","year","reminders"].includes(view)) view="challenges";
   state.view=view;
   const historical=["overview","calendar","trophies","records","year"].includes(view);
-  document.querySelectorAll("[data-view]").forEach(button=>{const active=button.hasAttribute("data-history")?historical:button.dataset.view===view;button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;});
+  document.querySelectorAll<HTMLElement>("[data-view]").forEach(button=>{const active=button.hasAttribute("data-history")?historical:button.dataset.view===view;button.setAttribute("aria-selected",String(active));button.tabIndex=active?0:-1;});
   $("history-navigation").hidden=!historical;
-  document.querySelectorAll('[role="tabpanel"]').forEach(panel=>panel.hidden=panel.id!=="view-"+view);
+  document.querySelectorAll<HTMLElement>('[role="tabpanel"]').forEach(panel=>panel.hidden=panel.id!=="view-"+view);
   $("public-filters").hidden=!historical;
   $("month-field").hidden=view!=="calendar" || state.calendarMode!=="day";
   $("filter-note").textContent=view==="trophies"?aqText("Win totals use the selected history scope. The year filter applies to awards."):view==="calendar"?aqText("Daily, weekly, and monthly results share one cutoff."):`Showing ${state.year}${state.player?" · "+name(state.player):aqText(" · everyone")}`;
@@ -57,7 +97,7 @@ function showView(view,focus=false) {
   if(view==="challenges"&&state.session&&!state.friendAchievements&&!state.achievementLoading)loadFriendAchievements();
 }
 function renderOverview() {
-  const data=state.data, players=selectedPlayers(), summaries=yearly(), awards=data.awards.filter(item=>!state.player||item.user===state.player);
+  const data=state.data!, players=selectedPlayers(), summaries=yearly(), awards=data.awards.filter(item=>!state.player||item.user===state.player);
   const season=[...data.seasons].reverse().find(matchesPeriod);
   const weeks=data.weeks.filter(period=>isFinal(period)&&matchesPeriod(period)).slice(-3).reverse();
   const days=sum(players,"day_wins"), weekly=sum(players,"week_wins");
@@ -65,28 +105,28 @@ function renderOverview() {
   <div class="grid"><article class="card"><div class="card-head"><div><h2>Small steps. Real milestones.</h2><p>Consistency, improvement, and returning to study.</p></div></div>${awardList(awards.slice().reverse().slice(0,5))}</article><article class="card"><div class="card-head"><div><h2>${season?esc(monthName(season.key)):aqText("Monthly seasons")}</h2><p>A fresh start each month. Lifetime trophies stay with you.</p></div>${season?periodBadges(season):""}</div>${season?compactStandings(season,5):empty(aqText("The first season starts with studying."),aqText("Monthly progress will appear here."))}</article></div>
   <div class="grid"><article class="card"><div class="card-head"><div><h2>Recent weekly champions</h2><p>Finalized results in ${state.year}.</p></div><button class="link-button" data-goto="calendar" type="button">See calendar →</button></div>${weeks.length?aqHtml`<ul class="list">${weeks.map(period=>aqHtml`<li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${esc(period.winners.length?period.winners.map(name).join(" & "):aqText("No winner"))}</strong><small>${esc(periodName(period))}</small></div><button type="button" class="link-button" data-period="week:${esc(period.key)}">Details</button></li>`).join("")}</ul>`:empty(aqText("Your next chapter is being written."),aqText("Final weekly champions will appear after the competition closes."))}</article><article class="card"><div class="card-head"><div><h2>Keep the momentum</h2><p>Support for the days when life gets busy.</p></div><span class="symbol" aria-hidden="true">↗</span></div><p class="section-intro">Set a gentle daily nudge, get a warning when your streak has no freeze left, and celebrate your week with a personal recap.</p><div class="form-actions"><button data-goto="reminders" type="button">Choose my reminders</button><button data-goto="challenges" class="primary" type="button">Start a friendly challenge</button></div></article></div>`;
 }
-function awardList(awards) {
+function awardList(awards:Award[]) {
   if(!awards.length) return empty(aqText("Good habits are worth celebrating."),aqText("Awards appear here as players build consistency, improve, and return after a break."));
   return aqHtml`<ul class="list">${awards.map(item=>aqHtml`<li class="list-row">${avatar(item.user,item.display)}<div class="row-text"><strong>${esc(item.title)}</strong><small>${esc(item.display)} · ${esc(date(item.date))}</small></div><div class="row-end">${awardValue(item)}</div></li>`).join("")}</ul>`;
 }
-function awardValue(item) { const kind=String(item.kind); return aqHtml`<strong>${kind==="most_improved"?"+":""}${esc(number(item.value))}</strong><small>${kind==="most_improved"?aqText("reviews vs. last week"):kind==="comeback"?aqText("days away"):aqText("study days")}</small>${item.previous!==undefined?aqHtml`<small>previous: ${esc(number(item.previous))} reviews</small>`:""}`; }
-function compactStandings(period,limit=5) {
+function awardValue(item:Award) { const kind=String(item.kind); return aqHtml`<strong>${kind==="most_improved"?"+":""}${esc(number(item.value))}</strong><small>${kind==="most_improved"?aqText("reviews vs. last week"):kind==="comeback"?aqText("days away"):aqText("study days")}</small>${item.previous!==undefined?aqHtml`<small>previous: ${esc(number(item.previous))} reviews</small>`:""}`; }
+function compactStandings(period:Period,limit=5) {
   if(!period.standings.some(row=>row.reviews>0)) return empty(aqText("A fresh page."),aqText("Study today to put the first points on the board."));
   const max=Math.max(...period.standings.map(row=>amount(row.xp)),1);
   return aqHtml`<ul class="list">${period.standings.slice(0,limit).map((row,index)=>aqHtml`<li class="list-row">${avatar(row.user,row.display)}<div class="row-text"><strong>${index+1}. ${esc(row.display)}</strong><div class="progress" role="img" aria-label="${esc(number(row.xp))} XP"><i style="width:${Math.min(100,amount(row.xp)/max*100)}%"></i></div></div><div class="row-end"><strong>${esc(number(row.xp))} XP</strong><small>${esc(number(row.reviews))} reviews</small></div></li>`).join("")}</ul><div class="form-actions"><button class="link-button" type="button" data-period="${esc(period.kind)}:${esc(period.key)}">Full standings →</button></div>`;
 }
 function renderCalendar() {
   const modes=[["day",aqText("Daily wins")],["week",aqText("Weekly champions")],["month",aqText("Monthly seasons")]];
-  const toolbar=aqHtml`<div class="toolbar"><div class="segmented" role="group" aria-label="Competition period">${modes.map(([key,label])=>aqHtml`<button type="button" data-calendar-mode="${key}" aria-pressed="${state.calendarMode===key}">${label}</button>`).join("")}</div>${state.calendarMode==="day"?aqHtml`<div class="month-actions"><button type="button" data-month-step="-1" aria-label="Previous month">‹</button><span class="month-title">${esc(months[state.month-1])} ${state.year}</span><button type="button" data-month-step="1" aria-label="Next month">›</button></div>`:""}</div>`;
+  const toolbar=aqHtml`<div class="toolbar"><div class="segmented" role="group" aria-label="Competition period">${modes.map(([key,label])=>aqHtml`<button type="button" data-calendar-mode="${key}" aria-pressed="${state.calendarMode===key}">${label}</button>`).join("")}</div>${state.calendarMode==="day"?aqHtml`<div class="month-actions"><button type="button" data-month-step="-1" aria-label="Previous month">‹</button><span class="month-title">${esc(months()[state.month-1])} ${state.year}</span><button type="button" data-month-step="1" aria-label="Next month">›</button></div>`:""}</div>`;
   if(state.calendarMode!=="day") {
-    const periods=(state.calendarMode==="week"?state.data.weeks:state.data.seasons).filter(matchesPeriod).slice().reverse();
+    const periods=(state.calendarMode==="week"?state.data!.weeks:state.data!.seasons).filter(matchesPeriod).slice().reverse();
     $("view-calendar").innerHTML=aqHtml`<article class="card"><div class="card-head"><div><h2>Every chapter has its champions</h2><p>Explore ${state.calendarMode==="week"?aqText("weekly championships"):aqText("monthly seasons")} in ${state.year}.</p></div></div>${toolbar}<div class="table-wrap" style="margin-top:18px">${periods.length?aqHtml`<table><thead><tr><th>Period</th><th>Winner / current leader</th><th>Status</th><th class="numeric">Winning margin</th><th><span class="sr-only">Details</span></th></tr></thead><tbody>${periods.map(period=>aqHtml`<tr><td>${esc(periodName(period))}</td><td>${esc(period.winners.length?period.winners.map(name).join(" & "):aqText("No study recorded"))}</td><td>${periodBadges(period)}</td><td class="numeric">${period.winners.length>1?aqText("Shared win"):period.winners.length?number(period.winning_margin)+" XP":"—"}</td><td><button class="link-button" data-period="${state.calendarMode}:${esc(period.key)}" type="button">View</button></td></tr>`).join("")}</tbody></table>`:empty(aqText("No competitions in this selection."),aqText("Try another year or player."))}</div></article>`;
     return;
   }
   const first=new Date(Date.UTC(state.year,state.month-1,1)), count=new Date(Date.UTC(state.year,state.month,0)).getUTCDate(), padding=(first.getUTCDay()+6)%7;
-  const periods=new Map(state.data.calendar.map(period=>[period.key,period]));
+  const periods=new Map(state.data!.calendar.map(period=>[period.key,period] as const));
   const today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
-  let cells=Array.from({length:padding},()=>aqHtml(['<div class="day placeholder" aria-hidden="true"></div>'])).join("");
+  let cells=Array.from({length:padding},()=>aqHtml`<div class="day placeholder" aria-hidden="true"></div>`).join("");
   for(let day=1;day<=count;day++) {
     const key=`${state.year}-${String(state.month).padStart(2,"0")}-${String(day).padStart(2,"0")}`, period=periods.get(key), winners=period?.winners||[];
     const title=period?(winners.length?winners.map(name).join(" & "):aqText("No study recorded")):(key>today?aqText("Upcoming"):aqText("No recorded result"));
@@ -94,58 +134,58 @@ function renderCalendar() {
     const label=`${date(key)}: ${title}${status?", "+status:""}${period?.partial?aqText(", partial period"):""}`;
     cells+=aqHtml`<button type="button" class="day${today===key?aqText(" today"):""}${state.player&&!winners.includes(state.player)?" no-match":""}" data-period="day:${key}" aria-label="${esc(label)}" ${period?"":"disabled"}><span class="date">${day}</span>${winners.length?aqHtml`<span class="day-bottom">${avatar(winners[0])}<span class="winner">${esc(winners.length>1?name(winners[0])+" +"+(winners.length-1):name(winners[0]))}</span></span>`:aqHtml`<span class="winner muted">${key>today?aqText("Upcoming"):period?aqText("No study"):"—"}</span>`}<span class="mini-status">${esc(status)}${period?.partial?aqText(" · Partial"):""}</span></button>`;
   }
-  $("view-calendar").innerHTML=aqHtml`<article class="card calendar-card">${toolbar}<div class="calendar" id="calendar-grid" aria-label="Daily winners for ${esc(months[state.month-1])} ${state.year}">${[aqText("Mon"),aqText("Tue"),aqText("Wed"),aqText("Thu"),aqText("Fri"),aqText("Sat"),aqText("Sun")].map(day=>aqHtml`<div class="weekday" aria-hidden="true">${day}</div>`).join("")}${cells}</div><div class="calendar-note"><span><i class="dot"></i> Click a day for standings</span><span>Pending = waiting for late syncs</span><span>Rebuilt = reconstructed history</span>${state.player?aqHtml(["<span>Other winners are dimmed</span>"]):""}</div></article>`;
+  $("view-calendar").innerHTML=aqHtml`<article class="card calendar-card">${toolbar}<div class="calendar" id="calendar-grid" aria-label="Daily winners for ${esc(months()[state.month-1])} ${state.year}">${[aqText("Mon"),aqText("Tue"),aqText("Wed"),aqText("Thu"),aqText("Fri"),aqText("Sat"),aqText("Sun")].map(day=>aqHtml`<div class="weekday" aria-hidden="true">${day}</div>`).join("")}${cells}</div><div class="calendar-note"><span><i class="dot"></i> Click a day for standings</span><span>Pending = waiting for late syncs</span><span>Rebuilt = reconstructed history</span>${state.player?aqHtml`<span>Other winners are dimmed</span>`:""}</div></article>`;
 }
-function openPeriod(reference) {
-  const split=reference.indexOf(":"), kind=reference.slice(0,split), key=reference.slice(split+1), collection=kind==="day"?state.data.calendar:kind==="week"?state.data.weeks:state.data.seasons;
+function openPeriod(reference:string) {
+  const split=reference.indexOf(":"), kind=reference.slice(0,split), key=reference.slice(split+1), collection=kind==="day"?state.data!.calendar:kind==="week"?state.data!.weeks:state.data!.seasons;
   const period=collection.find(item=>item.key===key); if(!period) return;
   $("day-title").textContent=periodName(period);
   const winner=period.winners.length?`${isFinal(period)?aqText("Champion"):aqText("Current leader")}${period.winners.length>1?"s":""}: ${period.winners.map(name).join(" & ")}`:aqText("No study was recorded in this period.");
-  $("day-detail").innerHTML=aqHtml`<div class="dialog-badges">${periodBadges(period)}</div><p class="intro">${esc(winner)}${period.winners.length===1?` · ${number(period.winning_margin)} XP margin`:period.winners.length>1?aqText(" · Shared win"):""}</p>${period.standings.length?aqHtml`<div class="table-wrap"><table><caption class="sr-only">Full competition standings</caption><thead><tr><th>Player</th><th class="numeric">XP</th><th class="numeric">Reviews</th><th class="numeric">Study time</th><th class="numeric">New cards</th><th class="numeric">Study days</th></tr></thead><tbody>${period.standings.map(row=>aqHtml`<tr><td>${playerCell(row.user,row.display)}</td><td class="numeric">${number(row.xp)}</td><td class="numeric">${number(row.reviews)}</td><td class="numeric">${number(Math.round(amount(row.time_ms)/60000))} min</td><td class="numeric">${number(row.new_cards)}</td><td class="numeric">${number(row.days_active)}</td></tr>`).join("")}</tbody></table></div>`:empty(aqText("No standings yet."))}<p class="settings-hint">${esc(state.data.meta.scoring_note||"")}</p>${period.reconstructed?aqHtml(['<p class="settings-hint">Reconstructed from available history; this may not include activity that was never synced.</p>']):""}${period.partial?aqHtml(['<p class="settings-hint">This period begins before the available community history, so only the recorded portion is included.</p>']):""}`;
-  $("day-dialog").showModal();
+  $("day-detail").innerHTML=aqHtml`<div class="dialog-badges">${periodBadges(period)}</div><p class="intro">${esc(winner)}${period.winners.length===1?` · ${number(period.winning_margin)} XP margin`:period.winners.length>1?aqText(" · Shared win"):""}</p>${period.standings.length?aqHtml`<div class="table-wrap"><table><caption class="sr-only">Full competition standings</caption><thead><tr><th>Player</th><th class="numeric">XP</th><th class="numeric">Reviews</th><th class="numeric">Study time</th><th class="numeric">New cards</th><th class="numeric">Study days</th></tr></thead><tbody>${period.standings.map(row=>aqHtml`<tr><td>${playerCell(row.user,row.display)}</td><td class="numeric">${number(row.xp)}</td><td class="numeric">${number(row.reviews)}</td><td class="numeric">${number(Math.round(amount(row.time_ms)/60000))} min</td><td class="numeric">${number(row.new_cards)}</td><td class="numeric">${number(row.days_active)}</td></tr>`).join("")}</tbody></table></div>`:empty(aqText("No standings yet."))}<p class="settings-hint">${esc(state.data!.meta.scoring_note||"")}</p>${period.reconstructed?aqHtml`<p class="settings-hint">Reconstructed from available history; this may not include activity that was never synced.</p>`:""}${period.partial?aqHtml`<p class="settings-hint">This period begins before the available community history, so only the recorded portion is included.</p>`:""}`;
+  $<HTMLDialogElement>("day-dialog").showModal();
 }
 function winnerCountTable() {
-  const data=state.data.winner_history,shared=state.winnerScope==="shared",metric=state.winnerMetric;
+  const data=state.data!.winner_history,shared=state.winnerScope==="shared",metric=state.winnerMetric;
   const controls=aqHtml`<div class="win-controls"><div class="segmented" role="group" aria-label="Winner history scope"><button type="button" data-trophy-win-scope="shared" aria-pressed="${shared}">Shared history</button><button type="button" data-trophy-win-scope="lifetime" aria-pressed="${!shared}">Lifetime</button></div><label class="win-sort" for="trophy-win-metric">Rank by <select id="trophy-win-metric">${[["day",aqText("Days won")],["week",aqText("Weeks won")],["month",aqText("Months won")]].map(([key,label])=>aqHtml`<option value="${key}"${metric===key?" selected":""}>${label}</option>`).join("")}</select></label></div>`;
   if(!data?.shared||!data?.lifetime)return controls+empty(aqText("Winner counts are unavailable."),aqText("The calendar and your trophy cabinet are still available below."));
-  const scope=shared?data.shared:data.lifetime,ready=!shared||amount(data.shared.player_count)>=2,key=metric+"_wins";
-  const lexical=(a,b)=>a<b?-1:a>b?1:0;
+  const scope=shared?data.shared:data.lifetime,ready=!shared||amount(data.shared.player_count)>=2,key=`${metric}_wins` as const;
+  const lexical=(a:string,b:string)=>a<b?-1:a>b?1:0;
   const players=(scope.players||[]).filter(player=>player.history_start).sort((a,b)=>amount(b[key])-amount(a[key])||lexical(String(a.display),String(b.display))||lexical(String(a.user),String(b.user)));
   const waiting=(data.waiting_players||[]).filter(player=>!state.player||player.user===state.player).sort((a,b)=>lexical(String(a.display),String(b.display))||lexical(String(a.user),String(b.user)));
   const lifetimeStart=data.meta?.start_source==="configured"?`since the configured server start${data.meta.start_date?` on ${esc(date(data.meta.start_date))}`:""}`:`across available retained history${data.meta?.start_date?` from ${esc(date(data.meta.start_date))}`:""} (which may predate this server)`;
   const note=shared?ready?`Same window for all ${number(data.shared.player_count)} players with recorded history, from ${esc(date(scope.start_date))}. The window starts with the newest player’s first recorded study date. Only full weeks and months within that window count.`:aqText("Shared history needs at least two players with recorded study history. Earlier solo wins remain in Lifetime."):`Raw win totals ${lifetimeStart}, including earlier solo wins and partial periods. Players may have different amounts of recorded history.`;
-  let rank=0,previous=null;
+  let rank=0,previous:number|null=null;
   const rows=players.map((player,index)=>{
     const score=amount(player[key]);if(previous!==score)rank=index+1;previous=score;
     if(state.player&&player.user!==state.player)return "";
-    return aqHtml`<tr><td>${ready&&score>0?rank:"—"}</td><td>${playerCell(player.user,player.display)}<span class="history-start">${ready?`History from ${esc(date(player.history_start))}`:aqText("Waiting for a second player")}</span></td>${["day","week","month"].map(kind=>aqHtml`<td class="numeric${kind===metric?" win-selected":""}">${ready?number(player[kind+"_wins"]):"—"}</td>`).join("")}</tr>`;
+    return aqHtml`<tr><td>${ready&&score>0?rank:"—"}</td><td>${playerCell(player.user,player.display)}<span class="history-start">${ready?`History from ${esc(date(player.history_start))}`:aqText("Waiting for a second player")}</span></td>${(["day","week","month"] as const).map(kind=>aqHtml`<td class="numeric${kind===metric?" win-selected":""}">${ready?number(player[`${kind}_wins` as const]):"—"}</td>`).join("")}</tr>`;
   }).join("")+waiting.map(player=>aqHtml`<tr class="win-waiting"><td>—</td><td>${playerCell(player.user,player.display)}<span class="history-start">Waiting for study history</span></td><td class="numeric">—</td><td class="numeric">—</td><td class="numeric">—</td></tr>`).join("");
   const periods=shared&&ready&&scope.periods?aqHtml`<p class="win-note">${number(scope.periods.day)} finalized days · ${number(scope.periods.week)} full weeks · ${number(scope.periods.month)} full months in this window.</p>`:"";
   return controls+aqHtml`<p class="win-window">${note}</p>`+periods+(rows?aqHtml`<table id="trophy-winner-table" class="win-count-table"><caption class="sr-only">${shared?aqText("Shared history"):aqText("Lifetime")} wins, ranked by ${aqText({day:"days",week:"weeks",month:"months"}[metric])} won</caption><thead><tr><th scope="col"><span class="sr-only">Rank</span>#</th><th scope="col">Player</th>${[["day",aqText("Days")],["week",aqText("Weeks")],["month",aqText("Months")]].map(([kind,label])=>aqHtml`<th scope="col" class="numeric${kind===metric?" win-selected":""}"${kind===metric?' aria-sort="descending"':""}>${label}<span class="sr-only"> won</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`:empty(aqText("No recorded study history in this selection."),aqText("The first recorded study sessions will start the winner history.")))+aqHtml`<p class="win-note">Finalized results only. Tied winners each earn a win; equal win totals share a rank. Player filtering keeps the same comparison window and ranks.</p>`;
 }
 function renderTrophies() {
   const players=selectedPlayers().slice().sort((a,b)=>b.day_wins-a.day_wins||b.week_wins-a.week_wins), trophies=players.flatMap(player=>(player.trophies||[]).map(trophy=>({...trophy,user:player.user,display:player.display}))).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
-  const awards=state.data.awards.filter(item=>!state.player||item.user===state.player).slice().reverse();
+  const awards=state.data!.awards.filter(item=>!state.player||item.user===state.player).slice().reverse();
   $("view-trophies").innerHTML=aqHtml`<article class="card winner-counts" id="trophy-winner-history"><div class="card-head"><div><h2>Winner history</h2><p>Days, weeks, and months won across a shared window or a lifetime.</p></div><button type="button" class="link-button" data-winner-calendar>Open calendar →</button></div>${winnerCountTable()}</article>
   <article class="card" id="lifetime-achievements"><div class="card-head"><div><h2>Lifetime achievements</h2><p>Tied competition wins and winning streaks across available history, independent of the comparison window.</p></div></div>${players.length?aqHtml`<ul class="list">${players.map(player=>aqHtml`<li class="list-row"><div class="row-text">${playerCell(player.user,player.display)}<small>${number(player.shared_wins)} tied wins · Longest winning streak: ${number(player.longest_winning_streak)} days</small></div></li>`).join("")}</ul>`:empty(aqText("Your achievements are ahead."),aqText("Recorded study sessions will start your story."))}</article>
   <article class="card"><div class="card-head"><div><h2>${state.player?esc(name(state.player))+"’s trophy cabinet":aqText("The community trophy cabinet")}</h2><p>All-time trophies: first wins, championships, and milestones worth keeping.</p></div></div>${trophies.length?aqHtml`<div class="trophy-grid">${trophies.map(trophy=>aqHtml`<div class="trophy"><span class="symbol" aria-hidden="true">✦</span><h3>${esc(trophy.title)}</h3><small>${esc(trophy.display)}</small><small>${esc(date(trophy.date))}</small></div>`).join("")}</div>`:empty(aqText("Your first trophy is ahead."),aqText("Study, win competitions, and build your streak to start your collection."))}</article>
   <article class="card"><div class="card-head"><div><h2>More than first place</h2><p>Consistency awards, most improved, and comeback recognition in ${state.year}.</p></div></div>${awardList(awards)}</article>`;
 }
-function playerOptions(selected,all=false) { return (all?aqHtml(['<option value="">Everyone</option>']):"")+(state.data?.players||[]).map(player=>aqHtml`<option value="${esc(player.user)}" ${player.user===selected?"selected":""}>${esc(player.display)}</option>`).join(""); }
+function playerOptions(selected:string,all=false) { return (all?aqHtml`<option value="">Everyone</option>`:"")+(state.data?.players||[]).map(player=>aqHtml`<option value="${esc(player.user)}" ${player.user===selected?"selected":""}>${esc(player.display)}</option>`).join(""); }
 function renderRecords() {
-  const players=state.data.players;
+  const players=state.data!.players;
   if(!players.some(player=>player.user===state.matchupA)) state.matchupA=state.player||players[0]?.user||"";
   if(!players.some(player=>player.user===state.matchupB)||state.matchupB===state.matchupA) state.matchupB=players.find(player=>player.user!==state.matchupA)?.user||"";
-  const records=state.data.records.filter(item=>(!state.player||item.user===state.player)&&(state.recordScope==="all"||item.scope===state.recordScope)).slice().sort((a,b)=>b.date.localeCompare(a.date));
-  const metrics={daily_xp:aqText("daily XP"),daily_reviews:aqText("reviews in a day"),streak:aqText("day streak")};
-  $("view-records").innerHTML=aqHtml`<div class="grid"><article class="card"><div class="card-head"><div><h2>Friendly rivals</h2><p>Head-to-head history across finalized days and weeks.</p></div></div>${players.length>1?aqHtml`<div class="form-grid"><label class="field"><span>Player one</span><select id="matchup-a">${playerOptions(state.matchupA)}</select></label><label class="field"><span>Player two</span><select id="matchup-b">${playerOptions(state.matchupB)}</select></label></div><div id="matchup-result"></div>`:empty(aqText("Better with a study buddy."),aqText("Head-to-head history is available when two players have joined."))}</article><article class="card"><div class="card-head"><div><h2>Every comeback counts</h2><p>Returning to study is progress worth recognizing.</p></div></div>${awardList(state.data.awards.filter(item=>String(item.kind).includes("comeback")&&(!state.player||item.user===state.player)).slice().reverse().slice(0,5))}</article></div>
+  const records=state.data!.records.filter(item=>(!state.player||item.user===state.player)&&(state.recordScope==="all"||item.scope===state.recordScope)).slice().sort((a,b)=>b.date.localeCompare(a.date));
+  const metrics:Record<string,string>={daily_xp:aqText("daily XP"),daily_reviews:aqText("reviews in a day"),streak:aqText("day streak")};
+  $("view-records").innerHTML=aqHtml`<div class="grid"><article class="card"><div class="card-head"><div><h2>Friendly rivals</h2><p>Head-to-head history across finalized days and weeks.</p></div></div>${players.length>1?aqHtml`<div class="form-grid"><label class="field"><span>Player one</span><select id="matchup-a">${playerOptions(state.matchupA)}</select></label><label class="field"><span>Player two</span><select id="matchup-b">${playerOptions(state.matchupB)}</select></label></div><div id="matchup-result"></div>`:empty(aqText("Better with a study buddy."),aqText("Head-to-head history is available when two players have joined."))}</article><article class="card"><div class="card-head"><div><h2>Every comeback counts</h2><p>Returning to study is progress worth recognizing.</p></div></div>${awardList(state.data!.awards.filter(item=>String(item.kind).includes("comeback")&&(!state.player||item.user===state.player)).slice().reverse().slice(0,5))}</article></div>
   <article class="card"><div class="card-head"><div><h2>Record timeline</h2><p>Personal bests and server records set in ${state.year}.</p></div><label class="field"><span class="sr-only">Record scope</span><select id="record-scope"><option value="all" ${state.recordScope==="all"?"selected":""}>All records</option><option value="server" ${state.recordScope==="server"?"selected":""}>Server records</option><option value="personal" ${state.recordScope==="personal"?"selected":""}>Personal bests</option></select></label></div>${records.length?aqHtml`<ol class="timeline">${records.map(record=>aqHtml`<li><small>${esc(date(record.date))}</small>${chip(record.scope==="server"?aqText("Server record"):aqText("Personal best"),record.scope==="server"?"gold":"blue")}<p><strong>${esc(record.display)}</strong> reached <strong>${number(record.value)} ${esc(metrics[record.metric]||record.metric)}</strong>.</p></li>`).join("")}</ol>`:empty(aqText("The next record is waiting."),aqText("New personal and community bests will appear here."))}</article>`;
   renderMatchup();
 }
 function renderMatchup() {
   if(!$("matchup-result")) return;
   if(state.matchupA===state.matchupB) { $("matchup-result").innerHTML=empty(aqText("Choose two different players.")); return; }
-  const pair=state.data.head_to_head.find(item=>(item.a===state.matchupA&&item.b===state.matchupB)||(item.b===state.matchupA&&item.a===state.matchupB));
+  const pair=state.data!.head_to_head.find(item=>(item.a===state.matchupA&&item.b===state.matchupB)||(item.b===state.matchupA&&item.a===state.matchupB));
   if(!pair) { $("matchup-result").innerHTML=empty(aqText("No shared competitions yet."),aqText("History appears after both players take part.")); return; }
   const forward=pair.a===state.matchupA, aDays=forward?pair.days_a:pair.days_b, bDays=forward?pair.days_b:pair.days_a, aWeeks=forward?pair.weeks_a:pair.weeks_b, bWeeks=forward?pair.weeks_b:pair.weeks_a;
   $("matchup-result").innerHTML=aqHtml`<div class="matchup"><div class="side">${avatar(state.matchupA)}<strong>${number(aDays)}</strong><span>${esc(name(state.matchupA))}</span><small>daily wins</small></div><span class="vs">VS</span><div class="side">${avatar(state.matchupB)}<strong>${number(bDays)}</strong><span>${esc(name(state.matchupB))}</span><small>daily wins</small></div></div><div class="notice">Weekly wins: <strong>${number(aWeeks)} – ${number(bWeeks)}</strong><br><span class="muted">Tied: ${number(pair.days_tied)} days · ${number(pair.weeks_tied)} weeks</span></div><p class="settings-hint">Compares these players’ scores against one another in finalized competitions, regardless of the overall winner. Weekly wins include only full weeks within this pair’s shared history.</p>`;
@@ -153,15 +193,15 @@ function renderMatchup() {
 function renderYear() {
   const players=selectedPlayers(), summaries=yearly(), xp=sum(summaries,"xp"), reviews=sum(summaries,"reviews"), days=sum(summaries,"study_days"), best=Math.max(0,...summaries.map(item=>amount(item.best_streak))), wins=sum(summaries,"days_won"), weeks=sum(summaries,"weeks_won");
   const monthly=Array.from({length:12},(_,index)=>{const key=`${state.year}-${String(index+1).padStart(2,"0")}`;return summaries.reduce((total,summary)=>total+amount((summary.months||[]).find(item=>item.month===key)?.xp),0);});
-  const max=Math.max(...monthly,1), bestMonth=monthly.some(value=>value>0)?months[monthly.indexOf(Math.max(...monthly))]:aqText("Still ahead");
+  const max=Math.max(...monthly,1), bestMonth=monthly.some(value=>value>0)?months()[monthly.indexOf(Math.max(...monthly))]:aqText("Still ahead");
   const trophies=players.flatMap(player=>(player.trophies||[]).filter(trophy=>String(trophy.date).startsWith(String(state.year))).map(trophy=>({...trophy,display:player.display})));
-  $("view-year").innerHTML=aqHtml`<div class="year-header"><div><div class="eyebrow">Look how far you’ve come</div><h2>${state.player?esc(name(state.player))+"’s year":aqText("A year of showing up")}</h2><p>${state.player?aqText("Every session added up. Here’s the story of your study year."):aqText("Your community’s shared effort, one study session at a time.")}</p></div><span class="year-number">${state.year}</span></div><div class="kpis">${kpi(aqText("Study days"),number(days),state.player?aqText("Days you chose to show up"):aqText("Combined player-days"),"green")}${kpi(aqText("Reviews"),number(reviews),aqText("Cards reviewed this year"),"blue")}${kpi(aqText("Best streak"),number(best)+" days",state.player?aqText("Your best streak this year"):aqText("Best player streak this year"))}${kpi(aqText("XP earned"),number(xp),aqText("Your progress, added up"),"gold")}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>A year in progress</h2><p>Strongest month: <strong>${esc(bestMonth)}</strong></p></div></div><div class="bars" role="img" aria-label="${esc(months.map((month,index)=>month+": "+number(monthly[index])+" XP").join("; "))}">${monthly.map((value,index)=>aqHtml`<div class="bar-item${value===max&&value>0?" highlight":""}" title="${esc(months[index])}: ${number(value)} XP"><i style="height:${Math.max(1,value/max*140)}px"></i><span>${esc(months[index].slice(0,3))}</span></div>`).join("")}</div><p class="settings-hint">Monthly XP follows the competition calendar. Partial months use available history.</p></article><article class="card"><div class="card-head"><div><h2>A year to remember</h2><p>The wins are part of the story. Showing up is the rest.</p></div></div><ul class="list"><li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${number(wins)} daily wins</strong><small>Days at the top, including shared wins</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">✦</span><div class="row-text"><strong>${number(weeks)} weekly titles</strong><small>Championships earned in ${state.year}</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">↗</span><div class="row-text"><strong>${number(trophies.length)} trophies earned</strong><small>${trophies.length?esc(trophies.slice(-2).map(item=>item.title).join(" · ")):aqText("Your next milestone is ahead")}</small></div></li></ul></article></div>${!reviews?empty(aqText("Your story for this year is still beginning."),aqText("Choose another year to look back, or study today to start a new chapter.")):""}`;
+  $("view-year").innerHTML=aqHtml`<div class="year-header"><div><div class="eyebrow">Look how far you’ve come</div><h2>${state.player?esc(name(state.player))+"’s year":aqText("A year of showing up")}</h2><p>${state.player?aqText("Every session added up. Here’s the story of your study year."):aqText("Your community’s shared effort, one study session at a time.")}</p></div><span class="year-number">${state.year}</span></div><div class="kpis">${kpi(aqText("Study days"),number(days),state.player?aqText("Days you chose to show up"):aqText("Combined player-days"),"green")}${kpi(aqText("Reviews"),number(reviews),aqText("Cards reviewed this year"),"blue")}${kpi(aqText("Best streak"),number(best)+" days",state.player?aqText("Your best streak this year"):aqText("Best player streak this year"))}${kpi(aqText("XP earned"),number(xp),aqText("Your progress, added up"),"gold")}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>A year in progress</h2><p>Strongest month: <strong>${esc(bestMonth)}</strong></p></div></div><div class="bars" role="img" aria-label="${esc(months().map((month,index)=>month+": "+number(monthly[index])+" XP").join("; "))}">${monthly.map((value,index)=>aqHtml`<div class="bar-item${value===max&&value>0?" highlight":""}" title="${esc(months()[index])}: ${number(value)} XP"><i style="height:${Math.max(1,value/max*140)}px"></i><span>${esc(months()[index].slice(0,3))}</span></div>`).join("")}</div><p class="settings-hint">Monthly XP follows the competition calendar. Partial months use available history.</p></article><article class="card"><div class="card-head"><div><h2>A year to remember</h2><p>The wins are part of the story. Showing up is the rest.</p></div></div><ul class="list"><li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${number(wins)} daily wins</strong><small>Days at the top, including shared wins</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">✦</span><div class="row-text"><strong>${number(weeks)} weekly titles</strong><small>Championships earned in ${state.year}</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">↗</span><div class="row-text"><strong>${number(trophies.length)} trophies earned</strong><small>${trophies.length?esc(trophies.slice(-2).map(item=>item.title).join(" · ")):aqText("Your next milestone is ahead")}</small></div></li></ul></article></div>${!reviews?empty(aqText("Your story for this year is still beginning."),aqText("Choose another year to look back, or study today to start a new chapter.")):""}`;
 }
 function renderAll() {
   if(!state.data) return;
   renderOverview();renderCalendar();renderTrophies();renderRecords();renderYear();renderPrivate();showView(state.challengeId?"challenge-"+state.challengeId:state.view);
 }
-function accountBanner() { return aqHtml`<div class="auth-status"><span>${avatar(state.session.user,name(state.session.user))} <strong>${esc(name(state.session.user))}</strong></span><div><button type="button" data-avatar-edit>Profile picture</button> <button type="button" data-disconnect>Disconnect</button></div></div>`; }
+function accountBanner() { return aqHtml`<div class="auth-status"><span>${avatar(state.session!.user,name(state.session!.user))} <strong>${esc(name(state.session!.user))}</strong></span><div><button type="button" data-avatar-edit>Profile picture</button> <button type="button" data-disconnect>Disconnect</button></div></div>`; }
 function renderPrivate() {
   const panels=["challenges","reminders","activity"];
   $("connect-button").hidden=!!state.session;
@@ -172,29 +212,29 @@ function renderPrivate() {
   }
   const banner=accountBanner();
   renderActivity(banner);
-  if(state.privateLoading) { ["challenges","reminders"].forEach(panel=>$("view-"+panel).innerHTML=banner+aqHtml(['<p class="loading-copy" role="status">Loading your account…</p>']));return; }
+  if(state.privateLoading) { ["challenges","reminders"].forEach(panel=>$("view-"+panel).innerHTML=banner+aqHtml`<p class="loading-copy" role="status">Loading your account…</p>`);return; }
   if(state.privateError) { ["challenges","reminders"].forEach(panel=>$("view-"+panel).innerHTML=banner+aqHtml`<div class="notice error" role="alert">${esc(state.privateError)} <button type="button" data-private-retry>Try again</button></div>`);return; }
   renderReminderForm(banner);renderChallenges(banner);
 }
-function hourOptions(selected) { return Array.from({length:24},(_,hour)=>aqHtml`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join(""); }
-function renderReminderForm(banner) {
+function hourOptions(selected:unknown) { return Array.from({length:24},(_,hour)=>aqHtml`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join(""); }
+function renderReminderForm(banner:string) {
   const prefs=state.reminderDraft||state.reminders;if(!prefs) { $("view-reminders").innerHTML=banner;return; }
-  $("view-reminders").innerHTML=banner+aqHtml`<article class="card"><div class="card-head"><div><h2>A nudge when it helps</h2><p>Choose each reminder. You’re in control of the frequency.</p></div><span class="symbol" aria-hidden="true">◷</span></div><form id="reminder-form"><div class="settings-list">${reminderDefinitions.map(([key,title,description])=>aqHtml`<label class="check"><input type="checkbox" name="${key}" ${prefs[key]?"checked":""}><span><strong>${title}</strong><small>${description}</small></span></label>`).join("")}</div><div class="settings-timing"><label class="field"><span>Daily reminder at</span><select name="reminder_hour">${hourOptions(prefs.reminder_hour)}</select></label><label class="field"><span>Quiet hours start</span><select name="quiet_start">${hourOptions(prefs.quiet_start)}</select></label><label class="field"><span>Quiet hours end</span><select name="quiet_end">${hourOptions(prefs.quiet_end)}</select></label><label class="field"><span>Daily limit</span><select name="daily_limit">${[1,2,3,4,5].map(value=>aqHtml`<option value="${value}" ${value===prefs.daily_limit?"selected":""}>${esc(value===1 ? aqText`${value} notification` : aqText`${value} notifications`)}</option>`).join("")}</select></label></div><p class="settings-hint">Reminder times use your AnkiQuest timezone. Streak warnings follow your Anki day cutoff and stop after studying is recorded. Quiet hours and your daily limit apply to these reminders, including urgent ones. Set the same quiet start and end to disable quiet hours.</p><p class="settings-hint">These preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms are managed separately in each client's settings. Delivery uses the notification channel configured for your AnkiQuest account. Freeze refill reminders apply when quest-earned freezes are enabled.</p><p id="reminder-status" class="status" role="status"></p><div class="form-actions"><button class="primary" type="submit">Save reminder preferences</button></div></form></article>`;
+  $("view-reminders").innerHTML=banner+aqHtml`<article class="card"><div class="card-head"><div><h2>A nudge when it helps</h2><p>Choose each reminder. You’re in control of the frequency.</p></div><span class="symbol" aria-hidden="true">◷</span></div><form id="reminder-form"><div class="settings-list">${reminderDefinitions().map(([key,title,description])=>aqHtml`<label class="check"><input type="checkbox" name="${key}" ${prefs[key]?"checked":""}><span><strong>${title}</strong><small>${description}</small></span></label>`).join("")}</div><div class="settings-timing"><label class="field"><span>Daily reminder at</span><select name="reminder_hour">${hourOptions(prefs.reminder_hour)}</select></label><label class="field"><span>Quiet hours start</span><select name="quiet_start">${hourOptions(prefs.quiet_start)}</select></label><label class="field"><span>Quiet hours end</span><select name="quiet_end">${hourOptions(prefs.quiet_end)}</select></label><label class="field"><span>Daily limit</span><select name="daily_limit">${[1,2,3,4,5].map(value=>aqHtml`<option value="${value}" ${value===prefs.daily_limit?"selected":""}>${esc(value===1 ? aqText`${value} notification` : aqText`${value} notifications`)}</option>`).join("")}</select></label></div><p class="settings-hint">Reminder times use your AnkiQuest timezone. Streak warnings follow your Anki day cutoff and stop after studying is recorded. Quiet hours and your daily limit apply to these reminders, including urgent ones. Set the same quiet start and end to disable quiet hours.</p><p class="settings-hint">These preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms are managed separately in each client's settings. Delivery uses the notification channel configured for your AnkiQuest account. Freeze refill reminders apply when quest-earned freezes are enabled.</p><p id="reminder-status" class="status" role="status"></p><div class="form-actions"><button class="primary" type="submit">Save reminder preferences</button></div></form></article>`;
   $("reminder-status").textContent=state.reminderStatus;
   $("reminder-status").className=state.reminderError?"status error":"status";
-  $("reminder-form").querySelectorAll("input,select,button").forEach(control=>control.disabled=state.reminderSaving);
+  $("reminder-form").querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>("input,select,button").forEach(control=>control.disabled=state.reminderSaving);
 }
-function reminderFormValues(form) {
-  const values={};reminderDefinitions.forEach(([key])=>values[key]=form.elements[key].checked);
-  ["reminder_hour","quiet_start","quiet_end","daily_limit"].forEach(key=>values[key]=Number(form.elements[key].value));
-  return values;
+function reminderFormValues(form:HTMLFormElement) {
+  const values:Partial<ReminderSettings>={};reminderDefinitions().forEach(([key])=>values[key]=formField(form,key,HTMLInputElement).checked);
+  (["reminder_hour","quiet_start","quiet_end","daily_limit"] as const).forEach(key=>values[key]=Number(formField(form,key,HTMLSelectElement).value));
+  return values as ReminderSettings;
 }
-function dateTime(value) { if(value===null||value===undefined) return "—"; const parsed=new Date(value);return Number.isNaN(parsed.getTime())?String(value):parsed.toLocaleDateString(AnkiQuestI18n.language,{month:"short",day:"numeric",year:"numeric"}); }
-function progressBar(progress,target) { const percent=target?Math.min(100,amount(progress)/amount(target)*100):0;return aqHtml`<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${amount(target)}" aria-valuenow="${Math.min(amount(target),amount(progress))}" aria-label="Challenge progress"><i style="width:${percent}%"></i></div>`; }
-function challengeEnded(challenge) {
+function dateTime(value:string|number|null|undefined) { if(value===null||value===undefined) return "—"; const parsed=new Date(value);return Number.isNaN(parsed.getTime())?String(value):parsed.toLocaleDateString(AnkiQuestI18n.language,{month:"short",day:"numeric",year:"numeric"}); }
+function progressBar(progress:unknown,target:unknown) { const percent=target?Math.min(100,amount(progress)/amount(target)*100):0;return aqHtml`<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="${amount(target)}" aria-valuenow="${Math.min(amount(target),amount(progress))}" aria-label="Challenge progress"><i style="width:${percent}%"></i></div>`; }
+function challengeEnded(challenge:Challenge) {
   return ["ended", "cancelled", "declined"].includes(challenge.status) || Date.now() >= Number(challenge.end_at);
 }
-function renderWeeklySuggestion(suggestion) {
+function renderWeeklySuggestion(suggestion:WeeklySuggestion|null|undefined) {
   if (!suggestion) return "";
   const content = suggestion.challenge_id
     ? aqHtml`<p>Invitation sent. Your friend can choose whether to join.</p><a class="button-link" href="#challenge-${encodeURIComponent(suggestion.challenge_id)}">View weekly goal</a>`
@@ -203,7 +243,7 @@ function renderWeeklySuggestion(suggestion) {
       : aqHtml`<div class="list-row">${avatar(suggestion.friend.user,suggestion.friend.display)}<strong>${esc(suggestion.friend.display)}</strong></div><p>Study on 3 days each over seven days.</p><p class="settings-hint">Your seven days start after both of you agree.</p><p class="settings-hint">Reply by ${esc(dateTime(suggestion.expires_at))}</p><div class="actions"><button class="primary" type="button" data-weekly-action="invite" ${state.challengeSaving ? "disabled" : ""}>Invite friend</button><button type="button" data-weekly-action="dismiss" ${state.challengeSaving ? "disabled" : ""}>Not this week</button></div>`;
   return aqHtml`<article class="card weekly-suggestion" data-weekly-start="${esc(suggestion.week_start)}"><h2>Your weekly suggestion</h2>${content}<p class="settings-hint">Next suggestion: ${esc(dateTime(suggestion.expires_at))}</p></article>`;
 }
-function renderChallenges(banner) {
+function renderChallenges(banner:string) {
   const payload = state.challenges;
   if (!payload) { $("view-challenges").innerHTML = banner; return; }
   const challenges = payload.challenges || [];
@@ -213,10 +253,10 @@ function renderChallenges(banner) {
     $("view-challenges").innerHTML = banner + aqHtml`<button class="link-button" type="button" data-goto="challenges">← All friend goals</button>${feedback}` + (selected ? renderChallenge(selected, true) : aqHtml`<article class="card">${empty(aqText("This goal is not available."), aqText("It may have ended or you may not be a participant. Refresh to check again."))}<button type="button" data-private-retry>Refresh goals</button></article>`);
     return;
   }
-  const invited = challenges.filter(item => !challengeEnded(item) && item.members.some(member => member.user === state.session.user && member.status === "invited"));
+  const invited = challenges.filter(item => !challengeEnded(item) && item.members.some(member => member.user === state.session!.user && member.status === "invited"));
   const active = challenges.filter(item => !challengeEnded(item) && !invited.includes(item));
   const ended = challenges.filter(challengeEnded).slice().reverse();
-  const group = (title, items, description) => aqHtml`<section class="challenge-group" aria-label="${esc(title)}"><div class="card-head"><div><h2>${title}</h2><p>${description}</p></div></div><div class="stack">${items.map(item => renderChallenge(item)).join("")}</div></section>`;
+  const group = (title:string, items:Challenge[], description:string) => aqHtml`<section class="challenge-group" aria-label="${esc(title)}"><div class="card-head"><div><h2>${title}</h2><p>${description}</p></div></div><div class="stack">${items.map(item => renderChallenge(item)).join("")}</div></section>`;
   $("view-challenges").innerHTML = banner + aqHtml`<div class="card-head friend-heading"><div><h2>Your friend goals</h2><p>Your own decks, a little encouragement.</p></div><button class="primary" type="button" data-create-challenge>Start a friend goal</button><button type="button" data-nudge-friends>Nudge friends</button><button type="button" data-private-retry class="link-button">Refresh</button></div>${feedback}` +
     renderWeeklySuggestion(payload.weekly_suggestion) +
     (invited.length ? group(aqText("Invitations"), invited, aqText("Choose what fits your week. Joining is always optional.")) : "") +
@@ -226,89 +266,89 @@ function renderChallenges(banner) {
     (ended.length ? aqHtml`<details class="card challenge-history"><summary>Previous goals (${number(ended.length)})</summary><div class="stack">${ended.map(item => renderChallenge(item)).join("")}</div></details>` : "") + renderFriendAchievements();
 }
 function renderFriendAchievements() {
-  const items = (state.friendAchievements?.items || []).filter(item => item.kind === "completion" && item.sender && item.sender !== state.session.user);
-  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and chose to share with you.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div><span class="chip green">Deck complete</span></div><p>${esc(item.body)}</p>${item.replied ? aqHtml(['<p class="settings-hint">Congratulations sent</p>']) : aqHtml(['<button type="button" data-congratulate>Congratulate</button>'])}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml(['<p role="status">Loading achievements…</p>']) : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.friendAchievements?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only completions shared with your account appear here.</p></section>`;
+  const items = (state.friendAchievements?.items || []).filter(item => item.kind === "completion" && item.sender && item.sender !== state.session!.user);
+  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and chose to share with you.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div><span class="chip green">Deck complete</span></div><p>${esc(item.body)}</p>${item.replied ? aqHtml`<p class="settings-hint">Congratulations sent</p>` : aqHtml`<button type="button" data-congratulate>Congratulate</button>`}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml`<p role="status">Loading achievements…</p>` : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.friendAchievements?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only completions shared with your account appear here.</p></section>`;
 }
-function renderChallenge(challenge, detail = false) {
-  const me = challenge.members.find(member => member.user === state.session.user), ended = challengeEnded(challenge);
+function renderChallenge(challenge:Challenge, detail = false) {
+  const me = challenge.members.find(member => member.user === state.session!.user), ended = challengeEnded(challenge);
   const waiting = !challenge.started;
   const unit = challenge.kind === "reviews" ? aqText("reviews") : aqText("study days");
   const own = me?.progress || 0, progress = challenge.cooperative ? challenge.progress : own;
   const invited = me?.status === "invited" && !ended;
-  const actions = [];
+  const actions:[string,string,string][] = [];
   if (invited) actions.push(["accept", aqText("Accept invitation"), "primary"], ["decline", aqText("Decline"), ""]);
-  if (detail && me?.status === "accepted" && !ended && challenge.creator !== state.session.user) actions.push(["leave", aqText("Leave goal"), ""]);
-  if (detail && challenge.creator === state.session.user && !ended) actions.push(["cancel", aqText("End goal for everyone"), ""]);
+  if (detail && me?.status === "accepted" && !ended && challenge.creator !== state.session!.user) actions.push(["leave", aqText("Leave goal"), ""]);
+  if (detail && challenge.creator === state.session!.user && !ended) actions.push(["cancel", aqText("End goal for everyone"), ""]);
   const status = invited ? aqText("You're invited") : challenge.status === "complete" ? aqText("Goal reached") : ended ? challenge.status === "declined" ? aqText("Invitation declined") : challenge.status === "cancelled" ? aqText("Ended early") : aqText("Ended") : waiting ? challenge.weekly ? aqText("Waiting for your friend") : aqText("Waiting for everyone") : aqText("In progress");
   const explanation = waiting ? challenge.weekly ? aqText("Your seven days start after both of you agree.") : aqText("The full goal duration starts after everyone accepts.") : challenge.weekly ? aqText("Study on 3 days each over seven days.") : challenge.cooperative ? `Your accepted members contribute toward one total of ${number(challenge.target)} ${unit}. Contributions can be different sizes.` : `Each person has their own target of ${number(challenge.target)} ${unit}.`;
   const title = challenge.weekly ? aqText(challenge.title) : challenge.title;
   const timing = waiting ? ended ? aqText("Not started") : challenge.weekly ? aqText`Reply by ${dateTime(challenge.end_at)}` : aqText("Starts when everyone accepts") : aqText`Ends ${dateTime(challenge.end_at)}`;
-  return aqHtml`<article class="card challenge" data-goal="${esc(challenge.id)}"><div class="toolbar"><h3>${esc(title)}</h3>${chip(status, invited ? "blue" : challenge.status === "complete" ? "green" : "")}</div><p class="challenge-meta">${challenge.cooperative ? aqText("One shared total") : aqText("Individual targets")} · ${esc(timing)}</p><p class="settings-hint">${esc(explanation)}</p>${invited ? aqHtml`<p>${esc(name(challenge.creator))} invited you. Only studying after you accept counts.</p>` : ""}${!waiting && (challenge.cooperative || me?.status === "accepted") ? aqHtml`${progressBar(progress, challenge.target)}<p class="settings-hint">${number(progress)} / ${number(challenge.target)} ${unit}${challenge.cooperative ? aqText(" together") : aqText(" for you")}</p>` : ""}<div class="members">${challenge.members.map(member => aqHtml`<div class="member">${avatar(member.user, member.display)}<span>${esc(member.display)}${member.user === state.session.user ? aqText(" · you") : ""}</span><small>${waiting ? member.status === "accepted" ? aqText("Ready when you are") : esc(aqText(member.status)) : member.status === "accepted" ? `${number(member.progress)} ${unit}` : esc(member.status)}</small></div>`).join("")}</div>${detail ? aqHtml`<p class="settings-hint">${waiting ? challenge.weekly ? aqText("Studying before you both agree does not count toward this goal.") : aqText("Studying before everyone accepts does not count toward this goal.") : `${esc(dateTime(challenge.start_at))} – ${esc(dateTime(challenge.end_at))}.`} ${challenge.kind === "study_days" ? aqText("A studied Anki day counts once per person; streak freezes do not count.") : aqText("Reviews after accepting count toward your goal. Your deck's review schedule stays unchanged.")}</p>` : ""}<div class="actions">${actions.map(([action, label, style]) => aqHtml`<button type="button" class="${style}" data-challenge-action="${action}" data-challenge-id="${esc(challenge.id)}">${label}</button>`).join("")}${!detail ? aqHtml`<a class="button-link" href="#challenge-${encodeURIComponent(challenge.id)}">Details</a>` : ""}</div></article>`;
+  return aqHtml`<article class="card challenge" data-goal="${esc(challenge.id)}"><div class="toolbar"><h3>${esc(title)}</h3>${chip(status, invited ? "blue" : challenge.status === "complete" ? "green" : "")}</div><p class="challenge-meta">${challenge.cooperative ? aqText("One shared total") : aqText("Individual targets")} · ${esc(timing)}</p><p class="settings-hint">${esc(explanation)}</p>${invited ? aqHtml`<p>${esc(name(challenge.creator))} invited you. Only studying after you accept counts.</p>` : ""}${!waiting && (challenge.cooperative || me?.status === "accepted") ? aqHtml`${progressBar(progress, challenge.target)}<p class="settings-hint">${number(progress)} / ${number(challenge.target)} ${unit}${challenge.cooperative ? aqText(" together") : aqText(" for you")}</p>` : ""}<div class="members">${challenge.members.map(member => aqHtml`<div class="member">${avatar(member.user, member.display)}<span>${esc(member.display)}${member.user === state.session!.user ? aqText(" · you") : ""}</span><small>${waiting ? member.status === "accepted" ? aqText("Ready when you are") : esc(aqText(member.status)) : member.status === "accepted" ? `${number(member.progress)} ${unit}` : esc(member.status)}</small></div>`).join("")}</div>${detail ? aqHtml`<p class="settings-hint">${waiting ? challenge.weekly ? aqText("Studying before you both agree does not count toward this goal.") : aqText("Studying before everyone accepts does not count toward this goal.") : `${esc(dateTime(challenge.start_at))} – ${esc(dateTime(challenge.end_at))}.`} ${challenge.kind === "study_days" ? aqText("A studied Anki day counts once per person; streak freezes do not count.") : aqText("Reviews after accepting count toward your goal. Your deck's review schedule stays unchanged.")}</p>` : ""}<div class="actions">${actions.map(([action, label, style]) => aqHtml`<button type="button" class="${style}" data-challenge-action="${action}" data-challenge-id="${esc(challenge.id)}">${label}</button>`).join("")}${!detail ? aqHtml`<a class="button-link" href="#challenge-${encodeURIComponent(challenge.id)}">Details</a>` : ""}</div></article>`;
 }
 function openChallengeCreator() {
-  if (!state.session || !state.challenges || $("challenge-dialog").open) return;
-  const recipients = (state.challenges.recipients || []).filter(person => person.user !== state.session.user);
+  if (!state.session || !state.challenges || $<HTMLDialogElement>("challenge-dialog").open) return;
+  const recipients = (state.challenges.recipients || []).filter(person => person.user !== state.session!.user);
   state.challengeBodyKey = null;
   state.challengeRequest = globalThis.crypto?.randomUUID?.() || `goal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  $("challenge-create-content").innerHTML = aqHtml`<form id="challenge-form"><div class="preset-note"><span class="chip green">A manageable start</span><h3>Three study days together</h3><p>Each person studies on 3 days over the next 7 days. Use your own decks, at your own pace.</p></div><fieldset><legend>Invite your study buddies</legend>${recipients.length ? aqHtml`<div class="recipients">${recipients.map(person => aqHtml`<label class="check"><input type="checkbox" name="recipients" value="${esc(person.user)}"><span>${esc(person.display)}</span></label>`).join("")}</div>` : aqHtml(['<p class="muted">There are no other players to invite yet.</p>'])}</fieldset><details id="challenge-customize" class="goal-customize"><summary>Customize this goal</summary><div class="form-grid"><label class="field span-2"><span>Goal name</span><input name="title" required maxlength="80" value="Three study days together" autocomplete="off"></label><label class="field"><span>Measure progress in</span><select name="kind" id="challenge-kind"><option value="study_days">Study days</option><option value="reviews">Reviews</option></select></label><label class="field"><span>How you participate</span><select name="cooperative" id="challenge-mode"><option value="false">Each person has a target</option><option value="true">Everyone adds to one total</option></select></label><label class="field"><span id="target-label">Target per person</span><input name="target" type="number" min="1" max="31" value="3" required step="1"></label><label class="field"><span>Duration in days</span><input name="duration_days" type="number" min="1" max="31" value="7" required step="1"></label></div><p id="challenge-target-help" class="settings-hint">Each person has their own target. Study days count actual studying, not freezes.</p></details><label class="check"><input type="checkbox" name="start_when_ready"><span>Start when everyone accepts</span></label><p class="settings-hint">Leave this off to start now. Turn it on to give everyone the full duration after all invitees accept. Studying before then does not count.</p><p id="challenge-status" class="status" role="status"></p><div class="form-actions"><button type="button" data-close="challenge-dialog">Not now</button><button class="primary" type="submit" ${recipients.length ? "" : "disabled"}>Send invitation</button></div></form>`;
-  $("challenge-form").addEventListener("invalid", () => { $("challenge-customize").open = true; }, true);
-  $("challenge-dialog").showModal();
+  $("challenge-create-content").innerHTML = aqHtml`<form id="challenge-form"><div class="preset-note"><span class="chip green">A manageable start</span><h3>Three study days together</h3><p>Each person studies on 3 days over the next 7 days. Use your own decks, at your own pace.</p></div><fieldset><legend>Invite your study buddies</legend>${recipients.length ? aqHtml`<div class="recipients">${recipients.map(person => aqHtml`<label class="check"><input type="checkbox" name="recipients" value="${esc(person.user)}"><span>${esc(person.display)}</span></label>`).join("")}</div>` : aqHtml`<p class="muted">There are no other players to invite yet.</p>`}</fieldset><details id="challenge-customize" class="goal-customize"><summary>Customize this goal</summary><div class="form-grid"><label class="field span-2"><span>Goal name</span><input name="title" required maxlength="80" value="Three study days together" autocomplete="off"></label><label class="field"><span>Measure progress in</span><select name="kind" id="challenge-kind"><option value="study_days">Study days</option><option value="reviews">Reviews</option></select></label><label class="field"><span>How you participate</span><select name="cooperative" id="challenge-mode"><option value="false">Each person has a target</option><option value="true">Everyone adds to one total</option></select></label><label class="field"><span id="target-label">Target per person</span><input name="target" type="number" min="1" max="31" value="3" required step="1"></label><label class="field"><span>Duration in days</span><input name="duration_days" type="number" min="1" max="31" value="7" required step="1"></label></div><p id="challenge-target-help" class="settings-hint">Each person has their own target. Study days count actual studying, not freezes.</p></details><label class="check"><input type="checkbox" name="start_when_ready"><span>Start when everyone accepts</span></label><p class="settings-hint">Leave this off to start now. Turn it on to give everyone the full duration after all invitees accept. Studying before then does not count.</p><p id="challenge-status" class="status" role="status"></p><div class="form-actions"><button type="button" data-close="challenge-dialog">Not now</button><button class="primary" type="submit" ${recipients.length ? "" : "disabled"}>Send invitation</button></div></form>`;
+  $("challenge-form").addEventListener("invalid", () => { $<HTMLDetailsElement>("challenge-customize").open = true; }, true);
+  $<HTMLDialogElement>("challenge-dialog").showModal();
 }
-function renderActivity(banner) {
+function renderActivity(banner:string) {
   if(state.session && state.challenges && !state.privateLoading && !state.privateError) renderChallenges(accountBanner());
-  if (state.activityLoading && !state.activity) { $("view-activity").innerHTML = banner + aqHtml(['<p role="status" class="loading-copy">Loading your activity…</p>']); return; }
+  if (state.activityLoading && !state.activity) { $("view-activity").innerHTML = banner + aqHtml`<p role="status" class="loading-copy">Loading your activity…</p>`; return; }
   const payload = state.activity, items = payload?.items || [];
   const unread = Number(payload?.unread_count) || 0;
   $("activity-count").hidden = !unread;
   $("activity-count").textContent = unread > 99 ? "99+" : String(unread);
   $("view-activity").innerHTML = banner + aqHtml`<div class="card-head friend-heading"><div><h2>Your activity</h2><p>Invitations, encouragement, and study updates.</p></div><button type="button" data-activity-refresh ${state.activityLoading ? "disabled" : ""}>Refresh</button></div>${state.activityError ? aqHtml`<p class="notice error" role="alert">${esc(state.activityError)}</p>` : ""}<p id="activity-action-status" class="status" role="status"></p>${renderMailbox(payload, unread)}${state.activityBox === "sent" ? renderSent() : renderInbox(payload, items)}`;
 }
-function renderInbox(payload, items) {
+function renderInbox(payload:ActivityPage|null, items:Notice[]) {
   const attention=Array.isArray(payload?.attention)?payload.attention:[];
   const showAttention=state.activityCategory==="all"&&attention.length>0;
   const visible=showAttention?items.filter(item=>!attention.some(important=>important.id===item.id)):items;
-  const categories=payload?.legacy?"":aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories.map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
+  const categories=payload?.legacy?"":aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories().map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload?.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
   const emptyText=state.activityUnreadOnly?aqText("No unread notifications here."):state.activityCategory==="needs_action"?aqText("No invitations need a response."):state.activityCategory!=="all"?aqText("Nothing in this category yet."):showAttention?aqText("Everything else is up to date."):aqText("You're all caught up.");
-  return aqHtml`${renderAttention(payload)}${categories}${payload?.legacy ? aqHtml(['<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>']) : aqHtml(['<label class="activity-window">Show <select id="activity-window"><option value="30" ']) + (state.activityDays === 30 ? "selected" : "") + aqHtml(['>Last 30 days</option><option value="90" ']) + (state.activityDays === 90 ? "selected" : "") + aqHtml(['>Last 90 days</option></select></label>'])}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml(['<p role="status">Loading…</p>']) : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
+  return aqHtml`${renderAttention(payload)}${categories}${payload?.legacy ? aqHtml`<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>` : aqHtml`<label class="activity-window">Show <select id="activity-window"><option value="30" ` + (state.activityDays === 30 ? "selected" : "") + aqHtml`>Last 30 days</option><option value="90" ` + (state.activityDays === 90 ? "selected" : "") + aqHtml`>Last 90 days</option></select></label>`}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml`<p role="status">Loading…</p>` : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
 }
-function renderAttention(payload) {
+function renderAttention(payload:ActivityPage|null) {
   if(!payload?.action_count || state.activityCategory==="needs_action")return "";
   const count=Number(payload.action_count),attention=Array.isArray(payload.attention)?payload.attention:[];
   if(state.activityCategory!=="all")return "";
   return aqHtml`<section class="activity-attention" aria-labelledby="activity-attention-title"><div class="card-head"><div><h3 id="activity-attention-title">${aqText("Needs action")} <span class="count-badge">${number(count)}</span></h3><p>${aqText("Invitations stay here until you respond, even after you read them.")}</p></div></div><div class="stack">${attention.map(item=>aqHtml`<article class="card activity-attention-item"><strong>${esc(item.title)}</strong><p>${esc(item.body)}</p><button type="button" class="primary" data-activity-challenge="${Number(item.challenge_id)}" data-notice-id="${Number(item.id)}">${aqText("View invitation")}</button></article>`).join("")}</div>${count>attention.length?aqHtml`<button type="button" data-activity-category="needs_action">${aqText("View all invitations")}</button>`:""}</section>`;
 }
-function renderActivityDays(items) {
+function renderActivityDays(items:Notice[]) {
   let previous="";
   const today=new Date(),yesterday=new Date(today);yesterday.setDate(today.getDate()-1);
   return items.map(item=>{const date=new Date(Number(item.created_at)*1000),key=date.toDateString();const heading=key!==previous?aqHtml`<h3 class="activity-day">${esc(key===today.toDateString()?aqText("Today"):key===yesterday.toDateString()?aqText("Yesterday"):new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",day:"numeric",year:"numeric"}).format(date))}</h3>`:"";previous=key;return heading+renderActivityItem(item);}).join("");
 }
-function renderMailbox(payload, unread) {
+function renderMailbox(payload:ActivityPage|null, unread:number) {
   const box = state.activityBox;
   return aqHtml`<div class="actions activity-box"><div class="segmented" role="group" aria-label="Activity mailbox"><button type="button" data-activity-box="inbox" aria-pressed="${box === "inbox"}">Inbox</button><button type="button" data-activity-box="sent" aria-pressed="${box === "sent"}">Sent</button></div>${box === "inbox" && unread && !payload?.legacy ? aqHtml`<button type="button" data-activity-read-all>Mark all as read</button>` : ""}</div>`;
 }
 function renderSent() {
-  if (state.sentLoading && !state.sent) return aqHtml(['<p role="status" class="loading-copy">Loading…</p>']);
+  if (state.sentLoading && !state.sent) return aqHtml`<p role="status" class="loading-copy">Loading…</p>`;
   const items = state.sent?.items || [];
   return aqHtml`${state.sentError ? aqHtml`<p class="notice error" role="alert">${esc(state.sentError)}</p>` : ""}<div class="stack activity-list">${items.length ? items.map(renderSentItem).join("") : state.sentError ? "" : empty(aqText("Nothing sent yet."), aqText("Replies and nudges you send appear here, with when they were read."))}</div>${state.sent?.next_before ? aqHtml`<button type="button" class="load-more" data-sent-more ${state.sentLoading ? "disabled" : ""}>${state.sentLoading ? aqText("Loading…") : aqText("Load earlier messages")}</button>` : ""}`;
 }
-function replyContext(item) {
+function replyContext(item:Notice) {
   const original = item.reply_to;
   return original ? aqHtml`<blockquote class="reply-context"><small>${aqText("In reply to")}</small><strong>${esc(original.title)}</strong><span>${esc(original.body)}</span></blockquote>` : "";
 }
-function renderSentItem(item) {
-  const when = date => date.toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+function renderSentItem(item:SentNotice) {
+  const when = (date:Date) => date.toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
   const sent = new Date(Number(item.created_at) * 1000), seen = item.read_at ? new Date(Number(item.read_at) * 1000) : null;
-  return aqHtml`<article class="card activity-item sent-item" data-sent="${Number(item.id)}"><div class="card-head"><div><h3>To ${esc(name(item.recipient))}</h3><p><time datetime="${sent.toISOString()}">${esc(when(sent))}</time></p></div>${seen ? aqHtml`<span class="chip green">Seen ${esc(when(seen))}</span>` : aqHtml(['<span class="chip">Not seen yet</span>'])}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p></article>`;
+  return aqHtml`<article class="card activity-item sent-item" data-sent="${Number(item.id)}"><div class="card-head"><div><h3>To ${esc(name(item.recipient))}</h3><p><time datetime="${sent.toISOString()}">${esc(when(sent))}</time></p></div>${seen ? aqHtml`<span class="chip green">Seen ${esc(when(seen))}</span>` : aqHtml`<span class="chip">Not seen yet</span>`}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p></article>`;
 }
-function renderActivityItem(item) {
+function renderActivityItem(item:Notice) {
   const id = Number(item.id), challenge = Number(item.challenge_id), target = Number.isSafeInteger(challenge) && challenge > 0 ? challenge : /^\/community#challenge-([1-9]\d*)$/.exec(item.route || "")?.[1];
   const unread = !state.activity?.legacy && !item.read_at;
   const answerable = !!item.sender && !item.replied && !target;
   const quickReply = item.kind === "completion" ? aqText("Good job!") : item.kind === "reply" ? aqText("Thanks!") : item.kind === "nudge" ? aqText("On it!") : "";
-  return aqHtml`<article class="card activity-item${unread ? " unread" : ""}" data-notice="${id}"><div class="card-head"><div><h3>${esc(item.title)}</h3><p><time datetime="${new Date(Number(item.created_at) * 1000).toISOString()}">${esc(new Date(Number(item.created_at) * 1000).toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></p></div>${unread ? aqHtml(['<span class="chip blue">Unread</span>']) : ""}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p><div class="actions">${target ? aqHtml`<button type="button" class="${item.action_required ? "primary" : ""}" data-activity-challenge="${esc(target)}" data-notice-id="${id}">${item.action_required ? aqText("View invitation") : aqText("Open goal")}</button>` : ""}${unread ? aqHtml`<button type="button" data-mark-read="${id}">Mark read</button>` : ""}</div>${answerable ? aqHtml`<form class="activity-reply" data-reply-form="${id}"><label class="field"><span>Reply to ${esc(name(item.sender))}</span><input name="message" maxlength="200" required autocomplete="off" placeholder="Say something kind"></label><div class="actions"><button type="submit">Send reply</button>${quickReply ? aqHtml`<button type="button" data-quick-reply="${id}" data-message="${esc(quickReply)}">${esc(quickReply)}</button>` : ""}</div><p class="status" role="status"></p></form>` : item.replied ? aqHtml(['<p class="settings-hint">Reply sent</p>']) : ""}</article>`;
+  return aqHtml`<article class="card activity-item${unread ? " unread" : ""}" data-notice="${id}"><div class="card-head"><div><h3>${esc(item.title)}</h3><p><time datetime="${new Date(Number(item.created_at) * 1000).toISOString()}">${esc(new Date(Number(item.created_at) * 1000).toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></p></div>${unread ? aqHtml`<span class="chip blue">Unread</span>` : ""}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p><div class="actions">${target ? aqHtml`<button type="button" class="${item.action_required ? "primary" : ""}" data-activity-challenge="${esc(target)}" data-notice-id="${id}">${item.action_required ? aqText("View invitation") : aqText("Open goal")}</button>` : ""}${unread ? aqHtml`<button type="button" data-mark-read="${id}">Mark read</button>` : ""}</div>${answerable ? aqHtml`<form class="activity-reply" data-reply-form="${id}"><label class="field"><span>Reply to ${esc(name(item.sender))}</span><input name="message" maxlength="200" required autocomplete="off" placeholder="Say something kind"></label><div class="actions"><button type="submit">Send reply</button>${quickReply ? aqHtml`<button type="button" data-quick-reply="${id}" data-message="${esc(quickReply)}">${esc(quickReply)}</button>` : ""}</div><p class="status" role="status"></p></form>` : item.replied ? aqHtml`<p class="settings-hint">Reply sent</p>` : ""}</article>`;
 }
 
-async function request(url,options={},owner=null) {
+async function request<T>(url:string,options:RequestInit={},owner:OwnerSession|null=null):Promise<T> {
   const response=await fetch(url,{cache:"no-store",...options});
   if(owner&&state.session===owner&&(response.status===401||((!options.method||options.method==="GET")&&response.status===403))) {
     const saved=window.ankiquestSession;
@@ -316,16 +356,16 @@ async function request(url,options={},owner=null) {
     state.nativeDisconnected=true;clearPrivate();state.connectionError=aqText("Your personal connection could not be verified. Reconnect to continue.");renderPrivate();
   }
   await AnkiQuestSite.checkAccess(response,options);
-  if(!response.ok) { let message="";try { const body=await response.json();message=typeof body.error==="string"?body.error:typeof body.message==="string"?body.message:""; }catch(_){} const error=new Error(response.status===401?aqText("Your account could not be verified. Connect again with your own token."):response.status===403?aqText("This account does not have access to that action."):message||`The server could not complete this request (${response.status}). Please try again.`);error.status=response.status;throw error; }
-  return response.status===204?null:response.json();
+  if(!response.ok) { let message="";try { const body:{error?:unknown;message?:unknown}|null=await response.json();message=typeof body?.error==="string"?body.error:typeof body?.message==="string"?body.message:""; }catch(_){} const error=Object.assign(new Error(response.status===401?aqText("Your account could not be verified. Connect again with your own token."):response.status===403?aqText("This account does not have access to that action."):message||`The server could not complete this request (${response.status}). Please try again.`),{status:response.status});throw error; }
+  return response.status===204?null as T:response.json();
 }
-function ownerRequest(path,body,session=state.session) { if(!session) return Promise.reject(new Error(aqText("Connect your account first.")));return request(path,{method:body===undefined?"GET":"POST",headers:AnkiQuestSite.ownerHeaders(session,body),...(body===undefined?{}:{body:JSON.stringify(body)})},session); }
-function privateRequest(path,body,session=state.session) { return ownerRequest(`/api/community/${path}/${encodeURIComponent(session?.user||"")}`,body,session); }
+function ownerRequest<T>(path:string,body?:unknown,session:OwnerSession|null=state.session):Promise<T> { if(!session) return Promise.reject(new Error(aqText("Connect your account first.")));return request<T>(path,{method:body===undefined?"GET":"POST",headers:AnkiQuestSite.ownerHeaders(session,body),...(body===undefined?{}:{body:JSON.stringify(body)})},session); }
+function privateRequest<T>(path:string,body?:unknown,session:OwnerSession|null=state.session) { return ownerRequest<T>(`/api/community/${path}/${encodeURIComponent(session?.user||"")}`,body,session); }
 async function loadPrivate() {
   if(!state.session) return;
   const session=state.session,epoch=++state.privateEpoch,reminderEpoch=state.reminderEpoch,reminderSaving=state.reminderSaving;state.privateLoading=true;state.privateError="";renderPrivate();
-  try { const [reminders,challenges]=await Promise.all([privateRequest("reminders",undefined,session),privateRequest("challenges",undefined,session)]);if(state.session!==session||epoch!==state.privateEpoch)return;if(reminderEpoch===state.reminderEpoch&&!reminderSaving&&!state.reminderSaving)state.reminders=reminders;state.challenges=challenges; }
-  catch(error) { if(state.session!==session||epoch!==state.privateEpoch)return;state.privateError=error instanceof TypeError?aqText("Could not reach the server. Your changes have not been sent. Check your connection and retry."):error.message; }
+  try { const [reminders,challenges]=await Promise.all([privateRequest<ReminderSettings>("reminders",undefined,session),privateRequest<ChallengeList>("challenges",undefined,session)]);if(state.session!==session||epoch!==state.privateEpoch)return;if(reminderEpoch===state.reminderEpoch&&!reminderSaving&&!state.reminderSaving)state.reminders=reminders;state.challenges=challenges; }
+  catch(error) { if(state.session!==session||epoch!==state.privateEpoch)return;state.privateError=error instanceof TypeError?aqText("Could not reach the server. Your changes have not been sent. Check your connection and retry."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.privateEpoch){state.privateLoading=false;renderPrivate();} }
 }
 function connect() {
@@ -334,24 +374,26 @@ function connect() {
   state.nativeDisconnected=false;nativeAccountCleared=false;
   if(connectNativeSession())return;
   state.authEpoch++;
-  $("auth-user").innerHTML=playerOptions(state.player||state.data.players[0]?.user||"");
-  $("auth-token").value="";$("auth-message").textContent="";$("auth-message").className="status";$("auth-submit").disabled=!state.data.players.length;
+  $<HTMLSelectElement>("auth-user").innerHTML=playerOptions(state.player||state.data.players[0]?.user||"");
+  $<HTMLInputElement>("auth-token").value="";$("auth-message").textContent="";$("auth-message").className="status";$<HTMLButtonElement>("auth-submit").disabled=!state.data.players.length;
   if(!state.data.players.length) $("auth-message").textContent=aqText("No player accounts are available yet.");
-  $("auth-dialog").showModal();
+  $<HTMLDialogElement>("auth-dialog").showModal();
 }
 addEventListener("ankiquest:locked",()=>{state.nativeDisconnected=true;if(!state.disconnecting)delete window.ankiquestSession;clearPrivate();});
 function clearPrivate() {
-  AnkiQuestAvatars.close();
+  AnkiQuestAvatars!.close();
   state.authEpoch++;state.privateEpoch++;state.reminderEpoch++;state.activityEpoch++;state.achievementEpoch++;
   state.nativeSession=false;state.session=null;state.reminders=null;state.reminderDraft=null;state.reminderSaving=false;state.reminderStatus="";state.reminderError=false;
   state.challenges=null;state.activity=null;state.activityError="";state.activityLoading=false;state.activityBox="inbox";state.activityCategory="all";state.activityUnreadOnly=false;state.friendAchievements=null;state.achievementError="";state.achievementLoading=false;state.sent=null;state.sentError="";state.sentLoading=false;state.sentEpoch++;state.privateLoading=false;state.privateError="";
   state.challengeStatus="";state.challengeError=false;state.challengeSaving=false;state.connectionError="";
-  $("activity-count").hidden=true;$("connect-button").textContent=aqText("Connect account");
-  if($("auth-dialog").open)$("auth-dialog").close();
-  if($("challenge-dialog").open)$("challenge-dialog").close();
-  $("challenge-create-content").innerHTML="";renderPrivate();
+  $("activity-count").hidden=true;if(translated)$("connect-button").textContent=aqText("Connect account");
+  if($<HTMLDialogElement>("auth-dialog").open)$<HTMLDialogElement>("auth-dialog").close();
+  if($<HTMLDialogElement>("challenge-dialog").open)$<HTMLDialogElement>("challenge-dialog").close();
+  $("challenge-create-content").innerHTML="";
+  // Nothing private has rendered before translations are ready; the first render reflects this state.
+  if(translated)renderPrivate();
 }
-async function disconnect() { state.nativeDisconnected=true;delete window.ankiquestSession;state.disconnecting=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=error.message;} } finally { state.disconnecting=false; } }
+async function disconnect() { state.nativeDisconnected=true;delete window.ankiquestSession;state.disconnecting=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=errorMessage(error);} } finally { state.disconnecting=false; } }
 function connectNativeSession() {
   if(!state.data||state.nativeDisconnected)return false;
   const saved=window.ankiquestSession;
@@ -360,7 +402,7 @@ function connectNativeSession() {
     return false;
   }
   const candidate={user:saved.user,token:saved.token.trim()};
-  if(state.session&&(!state.nativeSession||(state.session.user===candidate.user&&state.session.token===candidate.token)))return true;
+  if(state.session&&(!state.nativeSession||(state.session!.user===candidate.user&&state.session.token===candidate.token)))return true;
   clearPrivate();state.session=candidate;state.nativeSession=true;
   $("connect-button").textContent=name(candidate.user);$("connect-button").className="auth-name";
   loadPrivate();loadActivity();loadFriendAchievements();
@@ -378,7 +420,7 @@ async function restoreMember() {
   clearPrivate();state.session=session;$("connect-button").textContent=name(session.user);
   await Promise.all([loadPrivate(),loadActivity(),loadFriendAchievements()]);
 }
-addEventListener("ankiquest:identity",()=>{if(!state.connecting)restoreMember();});
+addEventListener("ankiquest:identity",()=>{if(!state.connecting)afterReady(()=>void restoreMember());});
 async function loadFriendAchievements(more=false) {
   const session=state.session;if(!session||state.achievementLoading)return;
   const epoch=++state.achievementEpoch,before=more?state.friendAchievements?.next_before:null;
@@ -386,17 +428,17 @@ async function loadFriendAchievements(more=false) {
   if(state.challenges)renderChallenges(accountBanner());
   try {
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
-    let payload;
-    try { payload=await ownerRequest(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
+    let payload:ActivityPage;
+    try { payload=await ownerRequest<ActivityPage>(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
     catch(error) {
-      if(error.status===400)payload=await ownerRequest(base+(before?"&before="+encodeURIComponent(before):""),undefined,session);
-      else if(error.status===404){const items=await ownerRequest(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);payload={items:items.slice().reverse(),next_before:null,legacy:true};}
+      if(errorStatus(error)===400)payload=await ownerRequest<ActivityPage>(base+(before?"&before="+encodeURIComponent(before):""),undefined,session);
+      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);payload={items:items.slice().reverse(),next_before:null,legacy:true};}
       else throw error;
     }
     if(state.session!==session||epoch!==state.achievementEpoch)return;
     const items=(Array.isArray(payload.items)?payload.items:[]).filter(item=>item.kind==="completion");
-    state.friendAchievements={...payload,items:before?[...(state.friendAchievements?.items||[]),...items.filter(item=>!state.friendAchievements.items.some(old=>old.id===item.id))]:items};
-  } catch(error) { if(state.session===session&&epoch===state.achievementEpoch)state.achievementError=error instanceof TypeError?aqText("Could not refresh activity. Check your connection; nothing has been marked read."):error.message; }
+    state.friendAchievements={...payload,items:before?[...(state.friendAchievements?.items||[]),...items.filter(item=>!state.friendAchievements!.items.some(old=>old.id===item.id))]:items};
+  } catch(error) { if(state.session===session&&epoch===state.achievementEpoch)state.achievementError=error instanceof TypeError?aqText("Could not refresh activity. Check your connection; nothing has been marked read."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.achievementEpoch){state.achievementLoading=false;if(state.challenges)renderChallenges(accountBanner());} }
 }
 async function loadActivity(more=false) {
@@ -404,19 +446,19 @@ async function loadActivity(more=false) {
   const epoch=++state.activityEpoch,before=more?state.activity?.next_before:null;
   state.activityLoading=true;state.activityError="";renderActivity(accountBanner());
   try {
-    let payload;
+    let payload:ActivityPage;
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
     const filters=`${state.activityCategory!=="all"?"&category="+encodeURIComponent(state.activityCategory):""}${state.activityUnreadOnly?"&unread_only=true":""}`;
-    try { payload=await ownerRequest(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session); }
+    try { payload=await ownerRequest<ActivityPage>(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session); }
     catch(error) {
-      if(error.status===400&&filters){state.activityCategory="all";state.activityUnreadOnly=false;payload=await ownerRequest(base,undefined,session);}
-      else if(error.status===404){const items=await ownerRequest(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);state.activityCategory="all";state.activityUnreadOnly=false;payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};}
+      if(errorStatus(error)===400&&filters){state.activityCategory="all";state.activityUnreadOnly=false;payload=await ownerRequest<ActivityPage>(base,undefined,session);}
+      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);state.activityCategory="all";state.activityUnreadOnly=false;payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};}
       else throw error;
     }
     if(state.session!==session||epoch!==state.activityEpoch)return;
     const items=Array.isArray(payload.items)?payload.items:[];
-    state.activity={...payload,items:before?[...(state.activity?.items||[]),...items.filter(item=>!state.activity.items.some(old=>old.id===item.id))]:items};
-  } catch(error) { if(state.session===session&&epoch===state.activityEpoch)state.activityError=error instanceof TypeError?aqText("Could not refresh activity. Check your connection; nothing has been marked read."):error.message; }
+    state.activity={...payload,items:before?[...(state.activity?.items||[]),...items.filter(item=>!state.activity!.items.some(old=>old.id===item.id))]:items};
+  } catch(error) { if(state.session===session&&epoch===state.activityEpoch)state.activityError=error instanceof TypeError?aqText("Could not refresh activity. Check your connection; nothing has been marked read."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.activityEpoch){state.activityLoading=false;renderActivity(accountBanner());} }
 }
 async function loadSent(more=false) {
@@ -424,25 +466,25 @@ async function loadSent(more=false) {
   const epoch=++state.sentEpoch,before=more?state.sent?.next_before:null;
   state.sentLoading=true;state.sentError="";renderActivity(accountBanner());
   try {
-    const page=await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/sent?limit=100${before?"&before="+encodeURIComponent(before):""}`,undefined,session);
+    const page=await ownerRequest<SentPage>(`/api/activity/${encodeURIComponent(session.user)}/sent?limit=100${before?"&before="+encodeURIComponent(before):""}`,undefined,session);
     if(state.session!==session||epoch!==state.sentEpoch)return;
     const items=Array.isArray(page.items)?page.items:[];
     state.sent={...page,items:before?[...(state.sent?.items||[]),...items]:items};
-  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=error.status===404?aqText("This server does not keep sent messages yet."):error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):error.message; }
+  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=errorStatus(error)===404?aqText("This server does not keep sent messages yet."):error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.sentEpoch){state.sentLoading=false;renderActivity(accountBanner());} }
 }
-async function markAllRead(button) {
+async function markAllRead(button:HTMLButtonElement) {
   const session=state.session,through=Number(state.activity?.latest_id)||Math.max(0,...(state.activity?.items||[]).map(item=>Number(item.id)).filter(Number.isSafeInteger));
   if(!session||!through||state.activity?.legacy)return;
   button.disabled=true;
   try {
     await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{through},session);
     if(state.session!==session)return;
-    const readAt=Date.now()/1000;for(const item of [...state.activity.items,...(state.activity.attention||[]),...(state.friendAchievements?.items||[])])if(!item.read_at&&Number(item.id)<=through)item.read_at=readAt;
+    const readAt=Date.now()/1000;for(const item of [...state.activity!.items,...(state.activity!.attention||[]),...(state.friendAchievements?.items||[])])if(!item.read_at&&Number(item.id)<=through)item.read_at=readAt;
     await loadActivity();
-  } catch(error) { if(state.session!==session)return;button.disabled=false;const status=$("activity-action-status");if(status){status.className="status error";status.textContent=aqText("Could not mark everything read.")+" "+error.message;} }
+  } catch(error) { if(state.session!==session)return;button.disabled=false;const status=$("activity-action-status");if(status){status.className="status error";status.textContent=aqText("Could not mark everything read.")+" "+errorMessage(error);} }
 }
-async function markRead(id,rerender=true) {
+async function markRead(id:string|number|undefined,rerender=true) {
   const session=state.session;if(!session||state.activity?.legacy)return;
   await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{ids:[Number(id)]},session);
   if(state.session!==session)return;
@@ -452,7 +494,7 @@ async function markRead(id,rerender=true) {
   if(state.activityUnreadOnly&&state.activity)state.activity.items=state.activity.items.filter(item=>Number(item.id)!==Number(id));
   if(rerender)renderActivity(accountBanner());
 }
-async function handleActivity(button) {
+async function handleActivity(button:HTMLButtonElement) {
   button.disabled=true;
   const session=state.session,goal=button.dataset.activityChallenge;
   if(goal)showView("challenge-"+goal);
@@ -465,15 +507,15 @@ async function handleActivity(button) {
   } catch(error) {
     if(state.session!==session)return;
     if(goal&&state.challengeId===goal){state.challengeError=true;state.challengeStatus=aqText("Your goal is open. Read status could not be saved; you can retry from Activity.");renderChallenges(accountBanner());}
-    else { const status=$("activity-action-status");if(status){status.className="status error";status.textContent="Could not save read status. "+error.message;} }
+    else { const status=$("activity-action-status");if(status){status.className="status error";status.textContent="Could not save read status. "+errorMessage(error);} }
   }
   finally { button.disabled=false; }
 }
-async function sendActivityReply(form,message) {
+async function sendActivityReply(form:HTMLElement,message:string) {
   const session=state.session;if(!session||form.dataset.sending)return;
-  const id=Number(form.dataset.replyForm),status=form.querySelector('[role="status"]');
+  const id=Number(form.dataset.replyForm),status=form.querySelector<HTMLElement>('[role="status"]')!;
   message=message.trim();if(!message)return;
-  form.dataset.sending="true";form.querySelectorAll("button,input").forEach(control=>control.disabled=true);status.textContent=aqText("Sending…");status.className="status";
+  form.dataset.sending="true";form.querySelectorAll<HTMLButtonElement|HTMLInputElement>("button,input").forEach(control=>control.disabled=true);status.textContent=aqText("Sending…");status.className="status";
   try {
     await ownerRequest(`/api/reply/${encodeURIComponent(session.user)}`,{notification:id,message},session);
     if(state.session!==session)return;
@@ -481,45 +523,47 @@ async function sendActivityReply(form,message) {
     // Sending a reply succeeded even if a separate read-status request fails.
     try { await markRead(id,false); } catch(_) {}
     if(state.session===session){renderActivity(accountBanner());if(state.challenges)renderChallenges(accountBanner());$("activity-action-status").textContent=aqText("Your reply was sent.");}
-  } catch(error) { if(state.session===session){status.className="status error";status.textContent="Reply not sent. "+error.message;} }
-  finally { delete form.dataset.sending;form.querySelectorAll("button,input").forEach(control=>control.disabled=false); }
+  } catch(error) { if(state.session===session){status.className="status error";status.textContent="Reply not sent. "+errorMessage(error);} }
+  finally { delete form.dataset.sending;form.querySelectorAll<HTMLButtonElement|HTMLInputElement>("button,input").forEach(control=>control.disabled=false); }
 }
 function updateSelectors() {
-  const earliest=Number(String(state.data.meta.start_date||state.year).slice(0,4)), latest=Math.max(now.getFullYear(),state.year);
+  const earliest=Number(String(state.data!.meta.start_date||state.year).slice(0,4)), latest=Math.max(now.getFullYear(),state.year);
   $("year-filter").innerHTML=Array.from({length:Math.max(1,Math.min(150,latest-Math.min(earliest,state.year)+1))},(_,index)=>latest-index).map(year=>aqHtml`<option value="${year}" ${year===state.year?"selected":""}>${year}</option>`).join("");
-  $("month-filter").innerHTML=months.map((month,index)=>aqHtml`<option value="${index+1}" ${index+1===state.month?"selected":""}>${esc(month)}</option>`).join("");
-  if(!state.data.players.some(player=>player.user===state.player))state.player="";
+  $("month-filter").innerHTML=months().map((month,index)=>aqHtml`<option value="${index+1}" ${index+1===state.month?"selected":""}>${esc(month)}</option>`).join("");
+  if(!state.data!.players.some(player=>player.user===state.player))state.player="";
   $("player-filter").innerHTML=playerOptions(state.player,true);
 }
 async function loadData() {
   const id=++state.request;$("community-app").setAttribute("aria-busy","true");$("load-error").hidden=true;$("loading-status").hidden=false;$("loading-status").textContent=aqText("Loading wins and milestones…");
   try {
-    const data=await request(`/api/community?year=${state.year}&month=${state.month}`);
+    const data=await request<Partial<CommunityData>>(`/api/community?year=${state.year}&month=${state.month}`);
     if(id!==state.request)return;
     if(!data.meta||!Array.isArray(data.players))throw new Error(aqText("The server returned an incomplete community record."));
-    state.data={...data,calendar:data.calendar||[],weeks:data.weeks||[],seasons:data.seasons||[],awards:data.awards||[],records:data.records||[],head_to_head:data.head_to_head||[]};
+    state.data={...data,meta:data.meta,players:data.players,calendar:data.calendar||[],weeks:data.weeks||[],seasons:data.seasons||[],awards:data.awards||[],records:data.records||[],head_to_head:data.head_to_head||[]};
     updateSelectors();
-    $("history-note").innerHTML=data.meta.start_date?aqHtml`<strong>${data.meta.start_source==="configured"?aqText("Server started"):aqText("History available from")} ${esc(date(data.meta.start_date))}</strong>${data.meta.start_source==="configured"?aqText("Every study day adds to the story"):aqText("Earliest retained activity; may predate this server")}`:aqHtml(['<strong>Your community starts here</strong>The first study session begins the record']);
+    $("history-note").innerHTML=data.meta.start_date?aqHtml`<strong>${data.meta.start_source==="configured"?aqText("Server started"):aqText("History available from")} ${esc(date(data.meta.start_date))}</strong>${data.meta.start_source==="configured"?aqText("Every study day adds to the story"):aqText("Earliest retained activity; may predate this server")}`:aqHtml`<strong>Your community starts here</strong>The first study session begins the record`;
     $("scoring-note").textContent=`${data.meta.scoring_note||""} Competition timezone: ${data.meta.time_zone||aqText("server timezone")}, cutoff ${String(data.meta.rollover_hour??0).padStart(2,"0")}:00. Results finalize after a ${data.meta.grace_hours??24}-hour sync allowance.`;
     renderAll();connectNativeSession();
-  } catch(error) { if(id!==state.request)return;$("load-error").className="notice error";$("load-error").innerHTML=aqHtml`${esc(error.message)} <button type="button" data-retry>Try again</button>`;$("load-error").hidden=false;if(!state.data) $("view-overview").innerHTML=empty(aqText("The community record is unavailable."),aqText("Try again to load your community’s progress."));else{state.year=Number(state.data.meta.year)||state.year;state.month=Number(state.data.meta.month)||state.month;updateSelectors();renderAll();} }
+  } catch(error) { if(id!==state.request)return;$("load-error").className="notice error";$("load-error").innerHTML=aqHtml`${esc(errorMessage(error))} <button type="button" data-retry>Try again</button>`;$("load-error").hidden=false;if(!state.data) $("view-overview").innerHTML=empty(aqText("The community record is unavailable."),aqText("Try again to load your community’s progress."));else{state.year=Number(state.data.meta.year)||state.year;state.month=Number(state.data.meta.month)||state.month;updateSelectors();renderAll();} }
   finally { if(id===state.request){$("community-app").setAttribute("aria-busy","false");$("loading-status").hidden=true;} }
 }
 document.addEventListener("click",event=>{
+  if(!(event.target instanceof Element))return;
   const button=event.target.closest("button");if(!button)return;
+  afterReady(()=>{
   if(button.dataset.view)showView(button.dataset.view);
   if(button.dataset.goto)showView(button.dataset.goto,true);
   if(button.hasAttribute("data-winner-calendar")){state.calendarMode=state.winnerMetric;renderCalendar();showView("calendar",true);}
-  if(button.dataset.close)$(button.dataset.close).close();
+  if(button.dataset.close)$<HTMLDialogElement>(button.dataset.close).close();
   if(button.hasAttribute("data-connect")||button.id==="connect-button")connect();
   if(button.hasAttribute("data-disconnect"))disconnect();
-  if(button.hasAttribute("data-avatar-edit")&&state.session)AnkiQuestAvatars.open({user:state.session.user,display:name(state.session.user),token:state.session.token});
+  if(button.hasAttribute("data-avatar-edit")&&state.session)AnkiQuestAvatars!.open({user:state.session!.user,display:name(state.session!.user),token:state.session.token});
   if(button.hasAttribute("data-retry"))loadData();
   if(button.hasAttribute("data-private-retry"))loadPrivate();
   if(button.dataset.period&&state.data)openPeriod(button.dataset.period);
-  if(button.hasAttribute("data-select-player")) { state.player=button.dataset.selectPlayer;$("player-filter").value=state.player;if($("day-dialog").open)$("day-dialog").close();renderAll(); }
+  if(button.hasAttribute("data-select-player")) { state.player=button.dataset.selectPlayer!;$<HTMLSelectElement>("player-filter").value=state.player;if($<HTMLDialogElement>("day-dialog").open)$<HTMLDialogElement>("day-dialog").close();renderAll(); }
   if(button.dataset.calendarMode) { state.calendarMode=button.dataset.calendarMode;renderCalendar();showView("calendar"); }
-  if(["shared","lifetime"].includes(button.dataset.trophyWinScope)) { state.winnerScope=button.dataset.trophyWinScope;renderTrophies();document.querySelector(`[data-trophy-win-scope="${state.winnerScope}"]`)?.focus(); }
+  if(button.dataset.trophyWinScope==="shared"||button.dataset.trophyWinScope==="lifetime") { state.winnerScope=button.dataset.trophyWinScope;renderTrophies();document.querySelector<HTMLElement>(`[data-trophy-win-scope="${state.winnerScope}"]`)?.focus(); }
   if(button.dataset.monthStep) { const next=new Date(Date.UTC(state.year,state.month-1+Number(button.dataset.monthStep),1));state.year=next.getUTCFullYear();state.month=next.getUTCMonth()+1;loadData(); }
   if(button.dataset.challengeAction)actOnChallenge(button);
   if(button.dataset.weeklyAction)actOnWeeklySuggestion(button);
@@ -534,167 +578,97 @@ document.addEventListener("click",event=>{
   if(button.hasAttribute("data-activity-read-all"))markAllRead(button);
   if(button.hasAttribute("data-sent-more"))loadSent(true);
   if(button.dataset.markRead||button.dataset.activityChallenge)handleActivity(button);
-  if(button.dataset.quickReply)sendActivityReply(button.closest("form"),button.dataset.message);
-  if(button.hasAttribute("data-congratulate"))sendActivityReply(button.closest(".friend-achievement"),aqText("Good job!"));
+  if(button.dataset.quickReply)sendActivityReply(button.closest("form")!,button.dataset.message!);
+  if(button.hasAttribute("data-congratulate"))sendActivityReply(button.closest<HTMLElement>(".friend-achievement")!,aqText("Good job!"));
+  });
 });
-for(const nav of [$("tabs"),$("history-tabs")])nav.addEventListener("keydown",event=>{const buttons=[...nav.querySelectorAll("[role=tab]")],index=buttons.indexOf(event.target);if(index<0)return;let next=index;if(event.key==="ArrowRight")next=(index+1)%buttons.length;else if(event.key==="ArrowLeft")next=(index-1+buttons.length)%buttons.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;event.preventDefault();showView(buttons[next].dataset.view);buttons[next].focus();});
-$("player-filter").addEventListener("change",event=>{state.player=event.target.value;state.matchupA=state.player||state.matchupA;renderAll();});
-$("year-filter").addEventListener("change",event=>{state.year=Number(event.target.value);loadData();});
-$("month-filter").addEventListener("change",event=>{state.month=Number(event.target.value);loadData();});
+for(const nav of [$("tabs"),$("history-tabs")])nav.addEventListener("keydown",event=>{const buttons=[...nav.querySelectorAll<HTMLElement>("[role=tab]")],index=event.target instanceof HTMLElement?buttons.indexOf(event.target):-1;if(index<0)return;let next=index;if(event.key==="ArrowRight")next=(index+1)%buttons.length;else if(event.key==="ArrowLeft")next=(index-1+buttons.length)%buttons.length;else if(event.key==="Home")next=0;else if(event.key==="End")next=buttons.length-1;else return;event.preventDefault();afterReady(()=>{showView(buttons[next].dataset.view!);buttons[next].focus();});});
+const playerFilter=$<HTMLSelectElement>("player-filter"),yearFilter=$<HTMLSelectElement>("year-filter"),monthFilter=$<HTMLSelectElement>("month-filter");
+playerFilter.addEventListener("change",()=>{state.player=playerFilter.value;state.matchupA=state.player||state.matchupA;renderAll();});
+yearFilter.addEventListener("change",()=>{state.year=Number(yearFilter.value);loadData();});
+monthFilter.addEventListener("change",()=>{state.month=Number(monthFilter.value);loadData();});
 document.addEventListener("change",event=>{
-  if(event.target.id==="activity-window"){state.activityDays=Number(event.target.value);state.activityEpoch++;state.activityLoading=false;state.achievementEpoch++;state.achievementLoading=false;state.activity=null;state.friendAchievements=null;loadActivity();loadFriendAchievements();}
-  if(event.target.form?.id==="reminder-form"&&!state.reminderSaving){state.reminderDraft=reminderFormValues(event.target.form);state.reminderStatus="";state.reminderError=false;$("reminder-status").textContent="";}
-  if(event.target.id==="matchup-a"){state.matchupA=event.target.value;renderMatchup();}
-  if(event.target.id==="matchup-b"){state.matchupB=event.target.value;renderMatchup();}
-  if(event.target.id==="record-scope"){state.recordScope=event.target.value;renderRecords();}
-  if(event.target.id==="trophy-win-metric"&&["day","week","month"].includes(event.target.value)){state.winnerMetric=event.target.value;renderTrophies();$("trophy-win-metric").focus();}
-  if(["challenge-kind","challenge-mode"].includes(event.target.id)) {
-    const form=$("challenge-form"),cooperative=form.elements.cooperative.value==="true",reviews=form.elements.kind.value==="reviews";
+  const target=event.target;if(!(target instanceof HTMLInputElement||target instanceof HTMLSelectElement))return;
+  if(target.id==="activity-window"){state.activityDays=Number(target.value);state.activityEpoch++;state.activityLoading=false;state.achievementEpoch++;state.achievementLoading=false;state.activity=null;state.friendAchievements=null;loadActivity();loadFriendAchievements();}
+  if(target.form?.id==="reminder-form"&&!state.reminderSaving){state.reminderDraft=reminderFormValues(target.form);state.reminderStatus="";state.reminderError=false;$("reminder-status").textContent="";}
+  if(target.id==="matchup-a"){state.matchupA=target.value;renderMatchup();}
+  if(target.id==="matchup-b"){state.matchupB=target.value;renderMatchup();}
+  if(target.id==="record-scope"){state.recordScope=target.value;renderRecords();}
+  if(target.id==="trophy-win-metric"&&(target.value==="day"||target.value==="week"||target.value==="month")){state.winnerMetric=target.value;renderTrophies();$("trophy-win-metric").focus();}
+  if(["challenge-kind","challenge-mode"].includes(target.id)) {
+    const form=$<HTMLFormElement>("challenge-form"),cooperative=formField(form,"cooperative",HTMLSelectElement).value==="true",reviews=formField(form,"kind",HTMLSelectElement).value==="reviews";
     $("target-label").textContent=cooperative?aqText("Shared group target"):aqText("Target per person");
     $("challenge-target-help").textContent=cooperative?`Accepted members’ ${reviews?aqText("reviews"):aqText("study days")} add up toward one shared target.${reviews?"":aqText(" Each person’s study day counts separately.")}`:`Each person works toward their own target.${reviews?"":aqText(" Study days count actual studying; freezes do not count.")}`;
-    form.elements.target.max=reviews?"100000":"961";if(event.target.id==="challenge-kind")form.elements.target.value=reviews?"50":"3";
+    formField(form,"target",HTMLInputElement).max=reviews?"100000":"961";if(target.id==="challenge-kind")formField(form,"target",HTMLInputElement).value=reviews?"50":"3";
   }
 });
-$("auth-dialog").addEventListener("close",()=>{state.authEpoch++;$("auth-token").value="";});
+$<HTMLDialogElement>("auth-dialog").addEventListener("close",()=>{state.authEpoch++;$<HTMLInputElement>("auth-token").value="";});
 $("auth-form").addEventListener("submit",async event=>{
-  event.preventDefault();const user=$("auth-user").value,token=$("auth-token").value.trim();if(!user||!token)return;
-  const epoch=++state.authEpoch;state.connecting=true;$("auth-token").value="";$("auth-submit").disabled=true;$("auth-message").className="status";$("auth-message").textContent=aqText("Connecting…");
-  try { const candidate={user,token},reminders=await privateRequest("reminders",undefined,candidate);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;const session=await AnkiQuestSite.connectMember(user,token,()=>epoch===state.authEpoch&&$("auth-dialog").open);if(epoch!==state.authEpoch||!$("auth-dialog").open)return;state.session=session;state.reminders=reminders;$("auth-dialog").close();$("connect-button").textContent=name(user);$("connect-button").className="auth-name";await Promise.all([loadPrivate(),loadActivity(),loadFriendAchievements()]); }
-  catch(error){if(epoch===state.authEpoch&&$("auth-dialog").open){$("auth-message").className="status error";$("auth-message").textContent=error.message.replace(aqText("Disconnect and connect again with the correct token."),aqText("Check the token and try again."));}}
-  finally{state.connecting=false;$("auth-submit").disabled=false;}
+  event.preventDefault();const user=$<HTMLSelectElement>("auth-user").value,token=$<HTMLInputElement>("auth-token").value.trim();if(!user||!token)return;
+  const epoch=++state.authEpoch;state.connecting=true;$<HTMLInputElement>("auth-token").value="";$<HTMLButtonElement>("auth-submit").disabled=true;$("auth-message").className="status";$("auth-message").textContent=aqText("Connecting…");
+  try { const candidate={user,token},reminders=await privateRequest<ReminderSettings>("reminders",undefined,candidate);if(epoch!==state.authEpoch||!$<HTMLDialogElement>("auth-dialog").open)return;const session=await AnkiQuestSite.connectMember(user,token,()=>epoch===state.authEpoch&&$<HTMLDialogElement>("auth-dialog").open);if(epoch!==state.authEpoch||!$<HTMLDialogElement>("auth-dialog").open)return;state.session=session;state.reminders=reminders;$<HTMLDialogElement>("auth-dialog").close();$("connect-button").textContent=name(user);$("connect-button").className="auth-name";await Promise.all([loadPrivate(),loadActivity(),loadFriendAchievements()]); }
+  catch(error){if(epoch===state.authEpoch&&$<HTMLDialogElement>("auth-dialog").open){$("auth-message").className="status error";$("auth-message").textContent=errorMessage(error).replace(aqText("Disconnect and connect again with the correct token."),aqText("Check the token and try again."));}}
+  finally{state.connecting=false;$<HTMLButtonElement>("auth-submit").disabled=false;}
 });
 document.addEventListener("submit",async event=>{
-  if(event.target.matches("[data-reply-form]")){event.preventDefault();sendActivityReply(event.target,event.target.elements.message.value);return;}
-  if(event.target.id==="reminder-form") {
+  const target=event.target;if(!(target instanceof HTMLFormElement))return;
+  if(target.matches("[data-reply-form]")){event.preventDefault();sendActivityReply(target,formField(target,"message",HTMLInputElement).value);return;}
+  if(target.id==="reminder-form") {
     event.preventDefault();if(!state.session||state.reminderSaving)return;
-    const session=state.session,epoch=++state.reminderEpoch,body=reminderFormValues(event.target);
+    const session=state.session,epoch=++state.reminderEpoch,body=reminderFormValues(target);
     state.reminderDraft=body;state.reminderSaving=true;state.reminderError=false;state.reminderStatus=aqText("Saving preferences…");renderReminderForm(accountBanner());
-    try { const prefs=await privateRequest("reminders",body,session);if(state.session!==session||epoch!==state.reminderEpoch)return;state.reminders=prefs;state.reminderDraft=null;state.reminderStatus=aqText("Your reminder preferences are saved."); }
-    catch(error){if(state.session===session&&epoch===state.reminderEpoch){state.reminderError=true;state.reminderStatus=error.message;}}
+    try { const prefs=await privateRequest<ReminderSettings>("reminders",body,session);if(state.session!==session||epoch!==state.reminderEpoch)return;state.reminders=prefs;state.reminderDraft=null;state.reminderStatus=aqText("Your reminder preferences are saved."); }
+    catch(error){if(state.session===session&&epoch===state.reminderEpoch){state.reminderError=true;state.reminderStatus=errorMessage(error);}}
     finally{if(state.session===session&&epoch===state.reminderEpoch){state.reminderSaving=false;if(!state.privateLoading&&!state.privateError)renderReminderForm(accountBanner());}}
   }
-  if(event.target.id==="challenge-form") {
-    event.preventDefault();if(!state.session||state.challengeSaving)return;const form=event.target,session=state.session,formData=new FormData(form),body={title:String(formData.get("title")).trim(),kind:formData.get("kind"),cooperative:formData.get("cooperative")==="true",target:Number(formData.get("target")),duration_days:Number(formData.get("duration_days")),recipients:formData.getAll("recipients"),start_when_ready:formData.get("start_when_ready")==="on"};
+  if(target.id==="challenge-form") {
+    event.preventDefault();if(!state.session||state.challengeSaving)return;const form=target,session=state.session,formData=new FormData(form),body:NewChallenge={title:String(formData.get("title")).trim(),kind:formData.get("kind"),cooperative:formData.get("cooperative")==="true",target:Number(formData.get("target")),duration_days:Number(formData.get("duration_days")),recipients:formData.getAll("recipients"),start_when_ready:formData.get("start_when_ready")==="on"};
     const status=$("challenge-status");status.className="status";
     if(!body.title){status.className="status error";status.textContent=aqText("Give your challenge a name.");return;}
     if(!body.recipients.length||body.recipients.length>30){status.className="status error";status.textContent=aqText("Choose between 1 and 30 friends to invite.");return;}
     if(body.kind==="study_days"&&body.target>body.duration_days*(body.cooperative?body.recipients.length+1:1)){status.className="status error";status.textContent=aqText("Choose a study-day target that fits the duration and number of participants.");return;}
     const key=JSON.stringify(body);if(state.challengeBodyKey&&state.challengeBodyKey!==key)state.challengeRequest=globalThis.crypto?.randomUUID?.()||`goal-${Date.now()}-${Math.random().toString(36).slice(2)}`;state.challengeBodyKey=key;body.request_id=state.challengeRequest;
-    const controls=[...form.querySelectorAll("input,select,button")];controls.forEach(control=>control.disabled=true);state.challengeSaving=true;status.textContent=aqText("Sending your invitation…");
-    try{const payload=await privateRequest("challenges",body,session);if(state.session!==session)return;const created=payload.challenges.find(item=>!(state.challenges?.challenges||[]).some(old=>old.id===item.id));state.challenges=payload;state.challengeStatus=aqText("Invitation sent. Your friends can choose whether to join.");state.challengeError=false;if($("challenge-dialog").open){$("challenge-dialog").close();if(created)showView("challenge-"+created.id);}renderPrivate();loadActivity();}
-    catch(error){if(state.session===session){status.className="status error";status.textContent=error.message;}}
+    const controls=[...form.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>("input,select,button")];controls.forEach(control=>control.disabled=true);state.challengeSaving=true;status.textContent=aqText("Sending your invitation…");
+    try{const payload=await privateRequest<ChallengeList>("challenges",body,session);if(state.session!==session)return;const created=payload.challenges.find(item=>!(state.challenges?.challenges||[]).some(old=>old.id===item.id));state.challenges=payload;state.challengeStatus=aqText("Invitation sent. Your friends can choose whether to join.");state.challengeError=false;if($<HTMLDialogElement>("challenge-dialog").open){$<HTMLDialogElement>("challenge-dialog").close();if(created)showView("challenge-"+created.id);}renderPrivate();loadActivity();}
+    catch(error){if(state.session===session){status.className="status error";status.textContent=errorMessage(error);}}
     finally{state.challengeSaving=false;controls.forEach(control=>control.disabled=false);}
   }
 });
-async function actOnChallenge(button) {
-  const session=state.session;if(!session||button.disabled)return;const action=button.dataset.challengeAction,id=button.dataset.challengeId,status=$("challenge-action-status");
+async function actOnChallenge(button:HTMLButtonElement) {
+  const session=state.session;if(!session||button.disabled)return;const action=button.dataset.challengeAction!,id=button.dataset.challengeId!,status=$("challenge-action-status");
   if(action==="cancel"&&!window.confirm(aqText("Cancel this challenge for everyone? Its recorded progress will remain visible.")))return;
   if(action==="leave"&&!window.confirm(aqText("Leave this challenge? You can’t rejoin this invitation.")))return;
-  const controls=[...button.closest(".challenge").querySelectorAll("button")];controls.forEach(control=>control.disabled=true);status.className="status";status.textContent=aqText("Updating goal…");
-  try{const payload=await ownerRequest(`/api/community/challenges/${encodeURIComponent(session.user)}/${encodeURIComponent(id)}`,{action},session);if(state.session!==session)return;state.challenges=payload;state.challengeError=false;state.challengeStatus=({accept:aqText("You joined. Studying from now on counts toward your goal."),decline:aqText("Invitation declined. Your study progress is unchanged."),leave:aqText("You left the goal."),cancel:aqText("Goal ended. Its recorded progress is kept.")})[action];renderPrivate();loadActivity();}
-  catch(error){if(state.session===session){state.challengeError=true;state.challengeStatus=error instanceof TypeError?aqText("Could not reach the server. Your choice has not been confirmed. Refresh and try again."):error.message;renderPrivate();}}
+  const controls=[...button.closest(".challenge")!.querySelectorAll("button")];controls.forEach(control=>control.disabled=true);status.className="status";status.textContent=aqText("Updating goal…");
+  try{const payload=await ownerRequest<ChallengeList>(`/api/community/challenges/${encodeURIComponent(session.user)}/${encodeURIComponent(id)}`,{action},session);if(state.session!==session)return;state.challenges=payload;state.challengeError=false;const done:Record<string,string>={accept:aqText("You joined. Studying from now on counts toward your goal."),decline:aqText("Invitation declined. Your study progress is unchanged."),leave:aqText("You left the goal."),cancel:aqText("Goal ended. Its recorded progress is kept.")};state.challengeStatus=done[action];renderPrivate();loadActivity();}
+  catch(error){if(state.session===session){state.challengeError=true;state.challengeStatus=error instanceof TypeError?aqText("Could not reach the server. Your choice has not been confirmed. Refresh and try again."):errorMessage(error);renderPrivate();}}
   finally{controls.forEach(control=>control.disabled=false);}
 }
-async function actOnWeeklySuggestion(button) {
+async function actOnWeeklySuggestion(button:HTMLButtonElement) {
   const session=state.session,suggestion=state.challenges?.weekly_suggestion;
   if(!session||!suggestion||state.challengeSaving||button.disabled)return;
   const action=button.dataset.weeklyAction;
   state.challengeSaving=true;state.challengeError=false;state.challengeStatus=aqText("Updating goal…");renderPrivate();
   try {
-    const payload=await ownerRequest(`/api/community/challenges/${encodeURIComponent(session.user)}/weekly`,{week_start:suggestion.week_start,action},session);
+    const payload=await ownerRequest<ChallengeList>(`/api/community/challenges/${encodeURIComponent(session.user)}/weekly`,{week_start:suggestion.week_start,action},session);
     if(state.session!==session)return;
     state.challenges=payload;state.challengeStatus=action==="invite"?aqText("Invitation sent. Your friend can choose whether to join."):aqText("Skipped this week. You can still start a custom friend goal.");
     loadActivity();
   } catch(error) {
     if(state.session!==session)return;
-    state.challengeError=true;state.challengeStatus=error instanceof TypeError?aqText("Could not reach the server. Your choice has not been confirmed. Refresh and try again."):error.message;
+    state.challengeError=true;state.challengeStatus=error instanceof TypeError?aqText("Could not reach the server. Your choice has not been confirmed. Refresh and try again."):errorMessage(error);
   } finally {
     if(state.session===session){state.challengeSaving=false;renderPrivate();}
   }
 }
-window.addEventListener("hashchange",()=>showView(location.hash.slice(1)));
+window.addEventListener("hashchange",()=>afterReady(()=>showView(location.hash.slice(1))));
 window.addEventListener("pagehide",clearPrivate);
 window.addEventListener("pageshow",event=>{if(event.persisted)restoreMember();});
-showView(location.hash.slice(1)||"challenges");
-loadData();
-restoreMember();
+// Listeners above are registered right away; rendering starts once translations are ready.
+void AnkiQuestI18n.ready.then(()=>{
+  translated=true;
+  showView(location.hash.slice(1)||"challenges");
+  loadData();
+  restoreMember();
+});
+friendNudges({session:()=>state.session,request:ownerRequest});
 
-/* Friend nudges use the same private account as the community page. */
-(() => {
-  const plain = (source, ...values) => Array.isArray(source) ? source.reduce((text, part, index) => text + (index ? values[index - 1] : "") + part, "") : source;
-  const aqText = (...args) => (window.AnkiQuestI18n?.t || plain)(...args);
-  const aqHtml = (...args) => (window.AnkiQuestI18n?.html || plain)(...args);
-  const dialog = document.createElement("dialog");
-  dialog.className = "dialog";
-  dialog.setAttribute("aria-label", aqText("Nudge your friends"));
-  document.body.append(dialog);
-  let session = null, busy = false, generation = 0;
-  const close = () => { generation++; session = null; busy = false; dialog.close(); dialog.replaceChildren(); };
-  const current = (captured, epoch) => session === captured && state.session === captured && generation === epoch && dialog.open;
-  function render(payload) {
-    dialog.innerHTML = aqHtml`
-      <div class="card-head"><h2>Nudge your friends</h2><button type="button" data-nudge-close aria-label="Close">Close</button></div>
-      <p>A little encouragement to do Anki. One nudge per friend per Anki day.</p>
-      <label class="check"><input type="checkbox" data-nudge-receiving ${payload.receiving ? "checked" : ""}><span>Let friends send me nudges</span></label>
-      <label class="check"><input type="checkbox" data-nudge-automatic ${payload.automatic_receiving ? "checked" : ""}><span>Let AnkiQuest send me progress nudges</span></label>
-      <p class="settings-hint">Choose which friends can nudge you below. Phone vibrations follow your alert settings, silent mode, and Do Not Disturb.</p>
-      <div class="stack">${payload.friends.map(friend => aqHtml`
-        <div class="list-row">${avatar(friend.user, friend.display)}<div class="row-text">
-          <strong>${esc(friend.display)}</strong>
-          <small>${friend.sent_today ? aqText("Nudged today") : friend.enabled ? aqText("Ready for encouragement") : aqText("Not receiving nudges")}</small>
-          <label class="check"><input type="checkbox" data-nudge-sender="${esc(friend.user)}" aria-label="${esc(aqText("Receive nudges from") + " " + friend.display)}" ${friend.muted_by_me ? "" : "checked"}><span>Receive their nudges</span></label>
-        </div><button type="button" data-nudge-user="${esc(friend.user)}" ${!friend.enabled || friend.sent_today ? "disabled" : ""}>Nudge</button></div>`).join("") || aqHtml(["<p>No friends are available yet.</p>"])}</div>
-      <p data-nudge-status role="status"></p>`;
-  }
-  async function open() {
-    if (!state.session) return;
-    close(); session = state.session;
-    const captured = session, epoch = ++generation;
-    dialog.innerHTML = aqHtml(['<p role="status">Loading friends…</p><button type="button" data-nudge-close>Close</button>']);
-    dialog.showModal();
-    try {
-      const payload = await ownerRequest(`/api/friend-nudges/${encodeURIComponent(captured.user)}`, undefined, captured);
-      if (current(captured, epoch)) render(payload);
-    } catch (error) {
-      if (current(captured, epoch)) dialog.innerHTML = aqHtml`<p role="alert">${esc(error.status === 404 ? aqText("Update the server to use friend nudges.") : error.message)}</p><button type="button" data-nudge-close>Close</button>`;
-    }
-  }
-  async function change(control, mode) {
-    if (busy || !session || state.session !== session) return;
-    const captured = session, epoch = generation, wanted = control.checked;
-    busy = true;
-    const controls = [...dialog.querySelectorAll("input,button:not([data-nudge-close])")];
-    const disabled = controls.map(item => item.disabled);
-    controls.forEach(item => item.disabled = true);
-    const status = dialog.querySelector("[data-nudge-status]"); status.textContent = mode === "send" ? aqText("Sending…") : aqText("Saving…");
-    try {
-      const base = `/api/friend-nudges/${encodeURIComponent(captured.user)}`;
-      const path = mode === "friend" ? "/receiving" : mode === "automatic" ? "/automatic" : mode === "sender" ? `/senders/${encodeURIComponent(control.dataset.nudgeSender)}` : "";
-      await ownerRequest(base + path, mode === "send" ? {recipient:control.dataset.nudgeUser} : {enabled:wanted}, captured);
-      if (!current(captured, epoch)) return;
-      const payload = await ownerRequest(`/api/friend-nudges/${encodeURIComponent(captured.user)}`, undefined, captured);
-      if (current(captured, epoch)) { render(payload); dialog.querySelector("[data-nudge-status]").textContent = mode === "send" ? aqText("Nudge sent!") : aqText("Preference saved."); }
-    } catch (error) {
-      if (current(captured, epoch)) {
-        if (mode !== "send") control.checked = !wanted;
-        controls.forEach((item, index) => item.disabled = disabled[index]);
-        status.textContent = error.status === 409 ? aqText("You already nudged this friend today.") : error.status === 403 && mode === "send" ? aqText("This friend is not receiving nudges.") : "Could not confirm the change. Refresh and try again. " + error.message;
-      }
-    } finally { if (current(captured, epoch)) busy = false; }
-  }
-  document.addEventListener("click", event => {
-    const button = event.target.closest("button"); if (!button) return;
-    if (button.hasAttribute("data-nudge-friends")) open();
-    if (button.hasAttribute("data-nudge-close") || button.hasAttribute("data-disconnect")) close();
-    if (button.dataset.nudgeUser) change(button, "send");
-  });
-  dialog.addEventListener("change", event => {
-    if (event.target.hasAttribute("data-nudge-receiving")) change(event.target, "friend");
-    if (event.target.hasAttribute("data-nudge-automatic")) change(event.target, "automatic");
-    if (event.target.hasAttribute("data-nudge-sender")) change(event.target, "sender");
-  });
-  dialog.addEventListener("cancel", close);
-  addEventListener("ankiquest:locked", close);
-  addEventListener("ankiquest-auth", close);
-  addEventListener("pagehide", close);
-})();

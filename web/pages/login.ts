@@ -1,8 +1,7 @@
-// @ts-nocheck
 (function(){
 'use strict';
 var aqText=AnkiQuestI18n.t;
-var form=document.getElementById('login-form'),field=document.getElementById('password'),status=document.getElementById('login-status'),button=form.querySelector('button');
+var form=document.querySelector<HTMLFormElement>('#login-form')!,field=document.querySelector<HTMLInputElement>('#password')!,status=document.getElementById('login-status')!,button=form.querySelector('button')!;
 function destination(){
   var next=new URLSearchParams(location.search).get('next')||'/';
   if(!next.startsWith('/')||next.startsWith('//')||next.includes('\\')||/[\u0000-\u001f]/.test(next))next='/';
@@ -11,8 +10,11 @@ function destination(){
   return next;
 }
 form.addEventListener('submit',async function(event){
-  event.preventDefault();button.disabled=true;status.textContent=aqText("Signing in…");
+  event.preventDefault();button.disabled=true;
   var password=field.value;field.value='';
+  // The status messages are translated; the disabled button prevents a second submit while waiting.
+  await AnkiQuestI18n.ready;
+  status.textContent=aqText("Signing in…");
   try{
     var response=await fetch('/auth/session',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Ankiquest-CSRF':'1'},body:JSON.stringify({password:password})});
     password='';

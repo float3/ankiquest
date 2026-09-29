@@ -37,14 +37,14 @@ Older servers without member identity can retain the existing in-memory token co
 
 ## Browser verification
 
-`tests/mobile_web.cjs` starts an isolated server with synthetic players and reviews, then checks real API-backed browser actions. It covers owner/read-only separation, account continuity, challenge ordering/creation/acceptance, no retroactive progress, replies and read persistence, profile settings, deep links, offline recovery, credential storage, logout and layout at 320/390/1440 pixels in light and dark themes.
+`tests/mobile_web.test.ts` starts an isolated server with synthetic players and reviews, then checks real API-backed browser actions. It covers owner/read-only separation, account continuity, challenge ordering/creation/acceptance, no retroactive progress, replies and read persistence, profile settings, deep links, offline recovery, credential storage, logout and layout at 320/390/1440 pixels in light and dark themes.
 
 Run with Node 22.13+ (built-in SQLite), Playwright, and a built AnkiQuest binary. Install a Playwright browser or set `PLAYWRIGHT_CHANNEL` for an installed supported browser.
 
 ```sh
 ANKIQUEST_BIN=/path/to/ankiquest \
 PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
-node tests/mobile_web.cjs
+node --experimental-strip-types tests/mobile_web.test.ts
 ```
 
-`QA_DIR` selects the report/screenshot folder; otherwise a temporary folder is used. `--source-assets` intercepts only the static assets with the current files for UI iteration against a compiled backend. Final verification should run without that flag against the final compiled assets.
+`QA_DIR` selects the report/screenshot folder; otherwise a temporary folder is used. `--source-assets` intercepts only the static assets, serving freshly bundled `web/` code and pages, for UI iteration against a compiled backend. Final verification should run without that flag against the final compiled assets.

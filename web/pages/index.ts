@@ -1,42 +1,137 @@
-// @ts-nocheck
+export {};
+
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
-const app = document.getElementById("app");
-document.querySelector("[data-site-header]").dataset.siteSection = location.pathname.replace(/\/+$/, "") === "/records" ? "records" : "leaderboard";
-document.querySelector("[data-community-link]").href = AnkiQuestSite.href("/community");
-document.querySelector(".skip").addEventListener("click", event => { event.preventDefault(); app.focus(); });
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const num = n => n.toLocaleString(AnkiQuestI18n.language);
-const pct = (a, b) => b ? Math.min(100, Math.round(a / b * 100)) : 0;
+type Period = "hour" | "day" | "week" | "month" | "year" | "all";
+type RecordWindow = "hour" | "day" | "week" | "month" | "year";
+type RecordKind = RecordWindow | "streak" | "days";
+type WinMetric = "day" | "week" | "month";
+type WinScope = "shared" | "lifetime";
+
+interface Person { user: string; display: string; }
+
+/** A row of `/api/leaderboard` (`Standing` in src/main.rs). */
+interface Standing extends Person {
+  level: number;
+  xp_total: number;
+  week_xp: number;
+  /** XP in the requested period; missing from older servers. */
+  xp?: number;
+  period: string;
+  periods: Record<Period, number>;
+  streak: number;
+  streak_state: string;
+  day_ends_at: number;
+  today_reviews: number;
+}
+
+interface RecordHolder extends Person { value: number; detail: number; at: number; until: number; }
+interface RecordBoard { window: string; unit: string; holders: RecordHolder[]; }
+interface WeekInfo { ends_at: number; timezone: string; }
+
+interface PersonalBest { xp: number; reviews: number; at: number; until: number; }
+interface Quest { title: string; progress: number; target: number; done: boolean; reward: number; }
+interface Achievement { id: string; title: string; description: string; reward: number; progress: number; target: number; unlocked: string | null; }
+interface HeatCell { date: string; reviews: number; xp: number; frozen: boolean; }
+
+/** `/api/profile/{user}` (`Profile` in src/game.rs). */
+interface Profile extends Person {
+  level: number;
+  xp_total: number;
+  xp_into_level: number;
+  xp_for_next: number;
+  week_xp: number;
+  periods: Record<Period, number>;
+  records: Record<RecordWindow, PersonalBest>;
+  streak: number;
+  streak_state: string;
+  freezes: number;
+  stored_freezes: number;
+  freezes_enabled: boolean;
+  freeze_earned_today: boolean;
+  at_risk: boolean;
+  day_ends_at: number;
+  local_hour: number;
+  today: {reviews: number; minutes: number; xp: number; max_combo: number; current_combo: number; new_cards: number};
+  lifetime: {reviews: number; hours: number; days_active: number; best_streak: number; best_streak_at: number; first_day_at: number; best_day: number; best_combo: number; quests: number};
+  quests: Quest[];
+  achievements: Achievement[];
+  heatmap: HeatCell[];
+  last_review_id: number;
+}
+
+interface WinnerTotals extends Person { history_start: string | null; day_wins: number; week_wins: number; month_wins: number; }
+interface WinnerScope {
+  players: WinnerTotals[];
+  start_date?: string | null;
+  player_count?: number;
+  periods?: Record<WinMetric, number>;
+}
+/** `/api/winners` (`winner_history` in src/competition.rs). */
+interface WinnerHistory {
+  meta?: {start_date: string | null; start_source: string; time_zone: string | null; rollover_hour: number | null};
+  shared: WinnerScope;
+  lifetime: WinnerScope;
+  waiting_players?: Person[];
+}
+
+interface DeckSetting { id: string; name: string; enabled: boolean; recipients: string[]; }
+/** `/api/decks/{user}` (`decks::Settings`). */
+interface DeckSettings { decks: DeckSetting[]; recipients: Person[]; nudges: boolean; celebrations: boolean; }
+interface DeckUpdate { decks: {id: string; enabled: boolean; recipients: string[]}[]; nudges: boolean; celebrations: boolean; }
+
+/** `/api/deck-subscriptions/{user}` (`IncomingPreferences` in src/main.rs). */
+interface NotificationSettings {
+  enabled: boolean;
+  muted_senders: string[];
+  unsubscribed_senders: string[];
+  sharing_senders: string[];
+  senders: Person[];
+}
+interface NotificationUpdate { enabled: boolean; unsubscribed_senders: string[]; }
+
+/** `/api/streak-freezes/{user}` (`FreezeSettings` in src/main.rs). */
+interface FreezeSettings { enabled: boolean; freezes: number; capacity: number; }
+
+const app = document.getElementById("app")!;
+document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = location.pathname.replace(/\/+$/, "") === "/records" ? "records" : "leaderboard";
+document.querySelector<HTMLAnchorElement>("[data-community-link]")!.href = AnkiQuestSite.href("/community");
+document.querySelector(".skip")!.addEventListener("click", event => { event.preventDefault(); app.focus(); });
+const escapes: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+const esc = (s: unknown) => String(s).replace(/[&<>"]/g, c => escapes[c]);
+const num = (n: number) => n.toLocaleString(AnkiQuestI18n.language);
+const pct = (a: number, b: number) => b ? Math.min(100, Math.round(a / b * 100)) : 0;
+const dialogElement = (id: string) => document.getElementById(id) as HTMLDialogElement;
+const entries = <K extends string, V>(object: Record<K, V>) => Object.entries(object) as [K, V][];
 
 let weekEnds = 0;
-let renderId = 0, privatePageHidden = false, knownMember;
+let renderId = 0, privatePageHidden = false, knownMember: string | null | undefined;
 function closePersonalSettings() {
   renderId++;
   for(const id of ["deck-sharing","streak-freezes","notification-preferences"]) {
-    const dialog=document.getElementById(id);if(dialog.open)dialog.close();
+    const dialog=dialogElement(id);if(dialog.open)dialog.close();
   }
 }
 addEventListener("ankiquest:locked",()=>{settingsTokens.clear();delete window.ankiquestSession;closePersonalSettings();app.innerHTML="";});
 addEventListener("ankiquest:identity",event=>{const user=event.detail.user;if(knownMember&&knownMember!==user){settingsTokens.clear();closePersonalSettings();}knownMember=user;});
 addEventListener("pagehide",()=>{privatePageHidden=true;settingsTokens.clear();closePersonalSettings();});
 addEventListener("pageshow",()=>{privatePageHidden=false;});
-const winnerState = { data: null, scope: "shared", metric: "day", error: false, request: 0 };
-const settingsOpen = () => AnkiQuestAvatars.isOpen() || document.getElementById("deck-sharing").open || document.getElementById("streak-freezes").open || document.getElementById("notification-preferences").open;
+const winnerState: {data: WinnerHistory | null; scope: WinScope; metric: WinMetric; error: boolean; request: number} = { data: null, scope: "shared", metric: "day", error: false, request: 0 };
+const settingsOpen = () => AnkiQuestAvatars!.isOpen() || dialogElement("deck-sharing").open || dialogElement("streak-freezes").open || dialogElement("notification-preferences").open;
 // Page memory only: share credentials between settings dialogs, never between players.
-const settingsTokens = new Map();
+const settingsTokens = new Map<string, string>();
 let nativeSettingsCleared = false, previousNativeSettings = nativeSettingsIdentity();
 addEventListener("ankiquest-auth", () => {
   const identity = nativeSettingsIdentity();
   nativeSettingsCleared = !identity;
   if (!identity || identity !== previousNativeSettings) {
     settingsTokens.clear();
-    const recipientDialog = document.getElementById("notification-preferences");
+    const recipientDialog = document.getElementById("notification-preferences") as HTMLDialogElement | null;
     if (recipientDialog?.open) recipientDialog.close();
   }
   previousNativeSettings = identity;
 });
-function nativeSettingsToken(user) {
+function nativeSettingsToken(user: string) {
   const session = window.ankiquestSession;
   return session?.user === user && typeof session.token === "string" && session.token.trim()
     ? session.token.trim() : "";
@@ -46,19 +141,32 @@ function nativeSettingsIdentity() {
   return typeof session?.user === "string" && session.user && typeof session.token === "string" && session.token.trim()
     ? JSON.stringify([session.user, session.token.trim()]) : "";
 }
-function settingsToken(user) {
+function settingsToken(user: string) {
   return nativeSettingsToken(user) || settingsTokens.get(user) || "";
 }
-function forgetSettingsToken(user, failedToken) {
+function forgetSettingsToken(user: string, failedToken: string) {
   if (settingsTokens.get(user) === failedToken) settingsTokens.delete(user);
   if (nativeSettingsToken(user) === failedToken) delete window.ankiquestSession;
 }
 
-function connectSettingsAuth({ user, form, input, controller, load, clear, show, say, useSession }) {
+type Say = (message: string, error?: boolean) => void;
+interface SettingsAuth<T> {
+  user: string;
+  form: HTMLFormElement;
+  input: HTMLInputElement;
+  controller: AbortController;
+  load(token: string, session: OwnerSession | null): Promise<T>;
+  clear(): void;
+  show(data: T): void;
+  say: Say;
+  useSession(session: OwnerSession): void;
+}
+
+function connectSettingsAuth<T>({ user, form, input, controller, load, clear, show, say, useSession }: SettingsAuth<T>) {
   let busy = false, unlocked = false, generation = 0, queued = false;
-  let activeToken = "", fromNative = false, observedNative = nativeSettingsIdentity(), cookieSession = null;
-  const content = form.parentElement;
-  const button = form.querySelector("button");
+  let activeToken = "", fromNative = false, observedNative = nativeSettingsIdentity(), cookieSession: OwnerSession | null = null;
+  const content = form.parentElement!;
+  const button = form.querySelector("button")!;
   const reset = (message = "") => {
     if (controller.signal.aborted) return;
     unlocked = false;
@@ -74,7 +182,7 @@ function connectSettingsAuth({ user, form, input, controller, load, clear, show,
     say(message, Boolean(message));
     input.focus();
   };
-  const unlock = async (token, session = null) => {
+  const unlock = async (token: string, session: OwnerSession | null = null) => {
     if (busy || unlocked || controller.signal.aborted) return;
     if (!token && !session) { input.focus(); return; }
     const attempt = generation;
@@ -106,7 +214,8 @@ function connectSettingsAuth({ user, form, input, controller, load, clear, show,
         unlocked = true;
         say("");
       }
-    } catch (error) {
+    } catch (caught) {
+      const error = caught as Error;
       if (!controller.signal.aborted && attempt === generation && error.name !== "AbortError") {
         form.hidden = false;
         input.required = !settingsToken(user) && !cookieSession;
@@ -164,16 +273,23 @@ function connectSettingsAuth({ user, form, input, controller, load, clear, show,
   return reset;
 }
 let notificationDialogSession = 0;
-const PERIODS = { hour: aqText("This hour"), day: aqText("Today"), week: aqText("This week"), month: aqText("This month"), year: aqText("This year"), all: aqText("All time") };
+// Translated once the catalogs have loaded; render() waits for them.
+let PERIODS: Record<Period, string>, WINDOWS: Record<RecordWindow, string>, RECORDS: Record<RecordKind, string>;
+let labelsReady = false;
+const labels = AnkiQuestI18n.ready.then(() => {
+  PERIODS = { hour: aqText("This hour"), day: aqText("Today"), week: aqText("This week"), month: aqText("This month"), year: aqText("This year"), all: aqText("All time") };
 
-const WINDOWS = { hour: aqText("Best hour"), day: aqText("Best 24 hours"), week: aqText("Best 7 days"), month: aqText("Best 30 days"), year: aqText("Best 365 days") };
-const RECORDS = { ...WINDOWS, streak: aqText("Longest streak"), days: aqText("Days studied") };
-const SINCE = { streak: "ended", days: "since" };
+  WINDOWS = { hour: aqText("Best hour"), day: aqText("Best 24 hours"), week: aqText("Best 7 days"), month: aqText("Best 30 days"), year: aqText("Best 365 days") };
+  RECORDS = { ...WINDOWS, streak: aqText("Longest streak"), days: aqText("Days studied") };
+  labelsReady = true;
+});
+const SINCE: Partial<Record<RecordKind, string>> = { streak: "ended", days: "since" };
 
-function currentView() {
-  const name = location.pathname.replace(/\/+$/, "").split("/").pop();
+const isPeriod = (name: string): name is Period => name in PERIODS;
+function currentView(): Period | "records" {
+  const name = location.pathname.replace(/\/+$/, "").split("/").pop()!;
   if (name === "records") return "records";
-  return name in PERIODS ? name : "week";
+  return isPeriod(name) ? name : "week";
 }
 
 function currentPeriod() {
@@ -181,44 +297,44 @@ function currentPeriod() {
   return view === "records" ? "week" : view;
 }
 
-function tabs(active) {
-  const links = Object.entries(PERIODS).map(([name, label]) =>
+function tabs(active: Period) {
+  const links = entries(PERIODS).map(([name, label]) =>
     aqHtml`<a ${name === active ? 'aria-current="page"' : ""} href="${AnkiQuestSite.href("/" + name, location.hash)}">${label}</a>`);
   return aqHtml`<nav class="tabs" aria-label="Leaderboard period">${links.join("")}</nav>`;
 }
 
-function pageHero(title, description, note = "") {
+function pageHero(title: string, description: string, note = "") {
   return aqHtml`<div class="page-hero"><div><div class="eyebrow">A little progress, every day</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${note ? aqHtml`<div class="history-note">${note}</div>` : ""}</div>`;
 }
 
-function leaderboardKpis(rows, period) {
+function leaderboardKpis(rows: Standing[], period: Period) {
   const total = rows.reduce((sum, row) => sum + (row.xp ?? row.week_xp ?? 0), 0);
   const reviews = rows.reduce((sum, row) => sum + row.today_reviews, 0);
   const bestStreak = Math.max(0, ...rows.map(row => row.streak));
-  return aqHtml(['<div class="kpis leaderboard-kpis">']) +
+  return aqHtml`<div class="kpis leaderboard-kpis">` +
     AnkiQuestSite.kpi(aqText("Community XP"), num(total), PERIODS[period], "gold") +
     AnkiQuestSite.kpi(aqText("Reviews today"), num(reviews), aqText("Every card is a little progress"), "blue") +
     AnkiQuestSite.kpi(aqText("Study buddies"), num(rows.length), aqText("Growing together")) +
-    AnkiQuestSite.kpi(aqText("Longest active streak"), num(bestStreak) + " days", aqText("One study day at a time"), "green") + aqHtml(['</div>']);
+    AnkiQuestSite.kpi(aqText("Longest active streak"), num(bestStreak) + " days", aqText("One study day at a time"), "green") + aqHtml`</div>`;
 }
 
-function span(window, at, until) {
+function span(window: string, at: number, until: number) {
   const hours = window === "hour" || window === "day";
   const format = new Intl.DateTimeFormat(AnkiQuestI18n.language, hours ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" } : { year: "numeric", month: "short", day: "numeric" });
   const end = Number(until) > Number(at) ? until : at;
   return typeof format.formatRange === "function" ? format.formatRange(new Date(at), new Date(end)) : format.format(new Date(at));
 }
 
-function records(rows, me) {
+function records(rows: RecordBoard[], me: string) {
   const held = Object.fromEntries(rows.map(row => [row.window, row]));
   if (!rows.some(row => (row.holders ?? []).length)) return aqHtml`<p class="empty">Nobody has earned any XP yet.</p>`;
-  return aqHtml`<div class="records">${Object.entries(RECORDS).map(([window, label]) => {
+  return aqHtml`<div class="records">${entries(RECORDS).map(([window, label]) => {
     const row = held[window];
     const [best, ...rest] = row?.holders ?? [];
     if (!best) return "";
     const unit = row.unit === "days" ? aqText("days") : "XP";
     const when = SINCE[window] ? new Date(best.at).toLocaleDateString(AnkiQuestI18n.language, { year: "numeric", month: "short", day: "numeric" }) : span(window, best.at, best.until);
-    const entry = (holder, place, lead) => aqHtml`
+    const entry = (holder: RecordHolder, place: string | number, lead: boolean) => aqHtml`
       <div class="entry ${lead ? "lead" : "chase"}${holder.user === me ? " mine" : ""}">
         <span class="place">${place}</span>
         <a href="${AnkiQuestSite.href("/week", "#" + encodeURIComponent(holder.user))}">${esc(holder.display)}</a>
@@ -235,8 +351,8 @@ function records(rows, me) {
   }).join("")}</div>`;
 }
 
-function bests(player) {
-  const windows = Object.entries(WINDOWS).map(([window, label]) => {
+function bests(player: Profile) {
+  const windows = entries(WINDOWS).map(([window, label]) => {
     const record = player.records?.[window] ?? { xp: 0, reviews: 0 };
     return aqHtml`<div class="stat"><b>${num(record.xp)}</b><span>${label.toLowerCase()} · ${num(record.reviews)} reviews</span></div>`;
   });
@@ -245,7 +361,7 @@ function bests(player) {
   return aqHtml`<div class="stats">${windows.join("")}</div>`;
 }
 
-function boardTitle(period) {
+function boardTitle(period: Period) {
   if (period !== "week") return PERIODS[period];
   const left = weekEnds - Date.now();
   if (left <= 0) return aqText("This week");
@@ -254,13 +370,13 @@ function boardTitle(period) {
   return aqHtml`This week · resets in ${d ? `${d}d ${h % 24}h` : h ? `${h}h` : "<1h"}<span class="sub"> · ${when}</span>`;
 }
 
-function streakIcon(state) {
+function streakIcon(state: string) {
   const flame = 'M12 2C13 6 18 8 18 13C18 17 15 20 11 20C7 20 4 17 4 13C4 10 6 7 8 5C8 8 9 9 10 10C12 8 13 5 12 2Z';
   const waiting = state === "pending" || state === "unknown";
   const badge = waiting ? '<g class="streak-clock"><circle cx="18" cy="18" r="5" fill="var(--card)" stroke="currentColor" stroke-width="1.6"/><path d="M18 15v3h2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></g>' : state === "protected" ? '<path class="streak-snowflake" d="M11 9v8M7.5 11l7 4M7.5 15l7-4" fill="none" stroke="var(--card)" stroke-width="1.5" stroke-linecap="round"/>' : '';
   return `<svg class="streak-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${flame}" fill="${waiting ? 'none' : 'currentColor'}" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>${badge}</svg>`;
 }
-function streakBadge(row) {
+function streakBadge(row: Standing) {
   if (!(row.streak > 0)) return "";
   // A cached result from an ended Anki day cannot describe today's activity.
   const expired = row.day_ends_at && row.day_ends_at <= Date.now();
@@ -270,10 +386,10 @@ function streakBadge(row) {
   const label = aqText`${num(row.streak)} day streak · ${status}`;
   return aqHtml`<span class="streak" data-streak-state="${state}" role="img" tabindex="0" aria-label="${esc(label)}" title="${esc(label)}">${streakIcon(state)}${num(row.streak)}</span>`;
 }
-function board(rows, me) {
+function board(rows: Standing[], me: string) {
   if (!rows.length) return aqHtml`<p class="empty">Nobody has uploaded reviews yet.</p>`;
   if (rows.every(row => (row.xp ?? row.week_xp) === 0)) return aqHtml`<p class="empty">No XP in this period yet.</p>`;
-  const xpOf = row => row.xp ?? row.week_xp;
+  const xpOf = (row: Standing) => row.xp ?? row.week_xp;
   const lead = Math.max(1, xpOf(rows[0]));
   return aqHtml`<ol class="board">${rows.map((r, i) => aqHtml`
     <li class="${[r.user === me && "me", i === 0 && xpOf(r) > 0 && "lead"].filter(Boolean).join(" ")}">
@@ -291,8 +407,8 @@ function board(rows, me) {
   </ol><p class="streak-legend">${[["studied",aqText("Studied today")],["pending",aqText("Not studied yet")],["protected",aqText("Streak protected")]].map(([state,label]) => aqHtml`<span data-streak-state="${state}">${streakIcon(state)}${label}</span>`).join("")}</p>`;
 }
 
-const winCount = value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
-function winDate(value) {
+const winCount = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+function winDate(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(String(value) + "T00:00:00Z");
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString(AnkiQuestI18n.language, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
@@ -302,11 +418,11 @@ function winnerContent() {
   const heading = aqHtml`<div class="win-heading"><h2 id="winner-history-title">Winner history</h2><a id="winner-calendar-link" href="${AnkiQuestSite.href("/community?period=" + metric, "#calendar")}">Open winner calendar →</a></div>`;
   const controls = aqHtml`<div class="win-controls"><div class="win-scopes" role="group" aria-label="Winner history scope"><button type="button" data-win-scope="shared" aria-pressed="${shared}">Shared history</button><button type="button" data-win-scope="lifetime" aria-pressed="${!shared}">Lifetime</button></div><label class="win-sort" for="win-metric">Rank by <select id="win-metric">${[["day",aqText("Days won")],["week",aqText("Weeks won")],["month",aqText("Months won")]].map(([key,label])=>aqHtml`<option value="${key}"${metric===key?" selected":""}>${label}</option>`).join("")}</select></label></div>`;
   const failure = winnerState.error ? aqHtml`<p role="status">Winner history could not ${data ? aqText("refresh; showing the last loaded results") : "load"}. <button type="button" data-win-retry>Try again</button></p>` : "";
-  if (!data) return heading + controls + failure + (winnerState.error ? "" : aqHtml(['<p role="status">Loading winner history…</p>']));
+  if (!data) return heading + controls + failure + (winnerState.error ? "" : aqHtml`<p role="status">Loading winner history…</p>`);
   const scope = shared ? data.shared : data.lifetime;
   const ready = !shared || winCount(data.shared?.player_count) >= 2;
-  const key = metric + "_wins";
-  const lexical = (a,b) => a < b ? -1 : a > b ? 1 : 0;
+  const key = `${metric}_wins` as const;
+  const lexical = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
   const players = (scope?.players || []).filter(player=>player.history_start).sort((a,b) => winCount(b[key])-winCount(a[key]) || lexical(String(a.display),String(b.display)) || lexical(String(a.user),String(b.user)));
   const waiting = (data.waiting_players || []).slice().sort((a,b) => lexical(String(a.display),String(b.display)) || lexical(String(a.user),String(b.user)));
   const lifetimeStart = data.meta?.start_source === "configured"
@@ -316,15 +432,15 @@ function winnerContent() {
     ? ready ? `Same window for all ${num(winCount(data.shared.player_count))} players with recorded history, from ${esc(winDate(scope.start_date))}. The window starts with the newest player’s first recorded study date. Only full weeks and months within that window count.`
       : aqText("Shared history needs at least two players with recorded study history. Earlier solo wins remain in Lifetime.")
     : `Raw win totals ${lifetimeStart}, including earlier solo wins and partial periods. Players may have different amounts of recorded history.`;
-  let rank = 0, previous = null;
+  let rank = 0, previous: number | null = null;
   const playerRows = players.map((player,index) => {
     const score = winCount(player[key]);
     if (previous !== score) rank = index + 1;
     previous = score;
-    return aqHtml`<tr><td>${ready && score > 0 ? rank : "—"}</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>${ready ? `History from ${esc(winDate(player.history_start))}` : aqText("Waiting for a second player")}</small></td>${["day","week","month"].map(kind=>aqHtml`<td class="${kind===metric?"win-selected":""}">${ready ? num(winCount(player[kind+"_wins"])) : "—"}</td>`).join("")}</tr>`;
+    return aqHtml`<tr><td>${ready && score > 0 ? rank : "—"}</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>${ready ? `History from ${esc(winDate(player.history_start))}` : aqText("Waiting for a second player")}</small></td>${(["day","week","month"] as const).map(kind=>aqHtml`<td class="${kind===metric?"win-selected":""}">${ready ? num(winCount(player[`${kind}_wins`])) : "—"}</td>`).join("")}</tr>`;
   }).join("");
   const waitingRows = waiting.map(player=>aqHtml`<tr class="win-waiting"><td>—</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>Waiting for study history</small></td><td>—</td><td>—</td><td>—</td></tr>`).join("");
-  const table = players.length || waiting.length ? aqHtml`<table id="winner-history-table" class="win-table"><caption class="win-sr">${shared?aqText("Shared history"):aqText("Lifetime")} wins, ranked by ${aqText({day:"days",week:"weeks",month:"months"}[metric])} won</caption><thead><tr><th scope="col"><span class="win-sr">Rank</span>#</th><th scope="col">Player</th>${[["day",aqText("Days")],["week",aqText("Weeks")],["month",aqText("Months")]].map(([kind,label])=>aqHtml`<th scope="col"${kind===metric?' aria-sort="descending" class="win-selected"':""}>${label}<span class="win-sr"> won</span></th>`).join("")}</tr></thead><tbody>${playerRows}${waitingRows}</tbody></table>` : aqHtml(['<p class="empty">The first recorded study sessions will start your winner history.</p>']);
+  const table = players.length || waiting.length ? aqHtml`<table id="winner-history-table" class="win-table"><caption class="win-sr">${shared?aqText("Shared history"):aqText("Lifetime")} wins, ranked by ${aqText({day:"days",week:"weeks",month:"months"}[metric])} won</caption><thead><tr><th scope="col"><span class="win-sr">Rank</span>#</th><th scope="col">Player</th>${[["day",aqText("Days")],["week",aqText("Weeks")],["month",aqText("Months")]].map(([kind,label])=>aqHtml`<th scope="col"${kind===metric?' aria-sort="descending" class="win-selected"':""}>${label}<span class="win-sr"> won</span></th>`).join("")}</tr></thead><tbody>${playerRows}${waitingRows}</tbody></table>` : aqHtml`<p class="empty">The first recorded study sessions will start your winner history.</p>`;
   const cutoff = data.meta?.time_zone ? aqText` Cutoff: ${esc(String(data.meta.rollover_hour ?? 0).padStart(2,"0"))}:00 ${esc(data.meta.time_zone)}.` : "";
   const periods = shared && ready && scope.periods ? aqHtml`<p>${num(winCount(scope.periods.day))} finalized days · ${num(winCount(scope.periods.week))} full weeks · ${num(winCount(scope.periods.month))} full months in this window.</p>` : "";
   return heading + controls + failure + aqHtml`<p id="winner-window">${note}</p>` + periods + table + aqHtml`<p>Finalized results only. Tied winners each earn a win; equal win totals share a rank.${cutoff}</p>`;
@@ -337,7 +453,7 @@ function refreshWinnerContent() {
 async function loadWinners() {
   const id = ++winnerState.request;
   try {
-    const data = await AnkiQuestSite.readJSON("/api/winners");
+    const data = await AnkiQuestSite.readJSON<WinnerHistory>("/api/winners");
     if (!data.shared || !Array.isArray(data.shared.players) || !Array.isArray(data.lifetime?.players)) throw new Error(aqText("Incomplete winner history"));
     if (id !== winnerState.request) return;
     winnerState.data = data;
@@ -350,35 +466,37 @@ async function loadWinners() {
 }
 
 app.addEventListener("click", event => {
-  const button = event.target.closest("button");
-  if (button?.dataset.winScope && ["shared","lifetime"].includes(button.dataset.winScope)) {
-    winnerState.scope = button.dataset.winScope;
+  const button = (event.target as Element).closest("button");
+  const scope = button?.dataset.winScope;
+  if (scope === "shared" || scope === "lifetime") {
+    winnerState.scope = scope;
     refreshWinnerContent();
-    app.querySelector(`[data-win-scope="${winnerState.scope}"]`)?.focus();
+    app.querySelector<HTMLElement>(`[data-win-scope="${winnerState.scope}"]`)?.focus();
   }
   if (button?.hasAttribute("data-win-retry")) { winnerState.error = false; refreshWinnerContent(); loadWinners(); }
 });
 app.addEventListener("change", event => {
-  if (event.target.id === "win-metric" && ["day","week","month"].includes(event.target.value)) {
-    winnerState.metric = event.target.value;
+  const target = event.target as HTMLSelectElement;
+  if (target.id === "win-metric" && (target.value === "day" || target.value === "week" || target.value === "month")) {
+    winnerState.metric = target.value;
     refreshWinnerContent();
     document.getElementById("win-metric")?.focus();
   }
 });
 
-function heat(cells) {
-  if (!cells.length) return aqHtml(['<span class="sub">Your study history will appear here.</span>']);
+function heat(cells: HeatCell[]) {
+  if (!cells.length) return aqHtml`<span class="sub">Your study history will appear here.</span>`;
   const max = Math.max(1, ...cells.map(c => c.reviews));
   const first = new Date(cells[0].date + "T00:00:00Z");
   const pad = (first.getUTCDay() + 6) % 7;
-  const level = n => n === 0 ? 0 : Math.min(4, 1 + Math.floor(n / max * 3.999));
-  return aqHtml(["<i class='pad'></i>"]).repeat(pad) + cells.map(c =>
+  const level = (n: number) => n === 0 ? 0 : Math.min(4, 1 + Math.floor(n / max * 3.999));
+  return aqHtml`<i class='pad'></i>`.repeat(pad) + cells.map(c =>
     aqHtml`<i class="${c.frozen ? "frozen" : "l" + level(c.reviews)}" title="${c.date}: ${c.frozen ? aqText("streak freeze") : num(c.reviews) + " reviews, " + num(c.xp) + " XP"}"></i>`).join("");
 }
 
-const freezeCount = value => Math.max(0, Math.min(3, Math.floor(Number(value) || 0)));
+const freezeCount = (value: unknown) => Math.max(0, Math.min(3, Math.floor(Number(value) || 0)));
 
-function freezeSlots(count, enabled) {
+function freezeSlots(count: number, enabled: boolean) {
   return aqHtml`<div class="freeze-display${enabled ? "" : " off"}" role="img" aria-label="${count} of 3 streak freezes ${enabled ? "ready" : aqText("saved; protection off")}">
     ${Array.from({ length: 3 }, (_, i) => aqHtml`<span class="freeze-slot${i < count ? " filled" : ""}">
       <svg viewBox="0 0 40 48" aria-hidden="true" focusable="false">
@@ -393,7 +511,7 @@ function freezeSlots(count, enabled) {
   </div>`;
 }
 
-function streakFreezes(player) {
+function streakFreezes(player: Profile) {
   const count = freezeCount(player.stored_freezes ?? player.freezes), enabled = player.freezes_enabled === true;
   const state = !enabled ? "off" : count === 3 ? "full" : count ? "ready" : "empty";
   const badge = !enabled ? aqText("Off") : count === 3 ? aqText("Full") : aqText("On");
@@ -411,11 +529,11 @@ function streakFreezes(player) {
   </div>`;
 }
 
-function view(p, rows, canEditAvatar = false) {
+function view(p: Profile, rows: Standing[], canEditAvatar = false) {
   const unlocked = p.achievements.filter(a => a.unlocked).length;
-  const achievements = [...p.achievements].sort((a, b) => !!b.unlocked - !!a.unlocked || pct(b.progress, b.target) - pct(a.progress, a.target));
+  const achievements = [...p.achievements].sort((a, b) => Number(!!b.unlocked) - Number(!!a.unlocked) || pct(b.progress, b.target) - pct(a.progress, a.target));
   return aqHtml`
-${pageHero(p.display, aqText("A study journey, one session at a time. Quests, milestones, and the progress that adds up."), aqHtml(['<a href="']) + AnkiQuestSite.href("/" + currentPeriod()) + aqHtml(['">']) + aqText("← Back to leaderboard") + aqHtml(['</a>']))}
+${pageHero(p.display, aqText("A study journey, one session at a time. Quests, milestones, and the progress that adds up."), aqHtml`<a href="` + AnkiQuestSite.href("/" + currentPeriod()) + aqHtml`">` + aqText("← Back to leaderboard") + aqHtml`</a>`)}
 <div class="embedded-profile-title"><strong>${esc(p.display)}</strong><a href="${AnkiQuestSite.href("/" + currentPeriod())}">← Leaderboard</a></div>
 <div class="profile-layout">
 ${AnkiQuestAki.profile(p)}
@@ -425,7 +543,7 @@ ${AnkiQuestAki.profile(p)}
     <h2>Keep the progress going.</h2>
     <div class="sub">${num(p.xp_total)} XP earned so far</div>
     <div class="name avatar-name">${AnkiQuestSite.avatar(p.user,p.display)}<span>${esc(p.display)}</span></div>
-    ${canEditAvatar ? aqHtml(['<div><button class="avatar-edit-button" type="button" id="manage-avatar">Profile picture</button></div>']) : ''}
+    ${canEditAvatar ? aqHtml`<div><button class="avatar-edit-button" type="button" id="manage-avatar">Profile picture</button></div>` : ''}
     <div class="bar gold"><i style="width:${pct(p.xp_into_level, p.xp_for_next)}%"></i></div>
     <div class="sub">${num(p.xp_into_level)} / ${num(p.xp_for_next)} XP to level ${p.level + 1} · ${num(p.xp_total)} total</div>
   </div>
@@ -468,13 +586,13 @@ ${winnerSection()}
 </div>`;
 }
 
-function openDeckSharing(user, display) {
+function openDeckSharing(user: string, display: string) {
   if (settingsOpen()) return;
   renderId++;
-  const dialog = document.getElementById("deck-sharing");
-  let token = "", session = null;
+  const dialog = dialogElement("deck-sharing");
+  let token = "", session: OwnerSession | null = null;
   let closed = false;
-  let resetAuth = () => {};
+  let resetAuth: (message?: string) => void = () => {};
   const controller = new AbortController();
   dialog.innerHTML = aqHtml`<h3 id="deck-sharing-title">Deck notifications · ${esc(display)}</h3>
     <p class="sub">Notify selected people once per deck each Anki day, after you finish all scheduled cards, including learning cards due later today.</p>
@@ -486,13 +604,13 @@ function openDeckSharing(user, display) {
     </form></div>
     <p id="deck-status" role="status" aria-live="polite"></p>
     <div class="actions"><button type="button" id="deck-close">Close</button></div>`;
-  const content = dialog.querySelector("#deck-sharing-content");
-  const status = dialog.querySelector("#deck-status");
-  const say = (message, error = false) => {
+  const content = dialog.querySelector("#deck-sharing-content")!;
+  const status = dialog.querySelector("#deck-status")!;
+  const say = (message: string, error = false) => {
     status.textContent = message;
     status.className = error ? "error" : "sub";
   };
-  const request = async (body) => {
+  const request = async (body?: DeckUpdate): Promise<DeckSettings> => {
     const requestToken = token, requestSession = session;
     const response = await fetch("/api/decks/" + encodeURIComponent(user), {
       method: body ? "POST" : "GET",
@@ -515,11 +633,11 @@ function openDeckSharing(user, display) {
       if (response.status === 400 || response.status === 404) throw new Error(aqText("The deck or recipient list has changed. Close and reopen this window to refresh it."));
       throw new Error(aqText("Could not save or load deck notifications. Please try again."));
     }
-    const data = await response.json();
+    const data: DeckSettings = await response.json();
     if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
     return data;
   };
-  const showDecks = data => {
+  const showDecks = (data: DeckSettings) => {
     data.decks.sort((a, b) => {
       const left = a.name.split("::"), right = b.name.split("::");
       for (let i = 0; i < Math.min(left.length, right.length); i++) {
@@ -528,8 +646,8 @@ function openDeckSharing(user, display) {
       }
       return left.length - right.length;
     });
-    const subdecks = deck => data.decks.map((other, i) => other.name.startsWith(deck.name + "::") ? i : -1).filter(i => i >= 0);
-    const collapsed = new Set();
+    const subdecks = (deck: DeckSetting) => data.decks.map((other, i) => other.name.startsWith(deck.name + "::") ? i : -1).filter(i => i >= 0);
+    const collapsed = new Set<string>();
     content.innerHTML = aqHtml`<form id="deck-settings">
       ${data.decks.length ? "" : aqHtml`<p>No decks have been uploaded yet. Open an updated AnkiQuest client and sync your reviews, then reopen this window. Nudges work without them.</p>`}
       ${data.decks.map((deck, index) => aqHtml`<fieldset data-deck="${index}" style="margin-left:${(deck.name.split("::").length - 1) * 14}px">
@@ -553,8 +671,8 @@ function openDeckSharing(user, display) {
       ${data.decks.length ? aqHtml`<p class="sub">Only selected people receive your name and the deck name. Changes apply to future completions.</p>` : ""}
       <button type="submit">Save preferences</button>
     </form>`;
-    const form = content.querySelector("form");
-    const fields = form.querySelectorAll("fieldset[data-deck]");
+    const form = content.querySelector("form")!;
+    const fields = form.querySelectorAll<HTMLFieldSetElement>("fieldset[data-deck]");
     const refold = () => fields.forEach((field, i) => {
       field.hidden = [...collapsed].some(name => data.decks[i].name.startsWith(name + "::"));
       const fold = field.querySelector(".fold");
@@ -568,54 +686,55 @@ function openDeckSharing(user, display) {
       if (!collapsed.delete(name)) collapsed.add(name);
       refold();
     }));
-    form.querySelectorAll("fieldset[data-deck]").forEach(field => {
-      field.querySelector(".deck-enabled").addEventListener("change", event => {
-        field.querySelector(".recipients").hidden = !event.target.checked;
+    form.querySelectorAll<HTMLFieldSetElement>("fieldset[data-deck]").forEach(field => {
+      field.querySelector(".deck-enabled")!.addEventListener("change", event => {
+        field.querySelector<HTMLElement>(".recipients")!.hidden = !(event.target as HTMLInputElement).checked;
         say(aqText("Unsaved changes."));
       });
       field.querySelectorAll("[data-recipient]").forEach(input => input.addEventListener("change", () => say(aqText("Unsaved changes."))));
       field.querySelector(".apply-subdecks")?.addEventListener("click", () => {
-        const enabled = field.querySelector(".deck-enabled").checked;
-        const chosen = [...field.querySelectorAll("[data-recipient]")].map(input => input.checked);
-        const fields = form.querySelectorAll("fieldset[data-deck]");
+        const enabled = field.querySelector<HTMLInputElement>(".deck-enabled")!.checked;
+        const chosen = [...field.querySelectorAll<HTMLInputElement>("[data-recipient]")].map(input => input.checked);
+        const fields = form.querySelectorAll<HTMLFieldSetElement>("fieldset[data-deck]");
         for (const i of subdecks(data.decks[Number(field.dataset.deck)])) {
           const target = fields[i];
-          target.querySelector(".deck-enabled").checked = enabled;
-          target.querySelector(".recipients").hidden = !enabled;
-          target.querySelectorAll("[data-recipient]").forEach((input, r) => { input.checked = chosen[r]; });
+          target.querySelector<HTMLInputElement>(".deck-enabled")!.checked = enabled;
+          target.querySelector<HTMLElement>(".recipients")!.hidden = !enabled;
+          target.querySelectorAll<HTMLInputElement>("[data-recipient]").forEach((input, r) => { input.checked = chosen[r]; });
         }
         say(aqText("Copied to subdecks. Save to keep it."));
       });
     });
-    form.querySelector("#nudge-enabled").addEventListener("change", () => say(aqText("Unsaved changes.")));
-    form.querySelector("#celebrations-enabled").addEventListener("change", () => say(aqText("Unsaved changes.")));
+    form.querySelector("#nudge-enabled")!.addEventListener("change", () => say(aqText("Unsaved changes.")));
+    form.querySelector("#celebrations-enabled")!.addEventListener("change", () => say(aqText("Unsaved changes.")));
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const decks = [...form.querySelectorAll("fieldset[data-deck]")].map((field, i) => ({
         id: data.decks[i].id,
-        enabled: field.querySelector(".deck-enabled").checked,
-        recipients: [...field.querySelectorAll("[data-recipient]:checked")].map(input => data.recipients[Number(input.dataset.recipient)].user),
+        enabled: field.querySelector<HTMLInputElement>(".deck-enabled")!.checked,
+        recipients: [...field.querySelectorAll<HTMLInputElement>("[data-recipient]:checked")].map(input => data.recipients[Number(input.dataset.recipient)].user),
       }));
       const invalid = decks.findIndex(deck => deck.enabled && !deck.recipients.length);
       if (invalid >= 0) {
         say(`Select at least one person for ${data.decks[invalid].name}, or turn its notifications off.`, true);
-        form.querySelectorAll("fieldset[data-deck]")[invalid].querySelector(".deck-enabled").focus();
+        form.querySelectorAll("fieldset[data-deck]")[invalid].querySelector<HTMLInputElement>(".deck-enabled")!.focus();
         return;
       }
-      const controls = [...form.querySelectorAll("input, button")];
+      const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")];
       controls.forEach(control => { control.disabled = true; });
       say(aqText("Saving…"));
       try {
-        await request({ decks, nudges: form.querySelector("#nudge-enabled").checked, celebrations: form.querySelector("#celebrations-enabled").checked });
+        await request({ decks, nudges: form.querySelector<HTMLInputElement>("#nudge-enabled")!.checked, celebrations: form.querySelector<HTMLInputElement>("#celebrations-enabled")!.checked });
         if (!closed && form.isConnected) say(aqText("Preferences saved."));
-      } catch (error) {
+      } catch (caught) {
+        const error = caught as Error;
         if (!closed && form.isConnected && error.name !== "AbortError") say(error.message, true);
       } finally {
         controls.forEach(control => { control.disabled = false; });
       }
     });
   };
-  dialog.querySelector("#deck-close").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#deck-close")!.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     closed = true;
     token = "";
@@ -626,11 +745,11 @@ function openDeckSharing(user, display) {
   }, { once: true });
   dialog.showModal();
   resetAuth = connectSettingsAuth({
-    user, form: content.querySelector("form"), input: dialog.querySelector("#deck-token"), controller,
+    user, form: content.querySelector("form")!, input: dialog.querySelector<HTMLInputElement>("#deck-token")!, controller,
     load: (value, identity) => { token = value; session = identity; return request(); },
     clear: () => { token = ""; session = null; },
     useSession: identity => { token = identity.token || ""; session = identity; },
-    show: data => { showDecks(data); content.querySelector("input, button")?.focus(); }, say,
+    show: data => { showDecks(data); content.querySelector<HTMLElement>("input, button")?.focus(); }, say,
   });
 }
 
@@ -641,16 +760,28 @@ function receivingNotificationsEntry() {
   </section>`;
 }
 
+const senderNames = (value: unknown) => Array.isArray(value) && value.every((sender: unknown) => typeof sender === "string" && sender.length > 0);
+function isNotificationSettings(value: unknown): value is NotificationSettings {
+  const data = value as Record<string, unknown> | null;
+  return !!data && typeof data.enabled === "boolean" && senderNames(data.muted_senders) &&
+    senderNames(data.unsubscribed_senders) && senderNames(data.sharing_senders) &&
+    Array.isArray(data.senders) && data.senders.every((entry: unknown) => {
+      const sender = entry as Record<string, unknown> | null;
+      return !!sender && typeof sender.user === "string" && sender.user.length > 0 && typeof sender.display === "string";
+    });
+}
+
 function openNotificationPreferences(user = "", display = "") {
   if (settingsOpen()) return;
   renderId++;
-  const dialog = document.getElementById("notification-preferences");
+  const dialog = dialogElement("notification-preferences");
   const session = ++notificationDialogSession;
   const controller = new AbortController();
   const fixedUser = user;
   const opener = document.activeElement;
-  let token = "", ownerSession = null, closed = false, busy = false, authController = null, authUser = null;
-  let resetAuth = () => {}, playerEdited = false;
+  let token = "", ownerSession: OwnerSession | null = null, closed = false, busy = false;
+  let authController: AbortController | null = null, authUser: string | null = null;
+  let resetAuth: (message?: string) => void = () => {}, playerEdited = false;
   let remembered = "";
   if (!fixedUser) {
     try { remembered = localStorage.getItem("ankiquestPlayer") || ""; } catch (e) {}
@@ -671,16 +802,16 @@ function openNotificationPreferences(user = "", display = "") {
     </form></div>
     <p id="notification-status" class="status" role="status" aria-live="polite" data-notification-status></p>
     <div class="actions"><button type="button" id="notification-close" class="freeze-button" data-notification-close>Close</button></div>`;
-  const content = dialog.querySelector("#notification-content");
-  const status = dialog.querySelector("#notification-status");
-  const say = (message, error = false) => {
+  const content = dialog.querySelector("#notification-content")!;
+  const status = dialog.querySelector("#notification-status")!;
+  const say = (message: string, error = false) => {
     if (!current()) return;
     status.textContent = message;
     status.className = "status" + (error ? " error" : "");
   };
-  const request = async body => {
+  const request = async (body?: NotificationUpdate): Promise<NotificationSettings> => {
     const loading = body === undefined;
-    const requestUser = user, requestToken = token, requestSession = ownerSession, requestController = authController;
+    const requestUser = user, requestToken = token, requestSession = ownerSession, requestController = authController!;
     const active = () => current() && !requestController.signal.aborted && requestUser === user && requestToken === token && requestSession === ownerSession;
     const response = await fetch("/api/deck-subscriptions/" + encodeURIComponent(requestUser), {
       method: loading ? "GET" : "POST",
@@ -703,18 +834,14 @@ function openNotificationPreferences(user = "", display = "") {
       throw new Error(loading ? aqText("Could not load your notification settings. Please try again.")
         : aqText("Could not save your notification settings. Your changes are still here; please try again."));
     }
-    const data = await response.json();
+    const data: unknown = await response.json();
     if (!active()) throw new DOMException(aqText("Settings changed."), "AbortError");
-    if (!data || typeof data.enabled !== "boolean" || !Array.isArray(data.muted_senders) ||
-        !data.muted_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
-        !Array.isArray(data.unsubscribed_senders) || !data.unsubscribed_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
-        !Array.isArray(data.sharing_senders) || !data.sharing_senders.every(sender => typeof sender === "string" && sender.length > 0) ||
-        !Array.isArray(data.senders) || !data.senders.every(sender => sender && typeof sender.user === "string" && sender.user.length > 0 && typeof sender.display === "string")) {
+    if (!isNotificationSettings(data)) {
       throw new Error(aqText("The server returned unexpected notification settings. Please try again."));
     }
     return data;
   };
-  const showSettings = data => {
+  const showSettings = (data: NotificationSettings) => {
     if (!current()) return;
     const unsubscribed = new Set([...data.unsubscribed_senders, ...data.muted_senders]);
     const relevant = new Set([...data.sharing_senders, ...unsubscribed]);
@@ -722,7 +849,7 @@ function openNotificationPreferences(user = "", display = "") {
     // Keep subscriptions and previous mutes editable for former players too.
     for (const sender of unsubscribed) if (!people.has(sender)) people.set(sender, { user: sender, display: sender });
     const senders = [...people.values()].sort((a, b) => a.display.localeCompare(b.display) || a.user.localeCompare(b.user));
-    dialog.querySelector("#notification-intro").textContent = `Deck completion alerts for ${fixedUser ? display || user : user}. These settings apply across your devices.`;
+    dialog.querySelector("#notification-intro")!.textContent = `Deck completion alerts for ${fixedUser ? display || user : user}. These settings apply across your devices.`;
     content.innerHTML = aqHtml`<form id="notification-settings" data-notification-settings>
       <label class="receive-toggle" for="notification-enabled">
         <input id="notification-enabled" type="checkbox" role="switch" ${data.enabled ? "checked" : ""} data-receiving-enabled>
@@ -744,10 +871,10 @@ function openNotificationPreferences(user = "", display = "") {
       </ul>
       <button type="submit" class="freeze-button primary" data-notification-save>Save preferences</button>
     </form>`;
-    const form = content.querySelector("form");
-    const enabled = form.querySelector("#notification-enabled");
-    const senderInputs = [...form.querySelectorAll("[data-unsubscribed-sender]")];
-    const saveButton = form.querySelector("[data-notification-save]");
+    const form = content.querySelector("form")!;
+    const enabled = form.querySelector<HTMLInputElement>("#notification-enabled")!;
+    const senderInputs = [...form.querySelectorAll<HTMLInputElement>("[data-unsubscribed-sender]")];
+    const saveButton = form.querySelector<HTMLButtonElement>("[data-notification-save]")!;
     const syncControls = () => {
       form.setAttribute("aria-busy", String(busy));
       enabled.disabled = busy;
@@ -759,7 +886,7 @@ function openNotificationPreferences(user = "", display = "") {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       if (busy || !current()) return;
-      const draft = { enabled: enabled.checked, unsubscribed_senders: senderInputs.filter(input => input.checked).map(input => input.dataset.unsubscribedSender) };
+      const draft = { enabled: enabled.checked, unsubscribed_senders: senderInputs.filter(input => input.checked).map(input => input.dataset.unsubscribedSender!) };
       busy = true;
       syncControls();
       say(aqText("Saving…"));
@@ -770,10 +897,10 @@ function openNotificationPreferences(user = "", display = "") {
           showSettings(saved);
           say(saved.enabled ? aqText("Preferences saved. Your sender subscriptions have been updated.")
             : aqText("Preferences saved. All deck completion alerts are off. Your sender subscriptions are saved."));
-          content.querySelector("[data-notification-save]").focus();
+          content.querySelector<HTMLButtonElement>("[data-notification-save]")!.focus();
         }
       } catch (error) {
-        if (current()) say(error.message, true);
+        if (current()) say((error as Error).message, true);
       } finally {
         busy = false;
         if (current() && form.isConnected) syncControls();
@@ -781,8 +908,8 @@ function openNotificationPreferences(user = "", display = "") {
     });
     syncControls();
   };
-  const form = content.querySelector("form"), input = form.querySelector("#notification-token"), player = form.querySelector("#notification-player");
-  const bindAccount = target => {
+  const form = content.querySelector("form")!, input = form.querySelector<HTMLInputElement>("#notification-token")!, player = form.querySelector<HTMLInputElement>("#notification-player");
+  const bindAccount = (target: string) => {
     if (!current() || !target || target === authUser) return;
     authController?.abort();
     authController = new AbortController();
@@ -795,17 +922,17 @@ function openNotificationPreferences(user = "", display = "") {
       load: (value, identity) => { token = value; ownerSession = identity; return request(); },
       clear: () => { token = ""; ownerSession = null; },
       useSession: identity => { token = identity.token || ""; ownerSession = identity; },
-      show: data => { showSettings(data); content.querySelector("#notification-enabled").focus(); }, say,
+      show: data => { showSettings(data); content.querySelector<HTMLInputElement>("#notification-enabled")!.focus(); }, say,
     });
   };
   // A leaderboard visitor may choose a player; once connected, the same shared
   // auth helper used by deck/freeze preferences owns all loading and retries.
   form.addEventListener("submit", event => {
     playerEdited = true;
-    const target = fixedUser || player.value.trim();
+    const target = fixedUser || player!.value.trim();
     if (target === authUser) return;
     event.preventDefault();event.stopImmediatePropagation();
-    if (!target) { player.focus();return; }
+    if (!target) { player!.focus();return; }
     bindAccount(target);
     // A new task avoids the browser's re-entrant form-submission guard.
     setTimeout(() => { if (current()) form.requestSubmit(); }, 0);
@@ -830,14 +957,15 @@ function openNotificationPreferences(user = "", display = "") {
   };
   const close = () => { dialog.close(); finish(); };
   const onClose = () => { if (!dialog.open) finish(); };
-  const onCancel = event => { event.preventDefault(); close(); };
-  dialog.querySelector("#notification-close").addEventListener("click", close);
+  const onCancel = (event: Event) => { event.preventDefault(); close(); };
+  dialog.querySelector("#notification-close")!.addEventListener("click", close);
   dialog.addEventListener("close", onClose);
   dialog.addEventListener("cancel", onCancel);
   dialog.showModal();
   const native = window.ankiquestSession;
   if (fixedUser) bindAccount(fixedUser);
-  else if (nativeSettingsIdentity()) bindAccount(native.user);
+  // A native identity means `native.user` is a non-empty string.
+  else if (nativeSettingsIdentity()) bindAccount(native!.user as string);
   else AnkiQuestSite.member().then(identity => {
     if (!current() || playerEdited || nativeSettingsCleared || nativeSettingsIdentity()) return;
     if (identity) bindAccount(identity.user);
@@ -845,13 +973,18 @@ function openNotificationPreferences(user = "", display = "") {
   });
 }
 
-function openStreakFreezes(user, display) {
+function isFreezeSettings(value: unknown): value is FreezeSettings {
+  const {enabled, freezes, capacity} = value as Record<string, unknown>;
+  return typeof enabled === "boolean" && typeof freezes === "number" && Number.isInteger(freezes) && freezes >= 0 && freezes <= 3 && capacity === 3;
+}
+
+function openStreakFreezes(user: string, display: string) {
   if (settingsOpen()) return;
   renderId++;
-  const dialog = document.getElementById("streak-freezes");
+  const dialog = dialogElement("streak-freezes");
   const controller = new AbortController();
-  let token = "", session = null, closed = false, busy = false;
-  let resetAuth = () => {};
+  let token = "", session: OwnerSession | null = null, closed = false, busy = false;
+  let resetAuth: (message?: string) => void = () => {};
   dialog.innerHTML = aqHtml`<h3 id="freeze-title">Streak protection</h3>
     <p id="freeze-intro" class="intro">A little backup for ${esc(display)}'s study streak. On by default.</p>
     <ul class="rules">
@@ -867,13 +1000,13 @@ function openStreakFreezes(user, display) {
     </form></div>
     <p id="freeze-status" class="status" role="status" aria-live="polite"></p>
     <div class="actions"><button type="button" id="freeze-close" class="freeze-button">Close</button></div>`;
-  const content = dialog.querySelector("#freeze-content");
-  const status = dialog.querySelector("#freeze-status");
-  const say = (message, error = false) => {
+  const content = dialog.querySelector("#freeze-content")!;
+  const status = dialog.querySelector("#freeze-status")!;
+  const say = (message: string, error = false) => {
     status.textContent = message;
     status.className = "status" + (error ? " error" : "");
   };
-  const request = async body => {
+  const request = async (body?: {enabled: boolean}): Promise<FreezeSettings> => {
     const requestToken = token, requestSession = session;
     const response = await fetch("/api/streak-freezes/" + encodeURIComponent(user), {
       method: body === undefined ? "GET" : "POST",
@@ -895,14 +1028,14 @@ function openStreakFreezes(user, display) {
       }
       throw new Error(aqText("Could not load or save streak protection. Please try again."));
     }
-    const data = await response.json();
+    const data: unknown = await response.json();
     if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
-    if (typeof data.enabled !== "boolean" || !Number.isInteger(data.freezes) || data.freezes < 0 || data.freezes > 3 || data.capacity !== 3) {
+    if (!isFreezeSettings(data)) {
       throw new Error(aqText("The server returned unexpected freeze settings. Please try again."));
     }
     return data;
   };
-  const showSettings = data => {
+  const showSettings = (data: FreezeSettings) => {
     content.innerHTML = aqHtml`<form id="freeze-preferences">
       <div class="freeze-balance">${freezeSlots(data.freezes, data.enabled)}
         <div><strong>${data.freezes} of 3 freezes ${data.enabled ? "ready" : "saved"}</strong><span class="sub">${data.enabled ? data.freezes === 3 ? aqText("Fully stocked") : aqText("Earn more with daily quests") : aqText("Protection is off")}</span></div></div>
@@ -912,14 +1045,14 @@ function openStreakFreezes(user, display) {
       </label>
       <button type="submit" class="freeze-button primary">Save preference</button>
     </form>`;
-    const form = content.querySelector("form");
-    form.querySelector("#freeze-enabled").addEventListener("change", () => say(aqText("Unsaved change. Save to apply it.")));
+    const form = content.querySelector("form")!;
+    form.querySelector("#freeze-enabled")!.addEventListener("change", () => say(aqText("Unsaved change. Save to apply it.")));
     form.addEventListener("submit", async event => {
       event.preventDefault();
       if (busy || closed) return;
       busy = true;
-      const enabled = form.querySelector("#freeze-enabled").checked;
-      const controls = [...form.querySelectorAll("input, button")];
+      const enabled = form.querySelector<HTMLInputElement>("#freeze-enabled")!.checked;
+      const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button")];
       controls.forEach(control => { control.disabled = true; });
       say(aqText("Saving…"));
       try {
@@ -927,9 +1060,10 @@ function openStreakFreezes(user, display) {
         if (!closed && form.isConnected) {
           showSettings(saved);
           say(saved.enabled ? aqText("Streak protection is on.") : aqText("Streak protection is off. Your saved freezes are kept."));
-          content.querySelector("button").focus();
+          content.querySelector("button")!.focus();
         }
-      } catch (error) {
+      } catch (caught) {
+        const error = caught as Error;
         if (!closed && form.isConnected && error.name !== "AbortError") say(error.message, true);
       } finally {
         busy = false;
@@ -937,7 +1071,7 @@ function openStreakFreezes(user, display) {
       }
     });
   };
-  dialog.querySelector("#freeze-close").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#freeze-close")!.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     closed = true;
     token = "";
@@ -953,15 +1087,16 @@ function openStreakFreezes(user, display) {
   }, { once: true });
   dialog.showModal();
   resetAuth = connectSettingsAuth({
-    user, form: content.querySelector("form"), input: dialog.querySelector("#freeze-token"), controller,
+    user, form: content.querySelector("form")!, input: dialog.querySelector<HTMLInputElement>("#freeze-token")!, controller,
     load: (value, identity) => { token = value; session = identity; return request(); },
     clear: () => { token = ""; session = null; },
     useSession: identity => { token = identity.token || ""; session = identity; },
-    show: data => { showSettings(data); content.querySelector("#freeze-enabled").focus(); }, say,
+    show: data => { showSettings(data); content.querySelector<HTMLInputElement>("#freeze-enabled")!.focus(); }, say,
   });
 }
 
 async function render() {
+  if (!labelsReady) await labels;
   if (settingsOpen() || privatePageHidden) return;
   const id = ++renderId;
   const canRender = () => id === renderId && !settingsOpen();
@@ -970,26 +1105,26 @@ async function render() {
     let me = "";
     try { me = localStorage.getItem("ankiquestPlayer") || ""; } catch (e) {}
     if (currentView() === "records") {
-      const held = await AnkiQuestSite.readJSON("/api/records");
+      const held = await AnkiQuestSite.readJSON<RecordBoard[]>("/api/records");
       if (!canRender()) return;
       document.title = aqText("Records · AnkiQuest");
       AnkiQuestSite.setProfile(me);
-      app.innerHTML = pageHero(aqText("Records worth chasing."), aqText("Personal bests become shared milestones. Celebrate the sessions, streaks, and study days that raised the bar."), aqHtml(['<strong>All-time achievements</strong>A new record starts with one session.'])) + records(held, me) + receivingNotificationsEntry();
-      document.getElementById("manage-received-notifications").addEventListener("click", () => openNotificationPreferences());
+      app.innerHTML = pageHero(aqText("Records worth chasing."), aqText("Personal bests become shared milestones. Celebrate the sessions, streaks, and study days that raised the bar."), aqHtml`<strong>All-time achievements</strong>A new record starts with one session.`) + records(held, me) + receivingNotificationsEntry();
+      document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences());
       return;
     }
     const period = currentPeriod();
     loadWinners();
     const [rows, week] = await Promise.all([
-      AnkiQuestSite.readJSON("/api/leaderboard?period=" + period),
-      AnkiQuestSite.readJSON("/api/week").catch(() => null),
+      AnkiQuestSite.readJSON<Standing[]>("/api/leaderboard?period=" + period),
+      AnkiQuestSite.readJSON<WeekInfo>("/api/week").catch(() => null),
     ]);
     weekEnds = week?.ends_at ?? 0;
     if (user) {
       const res = await fetch("/api/profile/" + encodeURIComponent(user), {cache: "no-store"});
       await AnkiQuestSite.checkAccess(res);
       if (res.ok) {
-        const p = await res.json();
+        const p: Profile = await res.json();
         if (!canRender()) return;
         document.title = `${p.display} · AnkiQuest`;
         AnkiQuestSite.setProfile(p.user, true);
@@ -999,22 +1134,22 @@ async function render() {
         const native = window.ankiquestSession;
         const canEditAvatar = access?.member?.user === p.user || (native?.user === p.user && typeof native.token === "string" && !!native.token.trim());
         app.innerHTML = view(p, rows, canEditAvatar);
-        if (canEditAvatar) document.getElementById("manage-avatar").addEventListener("click", () => AnkiQuestAvatars.open({user:p.user,display:p.display}));
-        document.getElementById("manage-decks").addEventListener("click", () => openDeckSharing(p.user, p.display));
-        document.getElementById("manage-received-notifications").addEventListener("click", () => openNotificationPreferences(p.user, p.display));
-        document.getElementById("manage-freezes").addEventListener("click", () => openStreakFreezes(p.user, p.display));
+        if (canEditAvatar) document.getElementById("manage-avatar")!.addEventListener("click", () => AnkiQuestAvatars!.open({user:p.user,display:p.display}));
+        document.getElementById("manage-decks")!.addEventListener("click", () => openDeckSharing(p.user, p.display));
+        document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences(p.user, p.display));
+        document.getElementById("manage-freezes")!.addEventListener("click", () => openStreakFreezes(p.user, p.display));
         return;
       }
     }
     if (!canRender()) return;
     document.title = aqText("Leaderboard · AnkiQuest");
     AnkiQuestSite.setProfile(me);
-    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml(['<strong>Made for steady progress</strong>Standings update as members sync.'])) + leaderboardKpis(rows, period) + tabs(period) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
-    document.getElementById("manage-received-notifications").addEventListener("click", () => openNotificationPreferences());
+    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + leaderboardKpis(rows, period) + tabs(period) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
+    document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences());
   } catch (e) {
     if (!canRender()) return;
     app.innerHTML = aqHtml`<div class="notice error" role="alert">Could not reach the server. <button type="button" id="retry-load">Try again</button></div>`;
-    document.getElementById("retry-load").addEventListener("click", render);
+    document.getElementById("retry-load")!.addEventListener("click", render);
   } finally {
     if (canRender()) app.setAttribute("aria-busy", "false");
   }

@@ -1,43 +1,50 @@
 // Browser integration checks against an actual AnkiQuest binary and isolated fake data.
-// ANKIQUEST_BIN=/path/to/ankiquest PLAYWRIGHT_MODULE=/path/to/playwright node tests/mobile_web.cjs
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const assert = require('node:assert/strict');
-const {spawn} = require('node:child_process');
-const {DatabaseSync} = require('node:sqlite');
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const repo = path.resolve(__dirname, '..');
+// ANKIQUEST_BIN=/path/to/ankiquest PLAYWRIGHT_MODULE=/path/to/playwright node --experimental-strip-types tests/mobile_web.test.ts
+// --source-assets serves the pages and scripts built from this checkout instead of the binary's.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import type {ChildProcess} from 'node:child_process';
+import {DatabaseSync} from 'node:sqlite';
+import type {Browser, Page} from 'playwright';
+import {chromium, fulfillAsset, page as built, root as repo} from './support/web.ts';
 const out = process.env.QA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'ankiquest-mobile-web-'));
 fs.mkdirSync(out, {recursive: true});
 const run = fs.mkdtempSync(path.join(out, 'fixture-'));
 const token = 'test-alice-member-token', bobToken = 'test-bob-member-token', password = 'test-read-only-password';
-const checks = [], errors = [];
-checks.push = function(...items) { Array.prototype.push.apply(this,items);console.log(items.join('\n')); };
-let browser, server, base, log;
+const checks: string[] = [], errors: string[] = [];
+checks.push = function(...items: string[]) { const length=Array.prototype.push.apply(this,items);console.log(items.join('\n'));return length; };
+let browser: Browser | undefined, server: ChildProcess | undefined, base: string, log: number | undefined;
 const exe = process.env.ANKIQUEST_BIN || path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'ankiquest.exe' : 'ankiquest');
 const sourceAssets = process.argv.includes('--source-assets');
-async function freePort() { return new Promise((resolve, reject) => { const s = require('node:net').createServer();s.once('error', reject);s.listen(0, '127.0.0.1', () => { const port = s.address().port;s.close(() => resolve(port)); }); }); }
-async function api(route, body, credential = token, expected = 200) {
+async function freePort() { return new Promise<number>((resolve, reject) => { const s = net.createServer();s.once('error', reject);s.listen(0, '127.0.0.1', () => { const port = (s.address() as net.AddressInfo).port;s.close(() => resolve(port)); }); }); }
+interface Member { user: string; status: string; progress: number }
+interface Goal { id: number; title: string; weekly?: boolean; started?: boolean; progress: number; start_at: number; end_at: number; members: Member[] }
+interface Challenges { challenges: Goal[]; weekly_suggestion?: { week_start: number; challenge_id: number | null; friend: { user: string } } }
+interface Activity { items: { id: number; body: string }[]; unread_count: number }
+async function api<T = unknown>(route: string, body?: unknown, credential = token, expected = 200): Promise<T> {
   const response = await fetch(base + route, {method:body === undefined ? 'GET' : 'POST', headers:{Authorization:'Bearer ' + credential, ...(body === undefined ? {} : {'Content-Type':'application/json'})}, ...(body === undefined ? {} : {body:JSON.stringify(body)})});
   assert.equal(response.status, expected, route + ': ' + (response.status === expected ? '' : await response.text()));
-  return expected === 204 ? null : response.json();
+  return (expected === 204 ? null : response.json()) as T;
 }
-async function ready() { for(let n=0;n<100;n++){ if(server.exitCode !== null) throw Error('fixture exited: ' + fs.readFileSync(path.join(run,'server.log'),'utf8'));try{if((await fetch(base+'/auth/status')).ok)return;}catch{}await new Promise(resolve=>setTimeout(resolve,100)); }throw Error('fixture failed to start'); }
-async function overflow(page, label) {
+async function ready() { for(let n=0;n<100;n++){ if(server!.exitCode !== null) throw Error('fixture exited: ' + fs.readFileSync(path.join(run,'server.log'),'utf8'));try{if((await fetch(base+'/auth/status')).ok)return;}catch{}await new Promise(resolve=>setTimeout(resolve,100)); }throw Error('fixture failed to start'); }
+async function overflow(page: Page, label: string) {
   const width = await page.evaluate(() => ({viewport:innerWidth, content:document.documentElement.scrollWidth}));
   assert(width.content <= width.viewport, label + ': ' + JSON.stringify(width));
 }
-async function signIn(page, credential) {
+async function signIn(page: Page, credential: string) {
   await page.goto(base + '/login?next=%2Fcommunity%23challenges');
   await page.locator('.login-card > .aki-art').waitFor();
-  await page.waitForFunction(()=>document.querySelector('.login-card > .aki-art')?.naturalWidth>0);
+  await page.waitForFunction(()=>(document.querySelector<HTMLImageElement>('.login-card > .aki-art')?.naturalWidth ?? 0)>0);
   await screenshot(page,'aki-login-390-light');
   await page.locator('#password').fill(credential);
   await page.locator('button[type=submit]').click();
   await page.waitForURL('**/community#challenges');
 }
-async function screenshot(page, name) { await page.screenshot({path:path.join(out,name+'.png'),fullPage:true}); }
+async function screenshot(page: Page, name: string) { await page.screenshot({path:path.join(out,name+'.png'),fullPage:true}); }
 async function main() {
   const port = await freePort();base='http://127.0.0.1:'+port;
   fs.writeFileSync(path.join(run,'password'),password);
@@ -63,8 +70,8 @@ async function main() {
   history.exec('PRAGMA busy_timeout=5000');
   history.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','','An earlier study update','Your activity stays available after a notification is dismissed.',Math.floor(Date.now()/86400000)-10,Date.now()-10*86400000,'message');
   history.close();
-  const invited=await api('/api/community/challenges/bob',{title:'Three days with Bob',kind:'study_days',cooperative:false,target:3,duration_days:7,recipients:['alice'],request_id:'fixture-invite'},bobToken);
-  const invitation=invited.challenges.find(item=>item.title==='Three days with Bob');
+  const invited=await api<Challenges>('/api/community/challenges/bob',{title:'Three days with Bob',kind:'study_days',cooperative:false,target:3,duration_days:7,recipients:['alice'],request_id:'fixture-invite'},bobToken);
+  const invitation=invited.challenges.find(item=>item.title==='Three days with Bob')!;
   await api('/api/community/challenges/alice',{title:'Our shared review goal',kind:'reviews',cooperative:true,target:50,duration_days:7,recipients:['cleo'],request_id:'fixture-active'});
   const records=new DatabaseSync(path.join(run,'ankiquest.db'));
   records.exec('PRAGMA busy_timeout=5000');
@@ -75,8 +82,8 @@ async function main() {
   const context=await browser.newContext({locale:"en-US",viewport:{width:390,height:844}});
   if(sourceAssets)await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
-    const file=url.pathname==='/community'?'community.html':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index.html':url.pathname==='/site.js'?'site.js':url.pathname==='/site.css'?'site.css':url.pathname==='/login'?'login.html':null;
-    if(file)await route.fulfill({status:200,contentType:file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'text/html',body:file==='site.js'?require('./site_assets.cjs').siteScript():fs.readFileSync(path.join(repo,'static',file),'utf8')});else await route.continue();
+    const name=url.pathname==='/community'?'community':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index':url.pathname==='/login'?'login':null;
+    if(name)await route.fulfill({status:200,contentType:'text/html',body:built(name)});else if(!await fulfillAsset(route,url.pathname))await route.continue();
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await signIn(page,password);
@@ -85,14 +92,14 @@ async function main() {
   await page.locator('#view-challenges [data-connect]').click();
   await page.locator('#auth-user').selectOption('alice');await page.locator('#auth-token').fill(token);await page.locator('#auth-submit').click();
   await page.locator('[data-challenge-action=accept]').waitFor();
-  assert.equal((await (await page.request.get(base+'/auth/status')).json()).member.user,'alice');
+  assert.equal((await (await page.request.get(base+'/auth/status')).json() as Access).member?.user,'alice');
   const groups=await page.locator('.challenge-group h2').allTextContents();assert.deepEqual(groups,['Invitations','In progress',"Friends' achievements"]);
   const achievements=page.getByRole('region',{name:"Friends' achievements",exact:true});
   await achievements.getByText('Bob Rivera finished Spanish for today.',{exact:true}).waitFor();
   assert.equal(await achievements.locator('.friend-achievement').count(),1);
   await achievements.getByRole('button',{name:'Congratulate',exact:true}).click();
   await achievements.getByText('Congratulations sent',{exact:true}).waitFor();
-  assert((await api('/api/activity/bob',undefined,bobToken)).items.some(item=>item.body.includes('Good job!')));
+  assert((await api<Activity>('/api/activity/bob',undefined,bobToken)).items.some(item=>item.body.includes('Good job!')));
   checks.push('private shared deck achievements and a real congratulations reply');
   assert.equal(await page.locator('#challenge-form').count(),0,'creator is absent until requested');
   await screenshot(page,'invitation-390-light');
@@ -102,7 +109,7 @@ async function main() {
   assert.equal(await page.locator('#auth-token:visible').count(),0,'member session survives navigation');
   await page.locator('[data-challenge-action=accept]').click();
   await page.locator('#challenge-action-status').filter({hasText:'Studying from now on'}).waitFor();
-  const updated=await api('/api/community/challenges/alice');assert.equal(updated.challenges.find(item=>item.id===invitation.id).members.find(item=>item.user==='alice').progress,0);
+  const updated=await api<Challenges>('/api/community/challenges/alice');assert.equal(updated.challenges.find(item=>item.id===invitation.id)!.members.find(item=>item.user==='alice')!.progress,0);
   checks.push('stable goal URL, cookie owner continuity, acceptance without retroactive progress');
   await page.locator('#tab-challenges').click();await page.locator('[data-create-challenge]').click();
   const form=page.locator('#challenge-form');assert.equal(await form.locator('[name=target]').inputValue(),'3');assert.equal(await form.locator('[name=duration_days]').inputValue(),'7');
@@ -113,18 +120,18 @@ async function main() {
   await page.locator('#tab-activity').click();await page.locator('.activity-item').first().waitFor();
   const note=page.locator('.activity-item').filter({hasText:'A note from Bob'});await note.locator('input[name=message]').fill('Thanks, see you tomorrow!');await note.getByRole('button',{name:'Send reply',exact:true}).click();
   await page.locator('#activity-action-status').filter({hasText:'reply was sent'}).waitFor();
-  assert((await api('/api/activity/bob',undefined,bobToken)).items.some(item=>item.body.includes('Thanks, see you tomorrow!')));
+  assert((await api<Activity>('/api/activity/bob',undefined,bobToken)).items.some(item=>item.body.includes('Thanks, see you tomorrow!')));
   const readId=await page.locator('[data-mark-read]').first().getAttribute('data-mark-read');
   await page.locator('[data-mark-read="'+readId+'"]').click();await page.locator('[data-mark-read="'+readId+'"]').waitFor({state:'detached'});
-  const unreadBefore=(await api('/api/activity/alice')).unread_count;
+  const unreadBefore=(await api<Activity>('/api/activity/alice')).unread_count;
   await page.reload();await page.locator('.activity-item').first().waitFor();
-  assert.equal((await api('/api/activity/alice')).unread_count,unreadBefore);
+  assert.equal((await api<Activity>('/api/activity/alice')).unread_count,unreadBefore);
   checks.push('real reply, persistent read state, activity survives reload');
   await page.locator('[data-activity-box=sent]').click();
   const sentReply=page.locator('.sent-item').filter({hasText:'Thanks, see you tomorrow!'});
   await sentReply.getByText('Not seen yet',{exact:true}).waitFor();
   assert.equal(await sentReply.locator('h3').textContent(),'To Bob Rivera');
-  const bobInbox=await api('/api/activity/bob',undefined,bobToken);
+  const bobInbox=await api<Activity>('/api/activity/bob',undefined,bobToken);
   await api('/api/activity/bob/read',{through:Math.max(...bobInbox.items.map(item=>item.id))},bobToken,204);
   await page.locator('#view-activity [data-activity-refresh]').click();
   await sentReply.locator('.chip.green').filter({hasText:'Seen'}).waitFor();await screenshot(page,'sent-390-light');
@@ -134,7 +141,7 @@ async function main() {
   await page.locator('[data-activity-box=inbox]').click();await page.locator('#view-activity [data-activity-refresh]').click();
   await page.locator('#activity-count').filter({hasText:/^[1-9]/}).waitFor();await screenshot(page,'mark-all-390-light');
   await page.locator('[data-activity-read-all]').click();await page.locator('[data-activity-read-all]').waitFor({state:'detached'});
-  assert.equal((await api('/api/activity/alice')).unread_count,0);
+  assert.equal((await api<Activity>('/api/activity/alice')).unread_count,0);
   assert(await page.locator('#activity-count').isHidden());
   checks.push('sent replies show when they were read; mark all as read empties the inbox count');
   await page.goto(base+'/#alice');await page.locator('#manage-freezes').waitFor();
@@ -145,15 +152,15 @@ async function main() {
   assert.equal(await page.locator('#freeze-token:visible').count(),0);await page.locator('#freeze-enabled').check();await page.locator('#freeze-preferences button[type=submit]').click();await page.locator('#freeze-status').filter({hasText:'is on'}).waitFor();await page.locator('#freeze-close').click();
   await page.locator('#manage-decks').click();await page.locator('#deck-settings').waitFor();assert.equal(await page.locator('#deck-token:visible').count(),0);await page.locator('#deck-close').click();
   checks.push('freeze/deck preferences reuse owner session without repeated token');
-  for(const width of [320,390,1440])for(const theme of ['light','dark']) {
+  for(const width of [320,390,1440])for(const theme of ['light','dark'] as const) {
     await page.setViewportSize({width,height:width<400?844:1000});await page.emulateMedia({colorScheme:theme});
     for(const [route,name] of [['/community#challenges','friends'],['/community#activity','activity'],['/community#challenge-'+invitation.id,'goal'],['/community#reminders','reminders'],['/community#overview','history'],['/?embed=1#alice','profile']]) {
       await page.goto(base+route);
-      const readySelector={profile:'#manage-freezes',history:'#view-overview .kpi',friends:'#view-challenges .challenge',activity:'#view-activity .activity-item',goal:'#view-challenges [data-goal]',reminders:'#reminder-form'}[name];
+      const readySelector=({profile:'#manage-freezes',history:'#view-overview .kpi',friends:'#view-challenges .challenge',activity:'#view-activity .activity-item',goal:'#view-challenges [data-goal]',reminders:'#reminder-form'} as Record<string,string>)[name]!;
       await page.locator(readySelector).first().waitFor();
       await overflow(page,name+' '+width+' '+theme);
       if(name==='profile'&&width===320) {
-        await page.waitForFunction(()=>document.querySelector('[data-aki-companion] .aki-art')?.naturalWidth>0);
+        await page.waitForFunction(()=>(document.querySelector<HTMLImageElement>('[data-aki-companion] .aki-art')?.naturalWidth ?? 0)>0);
         await page.screenshot({path:path.join(out,'aki-profile-320-'+theme+'-live.png'),fullPage:false});
       }
       if(width<400&&['friends','activity','goal'].includes(name))await screenshot(page,name+'-'+width+'-'+theme);
@@ -178,8 +185,8 @@ async function main() {
     await page.unroute('**/api/activity/alice?*');
     await page.reload();await page.locator('.activity-item').first().waitFor();
   }
-  const mismatch=await page.evaluate(async({token})=>{try{await AnkiQuestSite.connectMember('bob',token);return 'accepted';}catch(error){return error.message;}},{token});
-  assert.match(mismatch,/selected player/);assert.equal((await (await page.request.get(base+'/auth/status')).json()).member.user,'alice');
+  const mismatch=await page.evaluate(async({token})=>{try{await AnkiQuestSite.connectMember('bob',token);return 'accepted';}catch(error){return (error as Error).message;}},{token});
+  assert.match(mismatch,/selected player/);assert.equal((await (await page.request.get(base+'/auth/status')).json() as Access).member?.user,'alice');
   checks.push('owner401/403 clears cached personal data; mismatched token cannot switch browser owner');
   await page.goto(base+'/community#activity');await page.locator('.activity-item').first().waitFor();
   await context.setOffline(true);await page.locator('#view-activity [data-activity-refresh]').click();await page.locator('#view-activity [role=alert]').waitFor();assert((await page.locator('.activity-item').count())>0,'failed refresh preserves existing activity');await context.setOffline(false);
@@ -188,23 +195,23 @@ async function main() {
   checks.push('offline retry preserves activity; no secrets in JS storage; logout revokes owner access');
   // Exercise the generated suggestion through the compiled server, not a routed mock.
   await signIn(page,token);
-  const weeklyDraft=(await api('/api/community/challenges/alice')).weekly_suggestion;
+  const weeklyDraft=(await api<Challenges>('/api/community/challenges/alice')).weekly_suggestion!;
   assert(weeklyDraft && !weeklyDraft.challenge_id);
   await page.locator('[data-weekly-action=invite]').click();
   await page.getByText('Waiting for your friend',{exact:true}).waitFor();
-  const waitingList=await api('/api/community/challenges/alice');
-  const weeklyId=waitingList.weekly_suggestion.challenge_id;
-  const waiting=waitingList.challenges.find(goal=>goal.id===weeklyId);
+  const waitingList=await api<Challenges>('/api/community/challenges/alice');
+  const weeklyId=waitingList.weekly_suggestion!.challenge_id;
+  const waiting=waitingList.challenges.find(goal=>goal.id===weeklyId)!;
   assert(waiting.weekly && !waiting.started);assert.equal(waiting.progress,0);
   assert.equal(await page.locator(`[data-goal="${weeklyId}"] [role=progressbar]`).count(),0);
   await api('/api/community/challenges/alice/weekly',{week_start:weeklyDraft.week_start,action:'invite'});
-  assert.equal((await api('/api/community/challenges/alice')).challenges.length,waitingList.challenges.length);
+  assert.equal((await api<Challenges>('/api/community/challenges/alice')).challenges.length,waitingList.challenges.length);
   const buddyToken=weeklyDraft.friend.user==='bob'?bobToken:'test-cleo-token';
-  const accepted=await api(`/api/community/challenges/${weeklyDraft.friend.user}/${weeklyId}`,{action:'accept'},buddyToken);
-  const active=accepted.challenges.find(goal=>goal.id===weeklyId);
+  const accepted=await api<Challenges>(`/api/community/challenges/${weeklyDraft.friend.user}/${weeklyId}`,{action:'accept'},buddyToken);
+  const active=accepted.challenges.find(goal=>goal.id===weeklyId)!;
   assert(active.started);assert.equal(active.end_at-active.start_at,7*86400000);
-  const retry=await api(`/api/community/challenges/${weeklyDraft.friend.user}/${weeklyId}`,{action:'accept'},buddyToken);
-  assert.equal(retry.challenges.find(goal=>goal.id===weeklyId).start_at,active.start_at);
+  const retry=await api<Challenges>(`/api/community/challenges/${weeklyDraft.friend.user}/${weeklyId}`,{action:'accept'},buddyToken);
+  assert.equal(retry.challenges.find(goal=>goal.id===weeklyId)!.start_at,active.start_at);
   await page.reload();await page.locator(`[data-goal="${weeklyId}"] [role=progressbar]`).waitFor();
   checks.push('compiled-server weekly suggestion: explicit invitation, both consent before progress, full seven days and no duplicate/restarted retry');
   assert.deepEqual(errors,[]);

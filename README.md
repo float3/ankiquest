@@ -8,7 +8,7 @@ XP never depends on which answer button was pressed, so there is no incentive to
 
 ## Run
 
-Requires Rust 1.88 or later.
+Requires Rust 1.88 or later with the `wasm32-unknown-unknown` target, and esbuild (`npm ci` installs it; build.rs also finds it on `PATH` or in `ESBUILD`).
 
 ```sh
 cargo run -- ankiquest.json
@@ -66,7 +66,7 @@ The website accepts files up to 20 MB and reduces them before upload. The server
 - `POST /api/avatar/<user>` accepts the raw picture body with `Authorization: Bearer <token>` and returns `{"revision":"1"}`.
 - `DELETE /api/avatar/<user>` removes the picture and returns 204.
 
-Browser regression checks are in `tests/avatar_layout.cjs`, `tests/avatar_index_layout.cjs`, and `tests/avatar_photos.cjs`. Run them with Node and Playwright installed; `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHANNEL` optionally select an existing installation/browser. The tests use synthetic users and mocked requests.
+Browser regression checks are in `tests/avatar_layout.test.ts`, `tests/avatar_index_layout.test.ts`, and `tests/avatar_photos.test.ts`. Run them with Node and Playwright installed; `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHANNEL` optionally select an existing installation/browser. The tests use synthetic users and mocked requests.
 
 ## Private website access
 
@@ -150,7 +150,7 @@ An ntfy push is marked delivered only after a successful HTTP response. Urgent s
 
 The server and the client used to study must both be updated. Clients only report progress for decks you share, so players who never enable a deck send no deck data. Sending the deck list again replaces the stored one, which removes deleted decks.
 
-AnkiQuest supports English and Spanish. Updated Android and desktop clients pass the language selected in Anki, including when it differs from the phone's language. Standalone browsers use their preferred language. Other languages currently fall back to English. The Spanish catalog is in `static/translations-es.json`; Android strings are in `values-es/ankiquest*.xml`. Names, deck names, goal titles and written messages are kept as authored.
+AnkiQuest supports English and Spanish. Updated Android and desktop clients pass the language selected in Anki, including when it differs from the phone's language. Standalone browsers use their preferred language. Other languages currently fall back to English. The catalogs are in `static/translations-*.json` (Spanish: `static/translations-es.json`); Android strings are in `values-es/ankiquest*.xml`. Names, deck names, goal titles and written messages are kept as authored.
 
 Authenticated profile, upload and inbox requests remember the owner's `Accept-Language` for later server pushes. Public profile views do not change it. `GET` and `POST /api/language/<user>` also require the owner's bearer token or personal session; cookie writes require CSRF protection. A POST accepts `{"language":"es-ES"}`. Stored notification text remains unchanged so each recipient can receive their own translation.
 
@@ -185,3 +185,15 @@ The module runs the server in a tight sandbox. systemd holds the port and
 passes it in, and the service may not connect to loopback or private
 addresses, only out to the internet for ntfy. So `ntfy` must be a public
 server. Outside systemd, `addr` is bound as usual.
+
+## Development
+
+The pages' scripts are TypeScript in `web/`; build.rs bundles them with esbuild and the server embeds the result, with `web/pages/*.ts` inlined where a page has `<script data-entry="pages/…"></script>`. Translation lives in `crates/i18n`, which the server links directly and the pages load as `/i18n.wasm` (built from `crates/i18n-wasm`), so both look up the same catalogs the same way.
+
+```sh
+rustup target add wasm32-unknown-unknown
+npm ci
+npm run typecheck
+cargo test --workspace
+npm run test:web
+```

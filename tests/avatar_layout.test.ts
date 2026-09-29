@@ -1,26 +1,20 @@
 // Run with Node and Playwright installed. Optional environment variables:
 // PLAYWRIGHT_MODULE: module name/path; PLAYWRIGHT_CHANNEL: e.g. msedge;
 // ANKIQUEST_AVATAR_EVIDENCE: directory for screenshots and measurements.
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {addSite, chromium, open, page as built, prefix, root as repository, script} from './support/web.ts';
 
-const repository = path.resolve(__dirname, '..');
-const source = fs.readFileSync(path.join(repository, 'static/community.html'), 'utf8');
+const source = built('community');
 const siteStyles = fs.readFileSync(path.join(repository, 'static/site.css'), 'utf8');
-const siteScript = require('./site_assets.cjs').siteScript();
 const styles = siteStyles + '\n' + [...source.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
 const sharedStylePath = path.join(repository, 'static/avatars.css');
-const sharedScriptPath = path.join(repository, 'static/avatars.js');
 const sharedStyles = fs.existsSync(sharedStylePath) ? fs.readFileSync(sharedStylePath, 'utf8') : '';
-const sharedScript = fs.existsSync(sharedScriptPath) ? fs.readFileSync(sharedScriptPath, 'utf8') : '';
-const script = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
-  .map(match => match[1]).find(value => value.includes('function avatar('));
-assert(styles && script, 'Load the real community stylesheet and avatar renderer');
-const rendererEnd = script.indexOf('function empty(');
-assert(rendererEnd > script.indexOf('function avatar('), 'Avatar helpers precede page startup');
-const renderer = script.slice(0, rendererEnd);
+const sharedScript = script('avatars');
+const renderer = prefix('pages/community', 'function empty(');
+assert(styles && renderer, 'Load the real community stylesheet and avatar renderer');
+assert(renderer.includes('function avatar('), 'Avatar helpers precede page startup');
 const evidence = process.env.ANKIQUEST_AVATAR_EVIDENCE;
 if (evidence) fs.mkdirSync(evidence, { recursive: true });
 
@@ -29,23 +23,22 @@ async function main() {
     headless: true,
     ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
   });
-  const results = [], failures = [];
+  const results: object[] = [], failures: string[] = [];
   try {
     for (const width of [390, 1440]) {
-      for (const colorScheme of ['light', 'dark']) {
+      for (const colorScheme of ['light', 'dark'] as const) {
         const page = await browser.newPage({locale:"en-US"});
         // The fixture contains synthetic users and must never contact a real server.
-        await page.route('**/*', route => route.abort());
         await page.setViewportSize({ width, height: 1000 });
         await page.emulateMedia({ colorScheme });
-        await page.setContent(`<!doctype html><html><head><meta charset="utf-8"><style>${styles}</style><style>${sharedStyles}</style></head><body><div id="fixture" class="shell stack"></div></body></html>`);
+        await open(page, `<!doctype html><html><head><meta charset="utf-8"><style>${styles}</style><style>${sharedStyles}</style></head><body><div id="fixture" class="shell stack"></div></body></html>`);
         if (sharedScript) await page.addScriptTag({ content: sharedScript });
-        await page.addScriptTag({ content: siteScript });
+        await addSite(page);
         await page.addScriptTag({ content: renderer });
         await page.evaluate(() => {
           const single = avatar('qa-cerro', 'Cerro');
           const double = avatar('qa-alice', 'Alice Brown');
-          document.getElementById('fixture').innerHTML = `
+          document.getElementById('fixture')!.innerHTML = `
             <article class="card" data-context="matchup"><div class="matchup">
               <div class="side">${single}<strong>171</strong><span>Cerro</span><small>daily wins</small></div>
               <span class="vs">VS</span>
@@ -72,20 +65,20 @@ async function main() {
         const measurements = await page.locator('.avatar').evaluateAll(avatars => avatars.map(element => {
           const bounds = element.getBoundingClientRect();
           const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-          const text = [];
+          const text: Text[] = [];
           for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-            if (node.textContent.trim()) text.push(node);
+            if (node.textContent!.trim()) text.push(node as Text);
           }
           const range = document.createRange();
           if (text.length) {
-            range.setStart(text[0], 0);
-            range.setEnd(text[text.length - 1], text[text.length - 1].length);
+            range.setStart(text[0]!, 0);
+            range.setEnd(text[text.length - 1]!, text[text.length - 1]!.length);
           }
           const letters = range.getBoundingClientRect();
           const style = getComputedStyle(element);
           return {
-            context: element.closest('[data-context]').dataset.context,
-            initials: element.textContent.trim(),
+            context: element.closest<HTMLElement>('[data-context]')!.dataset.context!,
+            initials: element.textContent!.trim(),
             width: bounds.width, height: bounds.height,
             letterWidth: letters.width, letterHeight: letters.height,
             offsetX: letters.x + letters.width / 2 - bounds.x - bounds.width / 2,
@@ -96,11 +89,11 @@ async function main() {
         assert.equal(measurements.length, 7, 'Every relevant avatar context is rendered');
         for (const measurement of measurements) {
           const label = `${width}px ${colorScheme} ${measurement.context} ${measurement.initials}`;
-          results.push({ width, colorScheme, ...measurement });
+          results.push(Object.assign({ width, colorScheme }, measurement));
           try {
             assert(measurement.width > 0 && measurement.height > 0, `${label}: avatar is visible`);
             assert(Math.abs(measurement.width - measurement.height) <= 0.5, `${label}: avatar stays square`);
-            const expectedSize = { matchup: 48, awards: 36, standings: 36, table: 29, calendar: width < 621 ? 21 : 24, challenge: 24 }[measurement.context];
+            const expectedSize = ({ matchup: 48, awards: 36, standings: 36, table: 29, calendar: width < 621 ? 21 : 24, challenge: 24 } as Record<string, number>)[measurement.context];
             assert.equal(measurement.width, expectedSize, `${label}: existing context size is preserved`);
             assert.equal(measurement.radius, '50%', `${label}: avatar has a circular shape`);
             assert(measurement.letterWidth > 0 && measurement.letterHeight > 0, `${label}: initials are visible`);
@@ -108,7 +101,7 @@ async function main() {
             // Font ascent/descent can shift the glyph box slightly within a centered line.
             assert(Math.abs(measurement.offsetY) <= 2.5, `${label}: vertical offset ${measurement.offsetY.toFixed(2)}px (display: ${measurement.display})`);
           } catch (error) {
-            failures.push(error.message);
+            failures.push((error as Error).message);
           }
         }
         if (evidence) await page.screenshot({ path: path.join(evidence, `avatar-layout-${width}-${colorScheme}.png`), fullPage: true });
@@ -123,4 +116,4 @@ async function main() {
   console.log(`PASS: ${results.length} avatar layouts centered across mobile/desktop and light/dark.`);
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+main().catch((error: Error) => { console.error(error.message); process.exitCode = 1; });

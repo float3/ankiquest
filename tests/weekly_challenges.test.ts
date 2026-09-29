@@ -1,25 +1,29 @@
-const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-const {test,before,after}=require('node:test');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const origin='http://ankiquest.test',root=path.join(__dirname,'../static');
-let browser;
+import assert from 'node:assert/strict';
+import {test,before,after} from 'node:test';
+import type {TestContext} from 'node:test';
+import type {Browser} from 'playwright';
+import {chromium,fulfillAsset,page as built} from './support/web.ts';
+const origin='http://ankiquest.test';
+interface Member {user:string;display:string;status:string;progress:number}
+interface Goal {id:number;title:string;weekly:boolean;start_when_ready?:boolean;started:boolean;kind:string;cooperative:boolean;creator:string;start_at:number;end_at:number;target:number;status:string;progress:number;members:Member[]}
+interface Request {path:string;auth:string|undefined;body:{action?:string;start_when_ready?:boolean}}
+let browser: Browser;
 before(async()=>{browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:process.platform==='win32'?{channel:'msedge'}:{})});});
 after(async()=>browser?.close());
-async function fixture(t,{language='en-US',legacy=false}={}) {
+async function fixture(t: TestContext,{language='en-US',legacy=false}={}) {
   const context=await browser.newContext({viewport:{width:390,height:844},locale:language});t.after(()=>context.close());
   const page=await context.newPage();page.setDefaultTimeout(10000);
-  const errors=[],requests=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
-  const now=Date.now(),suggestion={week_start:now-1000,expires_at:now+86400000,friend:{user:'hill',display:'Hill::{0}'},target:3,duration_days:7,dismissed:false,challenge_id:null};
-  let challenges=[];
-  const control={hold:null,fail:false};
+  const errors: string[]=[],requests: Request[]=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
+  const now=Date.now(),suggestion={week_start:now-1000,expires_at:now+86400000,friend:{user:'hill',display:'Hill::{0}'},target:3,duration_days:7,dismissed:false,challenge_id:null as number|null};
+  let challenges: Goal[]=[];
+  const control: {hold:Promise<void>|null;fail:boolean}={hold:null,fail:false};
   const payload=()=>({challenges,recipients:[suggestion.friend],...(legacy?{}:{weekly_suggestion:suggestion})});
   await page.addInitScript(()=>{window.ankiquestSession={user:'cerro',token:'saved-token'};});
   await page.route(origin+'/**',async route=>{
     const req=route.request(),url=new URL(req.url()),p=url.pathname;
-    const json=data=>route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
-    if(p==='/community')return route.fulfill({contentType:'text/html',body:fs.readFileSync(root+'/community.html','utf8')});
-    if(p==='/site.js')return route.fulfill({contentType:'text/javascript',body:require('./site_assets.cjs').siteScript()});
-    if(['/avatars.js','/friend-nudges.js','/avatars.css','/site.css'].includes(p))return route.fulfill({contentType:p.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(root+p,'utf8')});
+    const json=(data: unknown)=>route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
+    if(p==='/community')return route.fulfill({contentType:'text/html',body:built('community')});
+    if(await fulfillAsset(route,p))return;
     if(p==='/auth/status')return json({private_site:false,authenticated:true,member:null});
     if(p==='/api/avatars')return json({});
     if(p==='/api/community')return json({meta:{},players:[{user:'cerro',display:'Cerro'},{user:'hill',display:'Hill::{0}'}]});
@@ -31,7 +35,7 @@ async function fixture(t,{language='en-US',legacy=false}={}) {
       requests.push({path:p,auth:req.headers().authorization,body:req.postDataJSON()});
       if(control.hold)await control.hold;
       if(control.fail)return route.fulfill({status:400,contentType:'application/json',body:JSON.stringify({error:'Your weekly suggestion changed. Refresh and try again.'})});
-      const action=req.postDataJSON().action;
+      const action=(req.postDataJSON() as {action?:string}).action;
       if(action==='dismiss')suggestion.dismissed=true;
       if(action==='invite') {
         suggestion.challenge_id=1;
@@ -43,7 +47,7 @@ async function fixture(t,{language='en-US',legacy=false}={}) {
     return route.fulfill({status:404});
   });
   await page.goto(origin+'/community#challenges');await page.locator('[data-create-challenge]').waitFor();
-  return {page,requests,control,suggestion,setGoals:goals=>challenges=goals};
+  return {page,requests,control,suggestion,setGoals:(goals: Goal[])=>challenges=goals};
 }
 test('a suggestion sends nothing until invited; waiting has no progress timer; custom goals remain',async t=>{
   const {page,requests,suggestion}=await fixture(t);
@@ -70,7 +74,7 @@ test('custom goals offer a start-after-acceptance choice and hide progress while
   await form.getByRole('button',{name:'Send invitation'}).click();
   await page.waitForFunction(()=>!document.querySelector('#challenge-dialog[open]'));
   assert.equal(requests.length,1);
-  assert.equal(requests[0].body.start_when_ready,true);
+  assert.equal(requests[0]!.body.start_when_ready,true);
   setGoals([{id:3,title:'Together',weekly:false,start_when_ready:true,started:false,
     kind:'reviews',cooperative:true,creator:'cerro',start_at:Date.now(),end_at:9223372036854775807,
     target:3,status:'waiting',progress:0,members:[
@@ -117,7 +121,7 @@ test('the custom goal choice follows French, German and Portuguese Anki locales'
     ['fr-FR','Commencer quand tout le monde accepte'],
     ['de-DE','Starten, wenn alle zugesagt haben'],
     ['pt-PT','Começar quando todos aceitarem'],
-  ]){
+  ] as const){
     const {page}=await fixture(t,{language});
     await page.locator('[data-create-challenge]').click();
     await page.getByText(label,{exact:true}).waitFor();
@@ -127,9 +131,9 @@ test('the custom goal choice follows French, German and Portuguese Anki locales'
 });
 test('double clicks do not duplicate requests and failed choices can be retried',async t=>{
   const {page,requests,control}=await fixture(t);
-  let release;control.hold=new Promise(r=>release=r);control.fail=true;
-  await page.locator('[data-weekly-action="invite"]').evaluate(button=>{button.click();button.click();});
-  await page.waitForFunction(()=>document.querySelector('[data-weekly-action="invite"]').disabled);
+  let release!: ()=>void;control.hold=new Promise<void>(r=>release=r);control.fail=true;
+  await page.locator('[data-weekly-action="invite"]').evaluate((button: HTMLButtonElement)=>{button.click();button.click();});
+  await page.waitForFunction(()=>document.querySelector<HTMLButtonElement>('[data-weekly-action="invite"]')!.disabled);
   release();
   await page.getByText('Your weekly suggestion changed. Refresh and try again.').waitFor();
   assert.equal(requests.length,1);assert.equal(await page.locator('[data-weekly-action="invite"]').isEnabled(),true);
@@ -153,7 +157,7 @@ test('a recipient can agree before the progress display starts',async t=>{
 });
 test('a late invitation response cannot reconnect or repopulate a disconnected account',async t=>{
   const {page,control}=await fixture(t);
-  let release;control.hold=new Promise(r=>release=r);
+  let release!: ()=>void;control.hold=new Promise<void>(r=>release=r);
   await page.locator('[data-weekly-action="invite"]').click();
   await page.evaluate(()=>{window.ankiquestSession=null;window.dispatchEvent(new CustomEvent('ankiquest-auth'));});
   release();await page.waitForFunction(()=>!document.querySelector('.weekly-suggestion'));
@@ -162,7 +166,7 @@ test('a late invitation response cannot reconnect or repopulate a disconnected a
 test('the weekly card fits small and wide screens in both languages and themes',async t=>{
   for(const language of ['en-US','es-ES']) {
     const {page}=await fixture(t,{language});await page.locator('.weekly-suggestion').waitFor();
-    for(const width of [320,390,1440])for(const theme of ['light','dark']) {
+    for(const width of [320,390,1440])for(const theme of ['light','dark'] as const) {
       await page.setViewportSize({width,height:1000});await page.emulateMedia({colorScheme:theme});
       const box=await page.locator('.weekly-suggestion').evaluate(e=>({scroll:e.scrollWidth,width:e.clientWidth}));
       assert.ok(box.scroll<=box.width+1,`${language} ${width} ${theme} card overflow`);
