@@ -61,6 +61,7 @@
         week_rollover_hour = cfg.weekRolloverHour;
         competition_start_date = cfg.competitionStartDate;
         review_weighting = cfg.reviewWeighting;
+        log_retention_days = cfg.logRetentionDays;
         private_site = cfg.privateSite;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
@@ -165,6 +166,11 @@
           default = "flat";
           description = "How review XP is weighted. \"flat\" pays every answer its full rate, with 6 XP learning and relearning steps. \"diminishing\" pays 9 XP learning steps and halves the XP of each further answer of the same card on the same day. XP is recalculated from history, so changing this rewrites past XP.";
         };
+        logRetentionDays = lib.mkOption {
+          type = lib.types.ints.unsigned;
+          default = 90;
+          description = "Days to keep the server log in the state database. 0 keeps it forever. `ankiquest-admin set log_retention_days` overrides it at runtime.";
+        };
         users = lib.mkOption {
           type = lib.types.attrsOf user;
           default = {};
@@ -257,6 +263,12 @@
         environment.systemPackages = [
           (pkgs.writeShellScriptBin "ankiquest-message" ''
             exec ${lib.getExe cfg.package} ${configFile} message "$@"
+          '')
+          # The state belongs to the service's dynamic user, so run as it.
+          (pkgs.writeShellScriptBin "ankiquest-admin" ''
+            exec ${config.systemd.package}/bin/systemd-run --quiet --pipe --wait --collect \
+              -p User=ankiquest -p DynamicUser=yes -p StateDirectory=ankiquest \
+              ${lib.getExe cfg.package} ${configFile} admin "$@"
           '')
         ];
 

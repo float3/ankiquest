@@ -6,6 +6,15 @@ XP never depends on which answer button was pressed, so there is no incentive to
 
 `review_weighting` (Nix: `reviewWeighting`) chooses how reviews are weighted. The default, `"flat"`, pays every answer its full rate. `"diminishing"` makes each further answer of the same card on the same day worth half as much, so a card you keep failing cannot out-earn one you learn, and pays learning steps 9 XP instead of 6. XP is recalculated from review history, so changing it applies to past reviews too.
 
+## Administer
+
+`ankiquest [config.json] admin <command>` (on NixOS: `sudo ankiquest-admin <command>`) works on the state of a running server:
+
+- `settings` shows the settings in effect and where each comes from.
+- `set review_weighting diminishing` or `set log_retention_days 365` overrides a setting; `reset <setting>` returns to the configured value. The service applies changes within a minute, without a restart.
+- `logs [--since 30m|12h|7d|all] [--level info|error] [--user <player>] [--limit <n>]` prints the server log. Errors and setting changes are kept in the state database for `log_retention_days` (default 90; 0 keeps them forever), and still go to stderr for the journal.
+- `sql "<query>"` runs a read-only query against the state database.
+
 ## Run
 
 Requires Rust 1.88 or later with the `wasm32-unknown-unknown` target, and esbuild (`npm ci` installs it; build.rs also finds it on `PATH` or in `ESBUILD`).
@@ -23,6 +32,7 @@ cargo run -- ankiquest.json
   "week_timezone": "Europe/Berlin",
   "week_rollover_hour": 4,
   "review_weighting": "flat",
+  "log_retention_days": 90,
   "users": {
     "hill": { "display": "hill", "ntfy_topic": "some-secret-topic", "token_file": "hill.token" }
   }
