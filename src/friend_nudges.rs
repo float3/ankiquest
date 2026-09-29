@@ -3,7 +3,6 @@ use crate::store::{Error, Store};
 use crate::{App, authorized, now_ms, store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::params;
@@ -200,7 +199,6 @@ async fn sender_receiving(
 
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
-        .route("/friend-nudges.js", get(script))
         .route("/api/friend-nudges/{user}", get(settings).post(nudge))
         .route("/api/friend-nudges/{user}/receiving", post(receiving))
         .route(
@@ -211,16 +209,6 @@ pub fn routes() -> Router<Arc<App>> {
             "/api/friend-nudges/{user}/senders/{sender}",
             post(sender_receiving),
         )
-}
-
-async fn script() -> impl IntoResponse {
-    (
-        [(
-            axum::http::header::CONTENT_TYPE,
-            "text/javascript; charset=utf-8",
-        )],
-        include_str!("../static/friend-nudges.js"),
-    )
 }
 
 #[cfg(test)]

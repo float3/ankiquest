@@ -1,0 +1,13 @@
+[package]
+name = "ankiquest-i18n-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+description = "ankiquest-i18n for the web pages, as a WebAssembly module without bindgen"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ankiquest-i18n = { path = "../i18n" }

@@ -1,3 +1,7 @@
+// @ts-nocheck
+import "./i18n";
+import "./aki";
+
 /* Shared navigation, presentation components, and the browser access gate. */
 (() => {
   "use strict";

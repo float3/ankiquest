@@ -1,3 +1,4 @@
+// @ts-nocheck
 /* Private Today, study history, session recap and account settings. */
 (() => {
   "use strict";

@@ -270,6 +270,7 @@ fn public_path(path: &str) -> bool {
             "/login"
                 | "/site.css"
                 | "/site.js"
+                | "/i18n.wasm"
                 | "/icon.svg"
                 | "/manifest.webmanifest"
                 | "/auth/status"
@@ -506,7 +507,7 @@ pub(crate) async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> R
 }
 
 pub(crate) async fn login() -> Html<&'static str> {
-    Html(include_str!("../static/login.html"))
+    Html(web!("login.html"))
 }
 pub(crate) async fn site_css() -> impl IntoResponse {
     (
@@ -523,22 +524,20 @@ pub(crate) async fn personal_css() -> impl IntoResponse {
 pub(crate) async fn personal_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../static/personal.js"),
+        web!("personal.js"),
     )
 }
 pub(crate) async fn site_js() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        format!(
-            "window.AnkiQuestSpanish={};\nwindow.AnkiQuestFrench={};\nwindow.AnkiQuestGerman={};\nwindow.AnkiQuestPortuguese={};\n{}\n{}\n{}",
-            include_str!("../static/translations-es.json"),
-            include_str!("../static/translations-fr.json"),
-            include_str!("../static/translations-de.json"),
-            include_str!("../static/translations-pt.json"),
-            include_str!("../static/i18n.js"),
-            include_str!("../static/aki.js"),
-            include_str!("../static/site.js")
-        ),
+        web!("site.js"),
+    )
+}
+/// The translation catalogs and lookup, shared with the server.
+pub(crate) async fn i18n_wasm() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/wasm")],
+        include_bytes!(concat!(env!("OUT_DIR"), "/web/i18n.wasm")).as_slice(),
     )
 }
 
@@ -1118,6 +1117,7 @@ mod tests {
             "/login",
             "/site.css",
             "/site.js",
+            "/i18n.wasm",
             "/icon.svg",
             "/manifest.webmanifest",
             "/auth/status",

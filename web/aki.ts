@@ -1,3 +1,4 @@
+// @ts-nocheck
 /* Companions are presentation only: never change study rules, rewards or notifications. */
 (() => {
   "use strict";

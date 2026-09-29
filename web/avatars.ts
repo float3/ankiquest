@@ -1,3 +1,4 @@
+// @ts-nocheck
 /* Shared profile pictures. Tokens and selected photos live only in the open editor. */
 (() => {
   "use strict";
