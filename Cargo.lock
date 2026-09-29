@@ -12,6 +12,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "ankiquest"
 version = "0.1.0"
 dependencies = [
+ "ankiquest-i18n",
  "axum",
  "chrono",
  "chrono-tz",
@@ -23,6 +24,20 @@ dependencies = [
  "tokio",
  "tower",
  "ureq",
+]
+
+[[package]]
+name = "ankiquest-i18n"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "ankiquest-i18n-wasm"
+version = "0.1.0"
+dependencies = [
+ "ankiquest-i18n",
 ]
 
 [[package]]

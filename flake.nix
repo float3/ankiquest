@@ -12,22 +12,30 @@
     lib = nixpkgs.lib;
     systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
     forAllSystems = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+    # build.rs bundles web/ with esbuild and builds the translation module for
+    # wasm32-unknown-unknown, which nixpkgs' rustc supports; wasm-ld links it.
+    webBuild = pkgs: {
+      nativeBuildInputs = [pkgs.esbuild];
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "${pkgs.buildPackages.lld}/bin/wasm-ld";
+    };
   in {
     formatter = forAllSystems (pkgs: pkgs.alejandra);
 
     packages = forAllSystems (pkgs: {
-      default = pkgs.rustPlatform.buildRustPackage {
-        pname = "ankiquest";
-        version = "0.1.0";
-        src = lib.cleanSource self;
-        cargoLock.lockFile = ./Cargo.lock;
-        meta.mainProgram = "ankiquest";
-      };
+      default = pkgs.rustPlatform.buildRustPackage ({
+          pname = "ankiquest";
+          version = "0.1.0";
+          src = lib.cleanSource self;
+          cargoLock.lockFile = ./Cargo.lock;
+          meta.mainProgram = "ankiquest";
+        }
+        // webBuild pkgs);
     });
 
     devShells = forAllSystems (pkgs: {
       default = pkgs.mkShell {
-        packages = with pkgs; [cargo clippy rustc rustfmt];
+        packages = with pkgs; [cargo clippy rustc rustfmt esbuild nodejs_22];
+        inherit (webBuild pkgs) CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER;
       };
     });
 

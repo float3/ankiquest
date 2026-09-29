@@ -3,6 +3,7 @@ use crate::{
     App, authorized,
     store::{Error, Store},
 };
+pub use ankiquest_i18n::{normalize, substitute, text};
 use axum::{
     Json,
     extract::{Path, State},
@@ -10,32 +11,13 @@ use axum::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, OnceLock},
-};
+use std::sync::Arc;
 
 pub fn initialize(conn: &Connection) -> Result<(), Error> {
     conn.execute_batch(
         "create table if not exists languages (user text primary key, language text not null);",
     )?;
     Ok(())
-}
-
-pub fn normalize(language: &str) -> &'static str {
-    match language
-        .split(['-', '_'])
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "es" => "es",
-        "fr" => "fr",
-        "de" => "de",
-        "pt" => "pt",
-        _ => "en",
-    }
 }
 
 impl Store {
@@ -125,119 +107,6 @@ pub async fn set(
         .set_language(&user, &language)
         .map_err(crate::store_error)?;
     Ok(Json(Preference { language }))
-}
-
-struct Catalog {
-    entries: BTreeMap<String, String>,
-    templates: Vec<(String, String)>,
-}
-
-impl Catalog {
-    fn parse(source: &str) -> Self {
-        let entries: BTreeMap<String, String> =
-            serde_json::from_str(source).expect("valid translation catalog");
-        let mut templates: Vec<_> = entries
-            .iter()
-            .filter(|(source, _)| source.contains("{0}"))
-            .map(|(source, target)| (source.clone(), target.clone()))
-            .collect();
-        // A broad "Review {0} cards" must not capture "100 mature" as its count.
-        templates.sort_by_key(|(source, _)| {
-            std::cmp::Reverse(
-                source
-                    .split('{')
-                    .enumerate()
-                    .map(|(index, part)| {
-                        if index == 0 {
-                            part.len()
-                        } else {
-                            part.split_once('}').map_or(0, |(_, suffix)| suffix.len())
-                        }
-                    })
-                    .sum::<usize>(),
-            )
-        });
-        Self { entries, templates }
-    }
-}
-
-fn catalog(language: &str) -> Option<&'static Catalog> {
-    static ES: OnceLock<Catalog> = OnceLock::new();
-    static FR: OnceLock<Catalog> = OnceLock::new();
-    static DE: OnceLock<Catalog> = OnceLock::new();
-    static PT: OnceLock<Catalog> = OnceLock::new();
-    match normalize(language) {
-        "es" => {
-            Some(ES.get_or_init(|| Catalog::parse(include_str!("../static/translations-es.json"))))
-        }
-        "fr" => {
-            Some(FR.get_or_init(|| Catalog::parse(include_str!("../static/translations-fr.json"))))
-        }
-        "de" => {
-            Some(DE.get_or_init(|| Catalog::parse(include_str!("../static/translations-de.json"))))
-        }
-        "pt" => {
-            Some(PT.get_or_init(|| Catalog::parse(include_str!("../static/translations-pt.json"))))
-        }
-        _ => None,
-    }
-}
-
-// Templates are matched only against system-authored text. Substitutions stay verbatim.
-pub fn text(value: &str, language: &str) -> String {
-    let Some(catalog) = catalog(language) else {
-        return value.into();
-    };
-    if let Some(exact) = catalog.entries.get(value) {
-        return exact.clone();
-    }
-    for (source, target) in &catalog.templates {
-        if let Some(values) = capture(source, value) {
-            // Replace in one pass, so a name containing a placeholder is never interpreted.
-            return substitute(target, &values);
-        }
-    }
-    value.into()
-}
-
-fn capture<'a>(pattern: &str, mut value: &'a str) -> Option<Vec<&'a str>> {
-    let mut parts = pattern.split('{');
-    value = value.strip_prefix(parts.next()?)?;
-    let mut values = Vec::new();
-    for part in parts {
-        let (index, suffix) = part.split_once('}')?;
-        if index.parse::<usize>().ok()? != values.len() {
-            return None;
-        }
-        let end = if suffix.is_empty() {
-            value.len()
-        } else {
-            value.find(suffix)?
-        };
-        values.push(&value[..end]);
-        value = &value[end + suffix.len()..];
-    }
-    value.is_empty().then_some(values)
-}
-
-fn substitute(pattern: &str, values: &[&str]) -> String {
-    let mut parts = pattern.split('{');
-    let mut result = parts.next().unwrap_or_default().to_string();
-    for part in parts {
-        if let Some((index, suffix)) = part.split_once('}')
-            && let Some(value) = index
-                .parse::<usize>()
-                .ok()
-                .and_then(|index| values.get(index))
-        {
-            result.push_str(value);
-            result.push_str(suffix);
-            continue;
-        }
-        result.push('{');
-        result.push_str(part);
-    }
-    result
 }
 
 pub fn notice(notice: &mut crate::feedback::Notice, language: &str) {

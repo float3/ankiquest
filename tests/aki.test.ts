@@ -1,16 +1,15 @@
-const {test} = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {catalog, run} from './support/web.ts';
 function fixture(language = 'en') {
-  const catalog = JSON.parse(fs.readFileSync(path.join(__dirname, '../static/translations-es.json'), 'utf8'));
-  const context = {document:{addEventListener(){},documentElement:{dataset:{}},querySelectorAll(){return []}}, addEventListener(){}, dispatchEvent(){}, CustomEvent:class {constructor(name, options){this.type=name;this.detail=options.detail;}}, location:{pathname:'/week'}, AnkiQuestI18n:{t:value=>language==='es' ? catalog[value] || value : value}};
-  context.window = context;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/aki.js'),'utf8'), context);
-  return context.AnkiQuestAki;
+  const spanish = catalog('es');
+  const context: Record<string, unknown> = {document:{addEventListener(){},documentElement:{dataset:{}},querySelectorAll(){return []}}, addEventListener(){}, dispatchEvent(){}, CustomEvent:class {type: string; detail: unknown; constructor(name: string, options: {detail?: unknown}){this.type=name;this.detail=options.detail;}}, location:{pathname:'/week'}, AnkiQuestI18n:{t:(value: string)=>language==='es' ? spanish[value] || value : value}};
+  run('aki', context);
+  return context.AnkiQuestAki as AnkiQuestAkiApi;
 }
 test('a stored freeze alone never promises protection',()=>{
   const aki=fixture();
-  assert.equal(aki.mood({freezes:3,streak_state:'pending',today:{reviews:0}}),'review');
+  assert.equal(aki.mood({freezes:3,streak_state:'pending',today:{reviews:0}} as CompanionProfile),'review');
   assert.equal(aki.mood({streak_state:'protected',today:{reviews:0}}),'freeze');
   assert.equal(aki.mood({streak_state:'protected',today:{reviews:1}}),'review');
 });
@@ -65,8 +64,8 @@ test('every supported web language has Aki encouragement',()=>{
     'Your streak is protected by a freeze. A fresh start is waiting.',
     'Aki, your study companion.',
   ];
-  for (const language of ['es','fr','de','pt']) {
-    const catalog=JSON.parse(fs.readFileSync(path.join(__dirname,`../static/translations-${language}.json`),'utf8'));
-    for (const message of messages) assert.ok(catalog[message] && catalog[message]!==message,`${language}: ${message}`);
+  for (const language of ['es','fr','de','pt'] as const) {
+    const messagesIn=catalog(language);
+    for (const message of messages) assert.ok(messagesIn[message] && messagesIn[message]!==message,`${language}: ${message}`);
   }
 });

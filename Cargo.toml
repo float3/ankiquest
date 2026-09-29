@@ -7,7 +7,11 @@ rust-version = "1.88"
 license = "AGPL-3.0-only"
 repository = "https://github.com/float3/ankiquest"
 
+[workspace]
+members = [".", "crates/i18n", "crates/i18n-wasm"]
+
 [dependencies]
+ankiquest-i18n = { path = "crates/i18n" }
 axum = "0.8"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
@@ -21,3 +25,12 @@ ureq = "3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+
+# The translation module for the web pages, built by build.rs.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

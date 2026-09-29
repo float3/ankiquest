@@ -248,7 +248,7 @@ async fn remove(
 async fn script() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        include_str!("../static/avatars.js"),
+        web!("avatars.js"),
     )
 }
 

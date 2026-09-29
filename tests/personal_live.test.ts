@@ -1,26 +1,27 @@
 // End-to-end smoke test for private personal pages against the compiled server.
-// ANKIQUEST_BIN=/path/to/ankiquest PLAYWRIGHT_MODULE=/path/to/playwright node tests/personal_live.cjs
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const net = require('node:net');
-const {spawn} = require('node:child_process');
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+// ANKIQUEST_BIN=/path/to/ankiquest PLAYWRIGHT_MODULE=/path/to/playwright node --experimental-strip-types tests/personal_live.test.ts
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import {spawn} from 'node:child_process';
+import type {ChildProcess} from 'node:child_process';
+import type {Browser} from 'playwright';
+import {chromium, root as repo} from './support/web.ts';
 
-const repo = path.resolve(__dirname, '..');
 const exe = process.env.ANKIQUEST_BIN || path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'ankiquest.exe' : 'ankiquest');
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'ankiquest-personal-live-'));
 const token = 'alice-personal-test-token';
 const password = 'members-personal-test-password';
-let server, browser, log;
+let server: ChildProcess | undefined, browser: Browser | undefined, log: number | undefined;
 
 async function freePort() {
-  return new Promise((resolve, reject) => {
+  return new Promise<number>((resolve, reject) => {
     const socket = net.createServer();
     socket.once('error', reject);
     socket.listen(0, '127.0.0.1', () => {
-      const port = socket.address().port;
+      const port = (socket.address() as net.AddressInfo).port;
       socket.close(() => resolve(port));
     });
   });
@@ -37,9 +38,9 @@ async function main() {
     users:{alice:{display:'Alice',token}},
   }));
   log = fs.openSync(path.join(run, 'server.log'), 'a');
-  server = spawn(exe, [path.join(run, 'config.json')], {windowsHide:true,stdio:['ignore',log,log]});
+  const child = server = spawn(exe, [path.join(run, 'config.json')], {windowsHide:true,stdio:['ignore',log,log]});
   for (let i=0;i<100;i++) {
-    if (server.exitCode !== null) throw Error(fs.readFileSync(path.join(run, 'server.log'), 'utf8'));
+    if (child.exitCode !== null) throw Error(fs.readFileSync(path.join(run, 'server.log'), 'utf8'));
     try { if ((await fetch(base + '/auth/status')).ok) break; } catch {}
     if (i===99) throw Error('Server did not start');
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -49,7 +50,7 @@ async function main() {
   browser = await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL ? {channel:process.env.PLAYWRIGHT_CHANNEL} : {})});
   const context = await browser.newContext({locale:'en-US',viewport:{width:390,height:844}});
   const page = await context.newPage();
-  const errors = [];
+  const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base + '/login?next=%2Ftoday');
   await page.locator('#password').fill(password);
@@ -77,12 +78,12 @@ async function main() {
   await page.reload();
   await page.getByRole('heading', {name:'Latest synced session'}).waitFor();
   await page.locator('.personal-summary strong').first().waitFor();
-  assert.match(await page.locator('.personal-stamp').textContent(), /Study data updated/);
+  assert.match((await page.locator('.personal-stamp').textContent())!, /Study data updated/);
   assert.equal(await page.locator('.personal-summary strong').first().textContent(), '2');
   await page.goto(base + '/history');
   await page.locator('[data-day]:visible').first().waitFor();
   await page.locator('[data-day]:visible').first().click();
-  assert.match(await page.locator('#day-detail').textContent(), /reviews/);
+  assert.match((await page.locator('#day-detail').textContent())!, /reviews/);
   await page.goto(base + '/settings');
   if (await page.locator('#freeze-toggle').isChecked()) {
     await page.locator('#freeze-toggle').uncheck();
@@ -92,7 +93,7 @@ async function main() {
   await page.locator('#freeze-status').filter({hasText:'Saved'}).waitFor();
   const freeze = await page.request.get(base + '/api/streak-freezes/alice');
   assert.equal(freeze.status(), 200);
-  assert.equal((await freeze.json()).enabled, true);
+  assert.equal((await freeze.json() as {enabled: boolean}).enabled, true);
   assert.deepEqual(errors, []);
   assert((await page.evaluate(() => document.documentElement.scrollWidth)) <= 390);
   await context.close();
@@ -101,7 +102,8 @@ async function main() {
 
 main().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
   if (browser) await browser.close();
-  if (server && server.exitCode === null) {server.kill();await new Promise(resolve => server.once('exit', resolve));}
+  const child = server;
+  if (child && child.exitCode === null) {child.kill();await new Promise(resolve => child.once('exit', resolve));}
   if (log !== undefined) fs.closeSync(log);
   fs.rmSync(run, {recursive:true,force:true});
 });

@@ -1,3 +1,10 @@
+/// A file built from `web/` and `static/` by build.rs.
+macro_rules! web {
+    ($name:literal) => {
+        include_str!(concat!(env!("OUT_DIR"), "/web/", $name))
+    };
+}
+
 #[macro_use]
 mod admin;
 mod access;
@@ -1247,15 +1254,15 @@ async fn week_info(State(app): State<Arc<App>>) -> Json<WeekInfo> {
 }
 
 async fn index() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
+    Html(web!("index.html"))
 }
 
 async fn community_page() -> Html<&'static str> {
-    Html(include_str!("../static/community.html"))
+    Html(web!("community.html"))
 }
 
 async fn personal_page() -> Html<&'static str> {
-    Html(include_str!("../static/personal.html"))
+    Html(web!("personal.html"))
 }
 
 #[derive(Deserialize, Default)]
@@ -2141,6 +2148,7 @@ fn router(app: Arc<App>) -> Router {
         .route("/icon.svg", get(icon))
         .route("/site.css", get(access::site_css))
         .route("/site.js", get(access::site_js))
+        .route("/i18n.wasm", get(access::i18n_wasm))
         .route("/personal.css", get(access::personal_css))
         .route("/personal.js", get(access::personal_js))
         .route("/login", get(access::login))

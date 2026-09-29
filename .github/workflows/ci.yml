@@ -22,8 +22,11 @@ jobs:
       - name: Install Playwright
         run: npm ci && npx playwright install --with-deps chromium
 
+      - name: Type check
+        run: npm run typecheck
+
       - name: Build the server
-        run: cargo build
+        run: rustup target add wasm32-unknown-unknown && cargo build
 
       - name: Browser tests
         run: npm run test:web
@@ -39,7 +42,7 @@ jobs:
             experimental-features = nix-command flakes
 
       - name: Test
-        run: nix develop --command cargo test
+        run: nix develop --command cargo test --workspace
 
       - name: Test desktop deck completion
         run: |
@@ -50,7 +53,7 @@ jobs:
           "$RUNNER_TEMP/aqt/bin/python" -m unittest discover -s tests -v
 
       - name: Lint
-        run: nix develop --command cargo clippy --all-targets -- -D warnings
+        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build the package
         run: nix build --print-build-logs
