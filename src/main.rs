@@ -68,6 +68,8 @@ struct Config {
     #[serde(default)]
     competition_start_date: Option<String>,
     #[serde(default)]
+    review_weighting: game::ReviewWeighting,
+    #[serde(default)]
     users: HashMap<String, UserConfig>,
 }
 
@@ -1990,6 +1992,8 @@ async fn main() -> Result<(), Error> {
     let mut config: Config = serde_json::from_slice(
         &std::fs::read(&path).map_err(|e| format!("cannot read config {path}: {e}"))?,
     )?;
+
+    game::set_review_weighting(config.review_weighting);
 
     if config.legacy_remind_hour.is_some() {
         eprintln!("remind_hour is superseded by personal reminder preferences at /community.");

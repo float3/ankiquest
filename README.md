@@ -4,6 +4,8 @@ XP, levels, streaks, daily quests, achievements and a leaderboard for Anki. Clie
 
 XP never depends on which answer button was pressed, so there is no incentive to grade dishonestly.
 
+`review_weighting` (Nix: `reviewWeighting`) chooses how reviews are weighted. The default, `"flat"`, pays every answer its full rate. `"diminishing"` makes each further answer of the same card on the same day worth half as much, so a card you keep failing cannot out-earn one you learn, and pays learning steps 9 XP instead of 6. XP is recalculated from review history, so changing it applies to past reviews too.
+
 ## Run
 
 Requires Rust 1.88 or later.
@@ -20,6 +22,7 @@ cargo run -- ankiquest.json
   "public_url": "https://anki.example.com",
   "week_timezone": "Europe/Berlin",
   "week_rollover_hour": 4,
+  "review_weighting": "flat",
   "users": {
     "hill": { "display": "hill", "ntfy_topic": "some-secret-topic", "token_file": "hill.token" }
   }
