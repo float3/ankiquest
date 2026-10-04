@@ -54,7 +54,7 @@ async function main() {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(base + '/login?next=%2Ftoday');
   await page.locator('#password').fill(password);
-  await page.locator('button[type=submit]').click();
+  await page.locator('#login-form button[type=submit]').click();
   await page.waitForURL('**/today');
   await page.locator('#personal-gate:visible').waitFor();
   assert.equal((await page.request.get(base + '/api/study/alice')).status(), 401);

@@ -120,7 +120,7 @@ async fn nudge(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    if request.recipient == user || !app.config.users.contains_key(&request.recipient) {
+    if request.recipient == user || !app.is_user(&request.recipient) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let result = send(
@@ -186,7 +186,7 @@ async fn sender_receiving(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    if sender == user || !app.config.users.contains_key(&sender) {
+    if sender == user || !app.is_user(&sender) {
         return Err(StatusCode::BAD_REQUEST);
     }
     app.store
@@ -228,6 +228,7 @@ mod tests {
         .unwrap();
         let app = Arc::new(App {
             access: crate::access::Access::default(),
+            accounts: Default::default(),
             config,
             week: crate::game::Week::default(),
             store: Mutex::new(store),
@@ -288,6 +289,7 @@ mod tests {
         .unwrap();
         let app = Arc::new(App {
             access: crate::access::Access::default(),
+            accounts: Default::default(),
             config,
             week: crate::game::Week::default(),
             store: Mutex::new(store),
@@ -322,6 +324,7 @@ mod tests {
         .unwrap();
         let app = Arc::new(App {
             access: crate::access::Access::default(),
+            accounts: Default::default(),
             config,
             week: crate::game::Week::default(),
             store: Mutex::new(store),

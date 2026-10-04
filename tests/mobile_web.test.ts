@@ -41,7 +41,7 @@ async function signIn(page: Page, credential: string) {
   await page.waitForFunction(()=>(document.querySelector<HTMLImageElement>('.login-card > .aki-art')?.naturalWidth ?? 0)>0);
   await screenshot(page,'aki-login-390-light');
   await page.locator('#password').fill(credential);
-  await page.locator('button[type=submit]').click();
+  await page.locator('#login-form button[type=submit]').click();
   await page.waitForURL('**/community#challenges');
 }
 async function screenshot(page: Page, name: string) { await page.screenshot({path:path.join(out,name+'.png'),fullPage:true}); }

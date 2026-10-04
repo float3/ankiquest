@@ -60,6 +60,7 @@ impl Access {
             .transpose()?;
         if config.private_site
             && password.is_none()
+            && !config.registration
             && !config.users.values().any(|user| {
                 user.token
                     .as_ref()
@@ -99,7 +100,7 @@ impl Access {
             .flatten()
     }
 
-    fn throttled(&self, client: IpAddr, now: i64) -> bool {
+    pub(crate) fn throttled(&self, client: IpAddr, now: i64) -> bool {
         let mut sessions = self.sessions.lock().unwrap();
         sessions.failures.retain(|_, attempts| {
             now >= attempts.started && now - attempts.started < FAILURE_WINDOW_MS
@@ -110,7 +111,7 @@ impl Access {
             .is_some_and(|attempts| attempts.failures >= MAX_FAILURES)
     }
 
-    fn failure(&self, client: IpAddr, now: i64) {
+    pub(crate) fn failure(&self, client: IpAddr, now: i64) {
         let mut sessions = self.sessions.lock().unwrap();
         if !sessions.failures.contains_key(&client)
             && sessions.failures.len() >= MAX_FAILURE_CLIENTS
@@ -190,6 +191,7 @@ fn member_token(app: &App, given: &str) -> bool {
         .fold(false, |matched, expected| {
             constant_eq(expected, given) | matched
         })
+        || app.accounts.token_owner(given).is_some()
 }
 
 // A duplicated configured token cannot select a member identity implicitly.
@@ -205,7 +207,11 @@ fn token_owner(app: &App, given: &str) -> Option<String> {
                 .map(|_| name.clone())
         })
         .collect();
-    (matches.len() == 1).then(|| matches[0].clone())
+    match matches.len() {
+        1 => Some(matches[0].clone()),
+        0 => app.accounts.token_owner(given),
+        _ => None,
+    }
 }
 
 fn member(app: &App, headers: &HeaderMap) -> Option<String> {
@@ -213,6 +219,9 @@ fn member(app: &App, headers: &HeaderMap) -> Option<String> {
         return bearer(headers).and_then(|given| token_owner(app, given));
     }
     let owner = app.access.member(headers, now_ms())?;
+    if app.accounts.contains(&owner) {
+        return Some(owner);
+    }
     app.config
         .users
         .get(&owner)?
@@ -276,6 +285,8 @@ fn public_path(path: &str) -> bool {
                 | "/auth/status"
                 | "/auth/session"
                 | "/auth/logout"
+                | "/api/accounts"
+                | "/api/accounts/tokens"
         )
 }
 
@@ -394,7 +405,7 @@ pub(crate) async fn status(
     headers: HeaderMap,
 ) -> Json<serde_json::Value> {
     Json(
-        serde_json::json!({"private_site": app.config.private_site, "authenticated": authenticated(&app, &headers),
+        serde_json::json!({"private_site": app.config.private_site, "registration": app.config.registration, "authenticated": authenticated(&app, &headers),
             "member": member(&app, &headers).map(|user| serde_json::json!({"display":app.display(&user),"user":user}))}),
     )
 }
@@ -403,11 +414,14 @@ pub(crate) async fn status(
 #[serde(deny_unknown_fields)]
 struct Password {
     password: String,
+    /// Present when an account signs in with its own password.
+    #[serde(default)]
+    user: Option<String>,
 }
 
 // A reverse proxy may identify the original client only when explicitly trusted
 // and reached over a loopback connection. Ignore spoofed or ambiguous headers.
-fn client_ip(config: &Config, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+pub(crate) fn client_ip(config: &Config, headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
     if config.site_trust_proxy && peer.ip().is_loopback() {
         let mut values = headers.get_all("x-ankiquest-client-ip").iter();
         if let Some(value) = values.next()
@@ -451,6 +465,31 @@ pub(crate) async fn session(
             return response;
         }
         let credential = serde_json::from_slice::<Password>(&body).ok();
+        if let Some(Password {
+            password,
+            user: Some(user),
+        }) = &credential
+        {
+            let user = user.trim().to_ascii_lowercase();
+            if !crate::accounts::password_matches(&app, &user, password).await {
+                app.access.failure(client, now);
+                return error(
+                    StatusCode::UNAUTHORIZED,
+                    "Username or password not recognized.",
+                );
+            }
+            return match app.access.create_session(&headers, Some(user), now_ms()) {
+                Ok(token) => (
+                    StatusCode::NO_CONTENT,
+                    [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
+                )
+                    .into_response(),
+                Err(_) => error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Unable to create a session.",
+                ),
+            };
+        }
         let valid = credential.as_ref().is_some_and(|credential| {
             credential.password.len() <= 1024
                 && (member_token(&app, &credential.password)
@@ -566,6 +605,7 @@ mod tests {
                     password: Some("shared-master".into()),
                     ..Access::default()
                 },
+                accounts: Default::default(),
                 week: Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
