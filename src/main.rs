@@ -8,6 +8,7 @@ macro_rules! web {
 #[macro_use]
 mod admin;
 mod access;
+mod accounts;
 mod aki;
 mod avatars;
 mod challenges;
@@ -82,6 +83,9 @@ struct Config {
     log_retention_days: u32,
     #[serde(default)]
     users: HashMap<String, UserConfig>,
+    /// Lets anyone create an account with a username and password.
+    #[serde(default)]
+    registration: bool,
 }
 
 fn default_log_retention_days() -> u32 {
@@ -113,6 +117,7 @@ struct Player {
 struct App {
     config: Config,
     access: access::Access,
+    accounts: accounts::Directory,
     week: Week,
     store: Mutex<Store>,
     players: RwLock<HashMap<String, Player>>,
@@ -133,7 +138,29 @@ impl App {
             .users
             .get(user)
             .and_then(|u| u.display.clone())
+            .or_else(|| self.accounts.account(user).map(|account| account.display))
             .unwrap_or_else(|| user.into())
+    }
+
+    /// Anyone this server knows: configured users and accounts.
+    fn is_user(&self, user: &str) -> bool {
+        self.config.users.contains_key(user) || self.accounts.contains(user)
+    }
+
+    /// Players who can sign in: configured users with a token, and every account.
+    fn members(&self) -> BTreeSet<String> {
+        self.config
+            .users
+            .iter()
+            .filter(|(_, config)| {
+                config
+                    .token
+                    .as_deref()
+                    .is_some_and(|token| !token.is_empty())
+            })
+            .map(|(user, _)| user.clone())
+            .chain(self.accounts.users())
+            .collect()
     }
 
     fn profile(&self, user: &str) -> Option<Profile> {
@@ -172,6 +199,7 @@ impl App {
             .keys()
             .chain(players.keys())
             .cloned()
+            .chain(self.accounts.users())
             .collect();
         users
             .into_iter()
@@ -623,6 +651,7 @@ async fn upload(
 
 fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings, Error> {
     let mut users: BTreeSet<String> = app.config.users.keys().cloned().collect();
+    users.extend(app.accounts.users());
     let ntfy_enabled = app
         .config
         .ntfy
@@ -632,17 +661,18 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings
     users.retain(|candidate| {
         candidate != user
             && !unsubscribed.contains(candidate)
-            && app.config.users.get(candidate).is_some_and(|config| {
-                config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-                    || (ntfy_enabled
-                        && config
-                            .ntfy_topic
-                            .as_deref()
-                            .is_some_and(|topic| !topic.trim().is_empty()))
-            })
+            && (app.accounts.contains(candidate)
+                || app.config.users.get(candidate).is_some_and(|config| {
+                    config
+                        .token
+                        .as_deref()
+                        .is_some_and(|token| !token.is_empty())
+                        || (ntfy_enabled
+                            && config
+                                .ntfy_topic
+                                .as_deref()
+                                .is_some_and(|topic| !topic.trim().is_empty()))
+                }))
     });
     Ok(decks::Settings {
         decks: store.decks(user)?,
@@ -698,19 +728,12 @@ async fn deck_copy_inbox(
     let offers = deck_copies::inbox(&app.store.lock().unwrap().conn, &user, now_ms())
         .map_err(store_error)?;
     let mut friends: Vec<_> = app
-        .config
-        .users
-        .iter()
-        .filter(|(id, config)| {
-            *id != &user
-                && config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-        })
-        .map(|(id, _)| decks::Recipient {
-            user: id.clone(),
-            display: app.display(id),
+        .members()
+        .into_iter()
+        .filter(|id| id != &user)
+        .map(|id| decks::Recipient {
+            display: app.display(&id),
+            user: id,
         })
         .collect();
     friends.sort_by(|a, b| a.display.cmp(&b.display));
@@ -854,6 +877,7 @@ fn incoming_preferences(
     user: &str,
 ) -> Result<IncomingPreferences, Error> {
     let mut users: BTreeSet<String> = app.config.users.keys().cloned().collect();
+    users.extend(app.accounts.users());
     users.extend(store.known_incoming_senders(user)?);
     let unsubscribed_senders = store.unsubscribed_senders(user)?;
     users.extend(unsubscribed_senders.iter().cloned());
@@ -2082,6 +2106,7 @@ async fn main() -> Result<(), Error> {
 
     let access = access::Access::from_config(&config)?;
     let store = Store::open(&config.state_dir)?;
+    let accounts = accounts::Directory::load(&store.conn)?;
     let mut players = HashMap::new();
     for user in store.users()? {
         players.insert(user.clone(), load_player(&store, &user)?);
@@ -2100,6 +2125,7 @@ async fn main() -> Result<(), Error> {
         week,
         config,
         access,
+        accounts,
         players: RwLock::new(players),
         store: Mutex::new(store),
     });
@@ -2158,6 +2184,16 @@ fn router(app: Arc<App>) -> Router {
             post(access::session).layer(axum::extract::DefaultBodyLimit::max(4096)),
         )
         .route("/auth/logout", post(access::logout))
+        .route(
+            "/api/accounts",
+            post(accounts::signup).layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/accounts/tokens",
+            post(accounts::login)
+                .delete(accounts::logout)
+                .layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
         .route("/api/leaderboard", get(leaderboard))
         .route("/api/records", get(records))
         .route("/api/winners", get(winners))
@@ -2242,6 +2278,7 @@ mod tests {
             Arc::new(App {
                 config,
                 access: access::Access::default(),
+                accounts: Default::default(),
                 week: Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
@@ -3473,6 +3510,7 @@ mod tests {
         let reloaded = App {
             config,
             access: access::Access::default(),
+            accounts: Default::default(),
             week: Week::default(),
             store: Mutex::new(store),
             players: RwLock::new(HashMap::from([("cerro".into(), player)])),

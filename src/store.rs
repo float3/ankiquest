@@ -78,6 +78,7 @@ impl Store {
                  received_at integer not null
              ) without rowid;",
         )?;
+        crate::accounts::initialize(&conn)?;
         crate::avatars::initialize(&conn)?;
         crate::i18n::initialize(&conn)?;
         crate::companions::initialize(&conn)?;

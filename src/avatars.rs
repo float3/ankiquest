@@ -135,7 +135,7 @@ async fn list(State(app): State<Arc<App>>) -> Response {
         let mut revisions = BTreeMap::new();
         for row in rows {
             let (user, revision) = row?;
-            if app.config.users.contains_key(&user) {
+            if app.is_user(&user) {
                 revisions.insert(user, revision.to_string());
             }
         }
@@ -156,7 +156,7 @@ async fn read(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    if !app.config.users.contains_key(&user) {
+    if !app.is_user(&user) {
         return failure(StatusCode::NOT_FOUND, "No profile picture.");
     }
     let result = picture(&app.store.lock().unwrap(), &user);
@@ -292,6 +292,7 @@ mod tests {
         (
             Arc::new(App {
                 access: crate::access::Access::from_config(&config).unwrap(),
+                accounts: Default::default(),
                 config,
                 week: Week::default(),
                 store: Mutex::new(store),

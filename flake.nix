@@ -63,6 +63,7 @@
         review_weighting = cfg.reviewWeighting;
         log_retention_days = cfg.logRetentionDays;
         private_site = cfg.privateSite;
+        registration = cfg.registration;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
           if cfg.sitePasswordFile == null
@@ -117,6 +118,7 @@
           default = null;
           description = "Serve through nginx with ACME on this domain.";
         };
+        registration = lib.mkEnableOption "self-service accounts: anyone can sign up with a username and password, and sign in from the website, the add-on and the app";
         privateSite = lib.mkOption {
           type = lib.types.bool;
           default = false;
@@ -181,8 +183,8 @@
       config = lib.mkIf cfg.enable {
         assertions = [
           {
-            assertion = !cfg.privateSite || cfg.sitePasswordFile != null || withToken != {};
-            message = "services.ankiquest.privateSite needs sitePasswordFile or at least one user tokenFile.";
+            assertion = !cfg.privateSite || cfg.sitePasswordFile != null || withToken != {} || cfg.registration;
+            message = "services.ankiquest.privateSite needs sitePasswordFile, a user tokenFile, or registration.";
           }
         ];
         # systemd holds the port and passes it in. Connections nginx makes to
