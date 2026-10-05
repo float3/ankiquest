@@ -620,6 +620,7 @@ mod tests {
                 week: Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
+                standings: Default::default(),
             }),
             path,
         )

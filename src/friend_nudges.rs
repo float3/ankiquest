@@ -238,6 +238,7 @@ mod tests {
             week: crate::game::Week::default(),
             store: Mutex::new(store),
             players: RwLock::new(Default::default()),
+            standings: Default::default(),
         });
         for (owner, token, recipient, expected) in [
             ("cerro", "", "hill", StatusCode::UNAUTHORIZED),
@@ -299,6 +300,7 @@ mod tests {
             week: crate::game::Week::default(),
             store: Mutex::new(store),
             players: RwLock::new(Default::default()),
+            standings: Default::default(),
         });
         let response = routes()
             .with_state(app.clone())
@@ -334,6 +336,7 @@ mod tests {
             week: crate::game::Week::default(),
             store: Mutex::new(store),
             players: RwLock::new(Default::default()),
+            standings: Default::default(),
         });
         for (owner, sender, token, expected) in [
             ("hill", "cerro", "cerro-secret", StatusCode::UNAUTHORIZED),
