@@ -1146,5 +1146,17 @@
   "Your account and its data were deleted.": "Ton compte et ses données ont été supprimés.",
   "That password is not right.": "Ce mot de passe n'est pas correct.",
   "Too many attempts. Try again in one minute.": "Trop de tentatives. Réessaie dans une minute.",
-  "Your account could not be deleted. Please try again.": "Impossible de supprimer ton compte. Réessaie."
+  "Your account could not be deleted. Please try again.": "Impossible de supprimer ton compte. Réessaie.",
+  "New here?": "Nouveau ici ?",
+  "Turn your Anki reviews into a friendly game.": "Transforme tes révisions Anki en un jeu amical.",
+  "AnkiQuest gives every review XP, keeps your streak, sets three small quests a day and lets you study alongside friends. You keep using Anki exactly as before.": "AnkiQuest donne de l'XP à chaque révision, suit ta série, propose trois petites quêtes par jour et te laisse étudier avec tes amis. Tu continues d'utiliser Anki exactement comme avant.",
+  "Create an account": "Créer un compte",
+  "A username and a password. Your profile stays private unless you make it public.": "Un nom d'utilisateur et un mot de passe. Ton profil reste privé sauf si tu le rends public.",
+  "Connect Anki": "Connecte Anki",
+  "Install the add-on for Anki on your computer, or AnkiQuest for Android, and sign in there.": "Installe le module complémentaire d'Anki sur ton ordinateur, ou AnkiQuest pour Android, et connecte-toi.",
+  "Study as usual": "Étudie comme d'habitude",
+  "Reviews sync on their own. Add friends or start a group with an invite link.": "Les révisions se synchronisent toutes seules. Ajoute des amis ou crée un groupe avec un lien d'invitation.",
+  "Get the Anki add-on": "Obtenir le module pour Anki",
+  "Get the Android app": "Obtenir l'app Android",
+  "Free and open source. Only the timing of your reviews reaches the server, never the content of your cards.": "Gratuit et open source. Seul le minutage de tes révisions arrive au serveur, jamais le contenu de tes cartes."
 }

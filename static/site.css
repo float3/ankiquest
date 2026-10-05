@@ -43,6 +43,14 @@ small{font-size:12px}
 .tabs button[aria-selected=true]{background:var(--ink);color:var(--card)}
 .filters{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin-bottom:24px}
 .field{display:grid;gap:5px}
+.welcome{margin-bottom:22px}
+.welcome h2{font-size:24px;letter-spacing:-.02em;margin:6px 0 8px}
+.welcome-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0;padding:0;list-style:none;counter-reset:step}
+.welcome-steps li{counter-increment:step;display:grid;gap:4px;padding:14px;border:1px solid var(--line);border-radius:12px}
+.welcome-steps li::before{content:counter(step);font-weight:750;color:var(--accent)}
+.welcome-steps span{color:var(--dim);font-size:14px}
+.top-actions .site-signin{padding:7px 14px}
+@media(max-width:760px){.welcome-steps{grid-template-columns:1fr}}
 .scope-picker{display:flex;align-items:center;gap:10px;margin:-8px 0 18px;font-size:13px;font-weight:650}
 .scope-picker select{min-width:180px}
 .field>span,.field>label{font-size:12px;color:var(--dim);font-weight:600}
@@ -316,6 +324,7 @@ button, .button-link, .site-nav a, .top-actions a, .tabs a, .tabs button,
 .month-actions button, .table-player button { min-height:48px; }
 input:not([type=checkbox]):not([type=radio]), select { min-height:48px; }
 .button-link { display:inline-flex;align-items:center;justify-content:center;padding:9px 14px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font-weight:600;text-decoration:none;font-size:13px; }
+.button-link.primary { background:var(--accent);border-color:var(--accent);color:var(--card); }
 .month-actions button, dialog .dialog-head button { min-width:48px; }
 .check { min-height:48px;align-items:center; }
 .site-nav a, .top-actions a { display:inline-flex;align-items:center; }

@@ -1142,5 +1142,17 @@
   "Your account and its data were deleted.": "Tu cuenta y sus datos se eliminaron.",
   "That password is not right.": "Esa contraseña no es correcta.",
   "Too many attempts. Try again in one minute.": "Demasiados intentos. Vuelve a intentarlo en un minuto.",
-  "Your account could not be deleted. Please try again.": "No se pudo eliminar tu cuenta. Inténtalo de nuevo."
+  "Your account could not be deleted. Please try again.": "No se pudo eliminar tu cuenta. Inténtalo de nuevo.",
+  "New here?": "¿Eres nuevo?",
+  "Turn your Anki reviews into a friendly game.": "Convierte tus repasos de Anki en un juego amistoso.",
+  "AnkiQuest gives every review XP, keeps your streak, sets three small quests a day and lets you study alongside friends. You keep using Anki exactly as before.": "AnkiQuest da XP a cada repaso, lleva tu racha, te propone tres pequeñas misiones al día y te deja estudiar junto a tus amigos. Sigues usando Anki exactamente como antes.",
+  "Create an account": "Crear una cuenta",
+  "A username and a password. Your profile stays private unless you make it public.": "Un nombre de usuario y una contraseña. Tu perfil es privado salvo que lo hagas público.",
+  "Connect Anki": "Conecta Anki",
+  "Install the add-on for Anki on your computer, or AnkiQuest for Android, and sign in there.": "Instala el complemento de Anki en tu ordenador o AnkiQuest para Android e inicia sesión allí.",
+  "Study as usual": "Estudia como siempre",
+  "Reviews sync on their own. Add friends or start a group with an invite link.": "Los repasos se sincronizan solos. Añade amigos o crea un grupo con un enlace de invitación.",
+  "Get the Anki add-on": "Descargar el complemento de Anki",
+  "Get the Android app": "Descargar la app de Android",
+  "Free and open source. Only the timing of your reviews reaches the server, never the content of your cards.": "Gratis y de código abierto. Al servidor solo llegan los tiempos de tus repasos, nunca el contenido de tus tarjetas."
 }

@@ -345,6 +345,25 @@ document.addEventListener("change", event => {
   render();
 });
 
+const ADDON_RELEASES = "https://github.com/float3/ankiquest/releases/latest";
+const ANDROID_RELEASES = "https://github.com/float3/AnkiQuest-Android/releases/latest";
+
+/** What AnkiQuest is and how to start, for visitors without an account on a server that takes sign-ups. */
+function welcome() {
+  return aqHtml`<section class="card welcome" aria-labelledby="welcome-title">
+    <div class="eyebrow">New here?</div>
+    <h2 id="welcome-title">Turn your Anki reviews into a friendly game.</h2>
+    <p class="section-intro">AnkiQuest gives every review XP, keeps your streak, sets three small quests a day and lets you study alongside friends. You keep using Anki exactly as before.</p>
+    <ol class="welcome-steps">
+      <li><strong>Create an account</strong><span>A username and a password. Your profile stays private unless you make it public.</span></li>
+      <li><strong>Connect Anki</strong><span>Install the add-on for Anki on your computer, or AnkiQuest for Android, and sign in there.</span></li>
+      <li><strong>Study as usual</strong><span>Reviews sync on their own. Add friends or start a group with an invite link.</span></li>
+    </ol>
+    <div class="setting-actions"><a class="button-link primary" href="/login?signup=1">Create an account</a><a class="button-link" href="${ADDON_RELEASES}" rel="noopener">Get the Anki add-on</a><a class="button-link" href="${ANDROID_RELEASES}" rel="noopener">Get the Android app</a></div>
+    <p class="settings-hint">Free and open source. Only the timing of your reviews reaches the server, never the content of your cards. <a href="/privacy">Privacy</a></p>
+  </section>`;
+}
+
 function pageHero(title: string, description: string, note = "") {
   return aqHtml`<div class="page-hero"><div><div class="eyebrow">A little progress, every day</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${note ? aqHtml`<div class="history-note">${note}</div>` : ""}</div>`;
 }
@@ -1147,6 +1166,7 @@ async function render() {
     let me = "";
     try { me = localStorage.getItem("ankiquestPlayer") || ""; } catch (e) {}
     const session = await viewer();
+    const newcomer = !session && !AnkiQuestSite.embedded && !!(await AnkiQuestSite.status())?.registration;
     const choices = session ? await scopeChoices(session) : [];
     const stored = storedScope(), scope = choices.some(([value]) => value === stored) ? stored : "";
     const auth: RequestInit = session?.token ? {headers: AnkiQuestSite.ownerHeaders(session)} : {};
@@ -1192,7 +1212,7 @@ async function render() {
     if (!canRender()) return;
     document.title = aqText("Leaderboard · AnkiQuest");
     AnkiQuestSite.setProfile(me);
-    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
+    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + (newcomer ? welcome() : "") + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
     document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences());
   } catch (e) {
     if (!canRender()) return;
