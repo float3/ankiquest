@@ -231,6 +231,15 @@ fn member(app: &App, headers: &HeaderMap) -> Option<String> {
     Some(owner)
 }
 
+/// The signed-in member, or the shared community password, behind a request.
+pub(crate) fn viewer(app: &App, headers: &HeaderMap) -> crate::social::Viewer {
+    let member = member(app, headers);
+    let community = member.is_none()
+        && !headers.contains_key(header::AUTHORIZATION)
+        && app.access.authenticated(headers, now_ms());
+    crate::social::Viewer { member, community }
+}
+
 pub(crate) fn authorized(app: &App, user: &str, headers: &HeaderMap) -> bool {
     if headers.contains_key(header::AUTHORIZATION) {
         return bearer(headers)
@@ -288,6 +297,7 @@ fn public_path(path: &str) -> bool {
                 | "/api/accounts"
                 | "/api/accounts/tokens"
         )
+        || path.starts_with("/api/invites/")
 }
 
 fn encoded_next(path: &str) -> String {

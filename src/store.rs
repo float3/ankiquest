@@ -79,6 +79,7 @@ impl Store {
              ) without rowid;",
         )?;
         crate::accounts::initialize(&conn)?;
+        crate::social::initialize(&conn)?;
         crate::avatars::initialize(&conn)?;
         crate::i18n::initialize(&conn)?;
         crate::companions::initialize(&conn)?;
