@@ -1146,5 +1146,17 @@
   "Your account and its data were deleted.": "Dein Konto und seine Daten wurden gelöscht.",
   "That password is not right.": "Dieses Passwort stimmt nicht.",
   "Too many attempts. Try again in one minute.": "Zu viele Versuche. Versuch es in einer Minute noch einmal.",
-  "Your account could not be deleted. Please try again.": "Dein Konto konnte nicht gelöscht werden. Bitte versuch es noch einmal."
+  "Your account could not be deleted. Please try again.": "Dein Konto konnte nicht gelöscht werden. Bitte versuch es noch einmal.",
+  "New here?": "Neu hier?",
+  "Turn your Anki reviews into a friendly game.": "Mach aus deinen Anki-Wiederholungen ein freundliches Spiel.",
+  "AnkiQuest gives every review XP, keeps your streak, sets three small quests a day and lets you study alongside friends. You keep using Anki exactly as before.": "AnkiQuest gibt jeder Wiederholung XP, hält deine Lernserie fest, stellt dir drei kleine Quests am Tag und lässt dich mit Freunden lernen. Anki benutzt du genau wie bisher.",
+  "Create an account": "Konto erstellen",
+  "A username and a password. Your profile stays private unless you make it public.": "Ein Benutzername und ein Passwort. Dein Profil bleibt privat, außer du machst es öffentlich.",
+  "Connect Anki": "Anki verbinden",
+  "Install the add-on for Anki on your computer, or AnkiQuest for Android, and sign in there.": "Installiere das Add-on für Anki auf deinem Computer oder AnkiQuest für Android und melde dich dort an.",
+  "Study as usual": "Lerne wie gewohnt",
+  "Reviews sync on their own. Add friends or start a group with an invite link.": "Wiederholungen synchronisieren sich von selbst. Füge Freunde hinzu oder gründe eine Gruppe mit einem Einladungslink.",
+  "Get the Anki add-on": "Anki-Add-on holen",
+  "Get the Android app": "Android-App holen",
+  "Free and open source. Only the timing of your reviews reaches the server, never the content of your cards.": "Kostenlos und quelloffen. Nur der zeitliche Ablauf deiner Wiederholungen erreicht den Server, nie der Inhalt deiner Karten."
 }

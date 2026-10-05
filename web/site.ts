@@ -156,6 +156,10 @@ import "./aki";
   async function refreshAccess(fresh = false) {
     const access = await status(fresh);
     document.querySelectorAll<HTMLElement>(".site-lock").forEach(button => button.hidden = !access?.private_site && !memberUser(access));
+    document.querySelectorAll<HTMLAnchorElement>(".site-signin").forEach(link => {
+      link.hidden = embedded || !access?.registration || !!memberUser(access);
+      link.href = loginURL();
+    });
     if (memberUser(access)) setProfile(memberUser(access)!);
     if (access?.private_site && !access.authenticated) {
       dispatchEvent(new Event("ankiquest:locked"));
@@ -195,7 +199,7 @@ import "./aki";
     const active = header.dataset.siteSection || "leaderboard";
     await AnkiQuestI18n.ready;
     const links: [string, string, string][] = [["today", "/today", aqText("Today")], ["community", "/community", aqText("Community")], ["settings", "/settings", aqText("Settings")], ["leaderboard", "/week", aqText("Leaderboard")], ["records", "/records", aqText("Records")]];
-    header.innerHTML = aqHtml`<a class="brand" href="${href("/")}" aria-label="AnkiQuest home"><img src="/aki/face.png" alt="">ankiquest</a><nav class="site-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav><div class="top-actions"><a data-profile-link hidden>Profile</a><button type="button" class="site-lock" hidden>Lock site</button></div><p class="site-status error" role="status" hidden></p>`;
+    header.innerHTML = aqHtml`<a class="brand" href="${href("/")}" aria-label="AnkiQuest home"><img src="/aki/face.png" alt="">ankiquest</a><nav class="site-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav><div class="top-actions"><a data-profile-link hidden>Profile</a><a class="button-link primary site-signin" href="/login" hidden>Sign in</a><button type="button" class="site-lock" hidden>Lock site</button></div><p class="site-status error" role="status" hidden></p>`;
     if (embedded) header.insertAdjacentHTML("afterend", aqHtml`<nav class="tabs embedded-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`);
     const controls = header.querySelector(".top-actions")!;
     if (actions) while (actions.firstChild) controls.insertBefore(actions.firstChild, controls.querySelector(".site-lock"));
