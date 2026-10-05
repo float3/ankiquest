@@ -2233,6 +2233,8 @@ fn router(app: Arc<App>) -> Router {
         .route("/today", get(personal_page))
         .route("/history", get(personal_page))
         .route("/settings", get(personal_page))
+        .route("/friends", get(personal_page))
+        .route("/join/{code}", get(personal_page))
         .route("/{period}", get(period_page))
         .route("/manifest.webmanifest", get(manifest))
         .route("/icon.svg", get(icon))

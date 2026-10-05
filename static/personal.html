@@ -20,7 +20,7 @@
   <header class="topbar" data-site-header data-site-section="today"><div data-site-actions></div></header>
   <main id="personal-app" tabindex="-1" aria-busy="true">
     <div class="page-hero personal-hero"><div><div class="eyebrow" data-i18n="Your study space">Your study space</div><h1 id="personal-title">Today</h1><p id="personal-intro">Your progress, one day at a time.</p></div><button id="personal-refresh" type="button" hidden data-i18n="Refresh progress">Refresh progress</button></div>
-    <nav class="tabs personal-tabs" aria-label="Personal pages"><a href="/today" data-personal-tab="today" data-i18n="Today">Today</a><a href="/history" data-personal-tab="history" data-i18n="History">History</a><a href="/settings" data-personal-tab="settings" data-i18n="Settings">Settings</a></nav>
+    <nav class="tabs personal-tabs" aria-label="Personal pages"><a href="/today" data-personal-tab="today" data-i18n="Today">Today</a><a href="/history" data-personal-tab="history" data-i18n="History">History</a><a href="/friends" data-personal-tab="friends" data-i18n="Friends">Friends</a><a href="/settings" data-personal-tab="settings" data-i18n="Settings">Settings</a></nav>
     <section id="personal-gate" class="card" hidden aria-labelledby="connect-title">
       <h2 id="connect-title" data-i18n="Connect your account">Connect your account</h2>
       <p class="section-intro" data-i18n="Your member token unlocks your private progress and settings. The shared website password only unlocks public pages.">Your member token unlocks your private progress and settings. The shared website password only unlocks public pages.</p>
@@ -31,6 +31,7 @@
       </form>
       <p id="connect-status" class="status" role="status"></p>
       <p class="settings-hint" data-i18n="Your token is never saved in page storage.">Your token is never saved in page storage.</p>
+      <p id="personal-login" hidden><a class="button-link primary" href="/login" data-i18n="Sign in with a password or create an account">Sign in with a password or create an account</a></p>
     </section>
     <div id="personal-content" class="personal-content" hidden></div>
     <div id="personal-error" class="notice error" role="alert" hidden></div>

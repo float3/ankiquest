@@ -303,6 +303,48 @@ function tabs(active: Period) {
   return aqHtml`<nav class="tabs" aria-label="Leaderboard period">${links.join("")}</nav>`;
 }
 
+/** Which players a board shows: a member's friends and groups, everyone public, or one group. */
+type ScopeChoice = [value: string, label: string];
+interface SocialOverview { groups: {id: number; name: string}[]; friends: unknown[] }
+let scopeCache: {user: string; choices: Promise<ScopeChoice[]>} | null = null;
+addEventListener("ankiquest:identity", () => { scopeCache = null; });
+addEventListener("ankiquest-auth", () => { scopeCache = null; });
+
+async function viewer(): Promise<OwnerSession | null> {
+  const native = window.ankiquestSession;
+  if (typeof native?.user === "string" && native.user && typeof native.token === "string" && native.token.trim()) return {user: native.user, token: native.token.trim()};
+  return AnkiQuestSite.member();
+}
+
+function scopeChoices(session: OwnerSession): Promise<ScopeChoice[]> {
+  if (scopeCache?.user !== session.user) {
+    const request = AnkiQuestSite.readJSON<SocialOverview>("/api/social/" + encodeURIComponent(session.user), {headers: AnkiQuestSite.ownerHeaders(session)});
+    const choices = request.then((social): ScopeChoice[] => social.groups.length || social.friends.length
+      ? [["circle", aqText("Friends and groups")], ["global", aqText("Everyone")], ...social.groups.map((group): ScopeChoice => ["group:" + group.id, group.name])]
+      : []).catch(() => []);
+    scopeCache = {user: session.user, choices};
+  }
+  return scopeCache.choices;
+}
+
+function storedScope() {
+  try { return localStorage.getItem("ankiquestScope") || ""; } catch (e) { return ""; }
+}
+
+function scopePicker(choices: ScopeChoice[], scope: string) {
+  if (!choices.length) return "";
+  const selected = scope || "circle";
+  const options = choices.map(([value, label]) => `<option value="${esc(value)}" ${value === selected ? "selected" : ""}>${esc(label)}</option>`).join("");
+  return aqHtml`<label class="scope-picker"><span>Show</span><select id="board-scope">${options}</select></label>`;
+}
+
+document.addEventListener("change", event => {
+  const target = event.target as HTMLSelectElement;
+  if (target.id !== "board-scope") return;
+  try { localStorage.setItem("ankiquestScope", target.value); } catch (e) {}
+  render();
+});
+
 function pageHero(title: string, description: string, note = "") {
   return aqHtml`<div class="page-hero"><div><div class="eyebrow">A little progress, every day</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${note ? aqHtml`<div class="history-note">${note}</div>` : ""}</div>`;
 }
@@ -1104,19 +1146,25 @@ async function render() {
   try {
     let me = "";
     try { me = localStorage.getItem("ankiquestPlayer") || ""; } catch (e) {}
+    const session = await viewer();
+    const choices = session ? await scopeChoices(session) : [];
+    const stored = storedScope(), scope = choices.some(([value]) => value === stored) ? stored : "";
+    const auth: RequestInit = session?.token ? {headers: AnkiQuestSite.ownerHeaders(session)} : {};
+    const scoped = (url: string) => scope ? url + (url.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope) : url;
+    if (!canRender()) return;
     if (currentView() === "records") {
-      const held = await AnkiQuestSite.readJSON<RecordBoard[]>("/api/records");
+      const held = await AnkiQuestSite.readJSON<RecordBoard[]>(scoped("/api/records"), auth);
       if (!canRender()) return;
       document.title = aqText("Records · AnkiQuest");
       AnkiQuestSite.setProfile(me);
-      app.innerHTML = pageHero(aqText("Records worth chasing."), aqText("Personal bests become shared milestones. Celebrate the sessions, streaks, and study days that raised the bar."), aqHtml`<strong>All-time achievements</strong>A new record starts with one session.`) + records(held, me) + receivingNotificationsEntry();
+      app.innerHTML = pageHero(aqText("Records worth chasing."), aqText("Personal bests become shared milestones. Celebrate the sessions, streaks, and study days that raised the bar."), aqHtml`<strong>All-time achievements</strong>A new record starts with one session.`) + scopePicker(choices, scope) + records(held, me) + receivingNotificationsEntry();
       document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences());
       return;
     }
     const period = currentPeriod();
     loadWinners();
     const [rows, week] = await Promise.all([
-      AnkiQuestSite.readJSON<Standing[]>("/api/leaderboard?period=" + period),
+      AnkiQuestSite.readJSON<Standing[]>(scoped("/api/leaderboard?period=" + period), auth),
       AnkiQuestSite.readJSON<WeekInfo>("/api/week").catch(() => null),
     ]);
     weekEnds = week?.ends_at ?? 0;
@@ -1144,7 +1192,7 @@ async function render() {
     if (!canRender()) return;
     document.title = aqText("Leaderboard · AnkiQuest");
     AnkiQuestSite.setProfile(me);
-    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + leaderboardKpis(rows, period) + tabs(period) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
+    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
     document.getElementById("manage-received-notifications")!.addEventListener("click", () => openNotificationPreferences());
   } catch (e) {
     if (!canRender()) return;
