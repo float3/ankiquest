@@ -552,7 +552,7 @@ pub fn list(
                     && status == "accepted"
                     && let (Some(player), Some(joined)) = (player, joined)
                 {
-                    for review in &player.reviews {
+                    for review in player.reviews.iter() {
                         if review.id >= joined.max(start_at)
                             && review.id < end_at
                             && review.id <= now
@@ -840,7 +840,8 @@ mod tests {
                     time_ms: 5000,
                     kind: 1,
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         }
     }
 

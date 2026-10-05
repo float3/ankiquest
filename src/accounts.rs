@@ -462,6 +462,7 @@ mod tests {
                 week: crate::game::Week::default(),
                 store: std::sync::Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
+                standings: Default::default(),
             }),
             path,
         )

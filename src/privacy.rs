@@ -316,6 +316,7 @@ async fn delete(
     }
     app.accounts.remove(&user);
     app.players.write().unwrap().remove(&user);
+    app.forget_standing(&user);
     log_info!("an account was deleted");
     StatusCode::NO_CONTENT.into_response()
 }
@@ -417,6 +418,7 @@ mod tests {
                 week: crate::game::Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
+                standings: Default::default(),
             }),
             path,
         )

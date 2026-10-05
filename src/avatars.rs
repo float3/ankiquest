@@ -297,6 +297,7 @@ mod tests {
                 week: Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(Default::default()),
+                standings: Default::default(),
             }),
             path,
         )

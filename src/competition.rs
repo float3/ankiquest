@@ -16,7 +16,7 @@ const GRACE_MS: i64 = 86_400_000;
 pub struct Participant {
     pub user: String,
     pub display: String,
-    pub reviews: Vec<game::Review>,
+    pub reviews: std::sync::Arc<Vec<game::Review>>,
     pub clock: Clock,
     pub freeze_policy: FreezePolicy,
 }
@@ -993,7 +993,7 @@ mod tests {
         Participant {
             user: user.into(),
             display: user.to_uppercase(),
-            reviews,
+            reviews: reviews.into(),
             clock: Clock::default(),
             freeze_policy: FreezePolicy::default(),
         }
@@ -1373,7 +1373,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        players[0].reviews = reviews("2026-09-20", 10);
+        players[0].reviews = reviews("2026-09-20", 10).into();
         refresh(db.get(), &players, &week, at("2026-09-21", 10), None).unwrap();
         assert_eq!(
             period(db.get(), "day", "2026-09-20").standings[0].reviews,
@@ -1387,7 +1387,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        players[0].reviews = reviews("2026-09-20", 100);
+        players[0].reviews = reviews("2026-09-20", 100).into();
         refresh(db.get(), &players, &week, at("2026-09-23", 12), None).unwrap();
         assert_eq!(
             serde_json::to_value(period(db.get(), "day", "2026-09-20")).unwrap(),
@@ -1562,7 +1562,7 @@ mod tests {
         )
         .unwrap();
         let frozen = serde_json::to_value(period(db.get(), "day", "2026-09-20")).unwrap();
-        players[0].reviews.splice(0..0, reviews("2026-09-01", 2));
+        std::sync::Arc::make_mut(&mut players[0].reviews).splice(0..0, reviews("2026-09-01", 2));
         refresh(
             db.get(),
             &players,

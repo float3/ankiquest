@@ -165,13 +165,20 @@ impl App {
 
     /// Everyone who chose, or by default has, a public profile.
     pub fn global(&self, conn: &Connection) -> rusqlite::Result<BTreeSet<String>> {
-        let mut users = BTreeSet::new();
-        for user in self.known_users() {
-            if self.is_public(conn, &user)? {
-                users.insert(user);
-            }
-        }
-        Ok(users)
+        let chosen: std::collections::HashMap<String, bool> = conn
+            .prepare("select user, public from visibility")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(self
+            .known_users()
+            .into_iter()
+            .filter(|user| {
+                chosen
+                    .get(user)
+                    .copied()
+                    .unwrap_or_else(|| self.legacy(user))
+            })
+            .collect())
     }
 
     pub fn visible(
@@ -687,6 +694,7 @@ mod tests {
                 week: crate::game::Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
+                standings: Default::default(),
             }),
             path,
         )

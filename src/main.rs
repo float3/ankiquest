@@ -114,10 +114,35 @@ fn default_state() -> PathBuf {
 }
 
 struct Player {
-    reviews: Vec<Review>,
+    reviews: Arc<Vec<Review>>,
     clock: Clock,
     freeze_policy: game::FreezePolicy,
+    /// Changes whenever anything above does, so cached standings know they are stale.
+    revision: u64,
 }
+
+static REVISIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_revision() -> u64 {
+    REVISIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Standings computed recently, so boards and the tick do not recompute every history on every read.
+#[derive(Default)]
+struct StandingCache(Mutex<HashMap<String, CachedStanding>>);
+
+struct CachedStanding {
+    key: (u64, game::ReviewWeighting, i64, i64),
+    computed_at: i64,
+    recent: bool,
+    profile: Arc<Profile>,
+}
+
+/// How long a standing stays fresh while its player has studied in the last hour,
+/// because the rolling hour board moves with every minute.
+const STANDING_TTL_MS: i64 = 60_000;
+/// How much study history a cached standing keeps: enough for reminders about recent days.
+const STANDING_HISTORY_DAYS: usize = 14;
 
 struct App {
     config: Config,
@@ -126,6 +151,7 @@ struct App {
     week: Week,
     store: Mutex<Store>,
     players: RwLock<HashMap<String, Player>>,
+    standings: StandingCache,
 }
 
 impl Config {
@@ -191,12 +217,61 @@ impl App {
         ))
     }
 
-    fn profiles(&self) -> Vec<Profile> {
-        let users: Vec<String> = self.players.read().unwrap().keys().cloned().collect();
-        users.iter().filter_map(|u| self.profile(u)).collect()
+    /// A player's standing: their profile without the heatmap, achievements and older history.
+    /// It is cached until the player uploads, their Anki day or the clock hour changes,
+    /// or a minute passes while they have studied in the last hour.
+    fn standing(&self, user: &str) -> Option<Arc<Profile>> {
+        let now = now_ms();
+        let players = self.players.read().unwrap();
+        let player = players.get(user)?;
+        let key = (
+            player.revision,
+            game::review_weighting(),
+            player.clock.day(now),
+            now.div_euclid(3_600_000),
+        );
+        if let Some(cached) = self.standings.0.lock().unwrap().get(user)
+            && cached.key == key
+            && (!cached.recent || now - cached.computed_at < STANDING_TTL_MS)
+        {
+            return Some(cached.profile.clone());
+        }
+        let recent = player
+            .reviews
+            .last()
+            .is_some_and(|r| r.id > now - 3_600_000);
+        let mut profile = game::compute_with_freezes(
+            user,
+            &self.display(user),
+            &player.reviews,
+            &player.clock,
+            &self.week,
+            now,
+            &player.freeze_policy,
+        );
+        drop(players);
+        profile.heatmap = Vec::new();
+        profile.achievements = Vec::new();
+        let older = profile.history.len().saturating_sub(STANDING_HISTORY_DAYS);
+        profile.history.drain(..older);
+        let profile = Arc::new(profile);
+        self.standings.0.lock().unwrap().insert(
+            user.to_string(),
+            CachedStanding {
+                key,
+                computed_at: now,
+                recent,
+                profile: profile.clone(),
+            },
+        );
+        Some(profile)
     }
 
-    fn profiles_among(&self, users: &BTreeSet<String>) -> Vec<Profile> {
+    fn forget_standing(&self, user: &str) {
+        self.standings.0.lock().unwrap().remove(user);
+    }
+
+    fn standings_among(&self, users: &BTreeSet<String>) -> Vec<Arc<Profile>> {
         let players: Vec<String> = self
             .players
             .read()
@@ -205,7 +280,7 @@ impl App {
             .filter(|user| users.contains(*user))
             .cloned()
             .collect();
-        players.iter().filter_map(|u| self.profile(u)).collect()
+        players.iter().filter_map(|u| self.standing(u)).collect()
     }
 
     /// Players `user` can send things to: members of their circle other than themselves.
@@ -242,7 +317,7 @@ impl App {
                 let player = players.get(&user);
                 competition::Participant {
                     display: self.display(&user),
-                    reviews: player.map_or_else(Vec::new, |p| p.reviews.clone()),
+                    reviews: player.map_or_else(Default::default, |p| p.reviews.clone()),
                     clock: player.map_or_else(Clock::default, |p| p.clock),
                     freeze_policy: player
                         .map_or_else(game::FreezePolicy::default, |p| p.freeze_policy.clone()),
@@ -308,17 +383,17 @@ fn standings(app: &App, users: &BTreeSet<String>, period: Option<String>) -> Vec
         .filter(|name| Periods::NAMES.contains(&name.as_str()))
         .unwrap_or_else(|| "week".into());
     let mut standings: Vec<Standing> = app
-        .profiles_among(users)
+        .standings_among(users)
         .into_iter()
         .map(|p| Standing {
-            user: p.user,
-            display: p.display,
+            user: p.user.clone(),
+            display: p.display.clone(),
             level: p.level,
             xp_total: p.xp_total,
             week_xp: p.week_xp,
             xp: p.periods.get(&period),
             period: period.clone(),
-            periods: p.periods,
+            periods: p.periods.clone(),
             streak: p.streak,
             streak_state: p.streak_state,
             day_ends_at: p.day_ends_at,
@@ -1222,7 +1297,7 @@ struct RecordBoard {
 fn podium(
     window: &str,
     unit: &'static str,
-    profiles: &[Profile],
+    profiles: &[Arc<Profile>],
     of: impl Fn(&Profile) -> (u64, u64, i64, i64),
 ) -> RecordBoard {
     let mut holders: Vec<RecordHolder> = profiles
@@ -1255,7 +1330,7 @@ async fn records(
     Query(query): Query<BoardQuery>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RecordBoard>>, StatusCode> {
-    let profiles = app.profiles_among(&board_users(&app, &headers, query.scope.as_deref())?);
+    let profiles = app.standings_among(&board_users(&app, &headers, query.scope.as_deref())?);
     let mut board: Vec<RecordBoard> = Records::NAMES
         .iter()
         .map(|window| {
@@ -1701,9 +1776,10 @@ fn push(
 
 fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
     Ok(Player {
-        reviews: store.reviews(user)?,
+        reviews: Arc::new(store.reviews(user)?),
         clock: store.clock(user)?,
         freeze_policy: store.freeze_policy(user)?,
+        revision: next_revision(),
     })
 }
 
@@ -1783,51 +1859,65 @@ fn streak_warning_body(profile: &Profile) -> String {
 }
 
 fn tick(app: &App) -> Result<(), Error> {
-    let mut store = app.store.lock().unwrap();
-    let settings = app.config.settings().effective(&store.conn)?;
-    if settings.review_weighting != game::review_weighting() {
-        game::set_review_weighting(settings.review_weighting);
-        log_info!("review weighting is now {:?}", settings.review_weighting);
-    }
-    admin::flush(&store.conn, now_ms(), settings.log_retention_days)?;
-    let import_complete =
-        app.config
-            .sync_base
-            .as_ref()
-            .is_none_or(|base| match import(app, &mut store, base) {
-                Ok(()) => true,
-                Err(error) => {
-                    log_error!("competition refresh deferred until sync import succeeds: {error}");
-                    false
+    let now = now_ms();
+    let participants =
+        {
+            let mut store = app.store.lock().unwrap();
+            let settings = app.config.settings().effective(&store.conn)?;
+            if settings.review_weighting != game::review_weighting() {
+                game::set_review_weighting(settings.review_weighting);
+                log_info!("review weighting is now {:?}", settings.review_weighting);
+            }
+            admin::flush(&store.conn, now, settings.log_retention_days)?;
+            let import_complete = app.config.sync_base.as_ref().is_none_or(|base| {
+                match import(app, &mut store, base) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        log_error!(
+                            "competition refresh deferred until sync import succeeds: {error}"
+                        );
+                        false
+                    }
                 }
             });
-    let participants = app.participants();
-    let now = now_ms();
-    if import_complete {
-        refresh_community(app, &mut store, &app.legacy_participants(), now)?;
-    }
-    challenges::refresh(&mut store, &participants, now)?;
+            let participants = app.participants();
+            if import_complete {
+                refresh_community(app, &mut store, &app.legacy_participants(), now)?;
+            }
+            challenges::refresh(&mut store, &participants, now)?;
+            participants
+        };
+    // Standings are the expensive part, so they are worked out without holding the database.
     let users: Vec<String> = app.players.read().unwrap().keys().cloned().collect();
-    // One snapshot of the standings, so a nudge knows who is just out of reach.
-    let ranking = app.profiles();
-    for user in users {
-        let Some(profile) = app.profile(&user) else {
+    let ranking: HashMap<&str, Arc<Profile>> = users
+        .iter()
+        .filter_map(|user| app.standing(user).map(|profile| (user.as_str(), profile)))
+        .collect();
+    let mut legacy: Vec<(u64, &str)> = ranking
+        .iter()
+        .filter(|(user, _)| app.legacy(user))
+        .map(|(user, profile)| (profile.week_xp, *user))
+        .collect();
+    legacy.sort_unstable();
+    let clocks: HashMap<&str, Clock> = participants
+        .iter()
+        .map(|participant| (participant.user.as_str(), participant.clock))
+        .collect();
+    for user in &users {
+        let Some(profile) = ranking.get(user.as_str()) else {
             continue;
         };
-        let push_enabled = push_destination(&app.config, &user).is_some();
-        store.queue_events(&user, &profile.events, profile.day, now_ms(), push_enabled)?;
-        if store.nudges_enabled(&user)? {
-            let gap = |other: &Profile| (other.display.clone(), other.week_xp);
-            let circle = app.circle(&store.conn, &user)?;
-            let ahead = ranking
-                .iter()
-                .filter(|other| other.week_xp > profile.week_xp && circle.contains(&other.user))
-                .min_by_key(|other| other.week_xp)
-                .map(gap);
-            for nudge in game::nudges(&profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
+        // One player at a time, so requests can take the database in between.
+        let mut store = app.store.lock().unwrap();
+        let push_enabled = push_destination(&app.config, user).is_some();
+        store.queue_events(user, &profile.events, profile.day, now_ms(), push_enabled)?;
+        if store.nudges_enabled(user)? {
+            let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
+                .map(|other| (other.display.clone(), other.week_xp));
+            for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
                 store.send_once(
                     &decks::Outgoing {
-                        to: &user,
+                        to: user,
                         from: "",
                         title: &nudge.title,
                         body: &nudge.body,
@@ -1840,21 +1930,44 @@ fn tick(app: &App) -> Result<(), Error> {
                 )?;
             }
         }
-        if let Some(participant) = participants.iter().find(|p| p.user == user) {
-            let recap = competition::weekly_recap(&store, &user, &app.week, now)?;
-            reminders::tick(
-                &mut store,
-                &user,
-                &profile,
-                &participant.clock,
-                &app.week,
-                now,
-                recap,
-            )?;
+        if let Some(clock) = clocks.get(user.as_str()) {
+            let recap = competition::weekly_recap(&store, user, &app.week, now)?;
+            reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
         }
     }
-    drop(store);
     deliver_notifications(app, PUSH_BUDGET)
+}
+
+/// Whoever in the player's circle is closest above them this week, for "just out of reach" nudges.
+/// `legacy` is the original community sorted by week XP, so it needs no scan per player.
+fn just_ahead<'a>(
+    app: &App,
+    conn: &rusqlite::Connection,
+    user: &str,
+    profile: &Profile,
+    ranking: &'a HashMap<&str, Arc<Profile>>,
+    legacy: &[(u64, &'a str)],
+) -> rusqlite::Result<Option<&'a Profile>> {
+    let mut best: Option<&Profile> = None;
+    let mut consider = |other: &'a Profile| {
+        if other.week_xp > profile.week_xp && best.is_none_or(|best| other.week_xp < best.week_xp) {
+            best = Some(other);
+        }
+    };
+    if app.legacy(user) {
+        let above = legacy.partition_point(|(xp, _)| *xp <= profile.week_xp);
+        if let Some(other) = legacy.get(above).and_then(|(_, other)| ranking.get(other)) {
+            consider(other);
+        }
+    }
+    let mut others = social::friends(conn, user)?;
+    others.extend(social::group_mates(conn, user)?);
+    for other in others {
+        if let Some(other) = ranking.get(other.as_str()) {
+            consider(other);
+        }
+    }
+    Ok(best)
 }
 
 fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
@@ -2194,6 +2307,7 @@ async fn main() -> Result<(), Error> {
         access,
         accounts,
         players: RwLock::new(players),
+        standings: Default::default(),
         store: Mutex::new(store),
     });
 
@@ -2353,6 +2467,7 @@ mod tests {
                 week: Week::default(),
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
+                standings: Default::default(),
             }),
             path,
         )
@@ -2635,9 +2750,10 @@ mod tests {
         app.players.write().unwrap().insert(
             "cerro".into(),
             Player {
-                reviews: Vec::new(),
+                reviews: Default::default(),
                 clock: Clock::default(),
                 freeze_policy: game::FreezePolicy::default(),
+                revision: next_revision(),
             },
         );
         let expected = app.profile("cerro").unwrap();
@@ -3587,6 +3703,7 @@ mod tests {
             week: Week::default(),
             store: Mutex::new(store),
             players: RwLock::new(HashMap::from([("cerro".into(), player)])),
+            standings: Default::default(),
         };
         assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
         assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);
@@ -5569,6 +5686,115 @@ mod tests {
                 kind: 1,
             })
             .collect()
+    }
+
+    fn with_reviews(app: &App, user: &str, count: i64) {
+        app.players.write().unwrap().insert(
+            user.into(),
+            Player {
+                reviews: Arc::new(reviews_at(now_ms() - 600_000, count)),
+                clock: Clock::default(),
+                freeze_policy: game::FreezePolicy::default(),
+                revision: next_revision(),
+            },
+        );
+    }
+
+    #[test]
+    fn standings_are_cached_until_the_player_changes_and_stay_small() {
+        let (app, path) = fixture();
+        with_reviews(&app, "cerro", 5);
+        let first = app.standing("cerro").unwrap();
+        assert!(
+            Arc::ptr_eq(&first, &app.standing("cerro").unwrap()),
+            "a second read is served from the cache"
+        );
+        assert!(first.heatmap.is_empty() && first.achievements.is_empty());
+        assert!(
+            !app.profile("cerro").unwrap().heatmap.is_empty(),
+            "the full profile keeps everything"
+        );
+        with_reviews(&app, "cerro", 9);
+        let second = app.standing("cerro").unwrap();
+        assert!(
+            !Arc::ptr_eq(&first, &second),
+            "new reviews replace the cached standing"
+        );
+        assert!(second.today.reviews > first.today.reviews);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn the_nudge_target_is_the_closest_player_above_within_the_circle() {
+        let (store, path) = decks::tests::temporary_store();
+        store
+            .conn
+            .execute_batch("insert into accounts (user, display, password_hash, created_at) values ('ana', 'Ana', 'x', 0)")
+            .unwrap();
+        let accounts = accounts::Directory::load(&store.conn).unwrap();
+        let app = App {
+            config: serde_json::from_value(
+                serde_json::json!({"users": {"cerro": {}, "hill": {}, "friend": {}}}),
+            )
+            .unwrap(),
+            access: access::Access::default(),
+            accounts,
+            week: Week::default(),
+            store: Mutex::new(store),
+            players: RwLock::new(HashMap::new()),
+            standings: Default::default(),
+        };
+        for (user, count) in [("friend", 2), ("ana", 4), ("cerro", 6), ("hill", 20)] {
+            with_reviews(&app, user, count);
+        }
+        let users = ["friend", "ana", "cerro", "hill"];
+        let ranking: HashMap<&str, Arc<Profile>> = users
+            .iter()
+            .map(|user| (*user, app.standing(user).unwrap()))
+            .collect();
+        let mut legacy: Vec<(u64, &str)> = ranking
+            .iter()
+            .filter(|(user, _)| app.legacy(user))
+            .map(|(user, profile)| (profile.week_xp, *user))
+            .collect();
+        legacy.sort_unstable();
+        let ahead = |user: &str| {
+            let store = app.store.lock().unwrap();
+            just_ahead(&app, &store.conn, user, &ranking[user], &ranking, &legacy)
+                .unwrap()
+                .map(|profile| profile.user.clone())
+        };
+        assert_eq!(
+            ahead("friend").as_deref(),
+            Some("cerro"),
+            "a stranger's account is not in reach"
+        );
+        assert_eq!(ahead("cerro").as_deref(), Some("hill"));
+        assert_eq!(ahead("hill"), None);
+        assert_eq!(
+            ahead("ana"),
+            None,
+            "an account with no friends has nobody to chase"
+        );
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute("insert into friendships (a, b, requested_by, accepted, created_at) values ('ana', 'friend', 'ana', 1, 0)", [])
+            .unwrap();
+        assert_eq!(
+            ahead("friend").as_deref(),
+            Some("ana"),
+            "a friend counts once connected"
+        );
+        assert_eq!(
+            ahead("ana").as_deref(),
+            None,
+            "the friend is behind, and ana is not in the original community"
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     fn plain_upload(reviews: Vec<Review>) -> Upload {

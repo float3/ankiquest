@@ -223,7 +223,8 @@ mod tests {
                     time_ms: 1000,
                     kind: 1,
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         }
     }
 
