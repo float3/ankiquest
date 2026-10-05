@@ -19,10 +19,14 @@
     subscriptions?: {enabled: boolean; senders: Person[]; unsubscribed_senders: string[]; sharing_senders: string[]} | null;
     decks?: {decks: {id: string; name: string; enabled: boolean; recipients: string[]}[]; recipients: Person[]; celebrations: boolean} | null;
   }
+  interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
+  interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean }
+  interface Invite { name: string; members: number }
   type SettingName = keyof Settings;
   interface State {
     session: OwnerSession | null; epoch: number; profile: Profile | null; study: StudyHistory | null; challenges: Challenges | null; activity: Activity | null;
     settings: Settings; errors: Record<string, string>; year: number | null; selected: string | null; native: boolean;
+    social: Social | null; invite: Invite | null;
   }
 
   const {t:tr, html} = AnkiQuestI18n;
@@ -33,17 +37,20 @@
   const when = (value: unknown) => new Date(Number(value)).toLocaleString(AnkiQuestI18n.language, {dateStyle:"medium", timeStyle:"short"});
   const date = (value: string) => new Intl.DateTimeFormat(AnkiQuestI18n.language, {dateStyle:"full", timeZone:"UTC"}).format(new Date(value + "T12:00:00Z"));
   const path = location.pathname.replace(/\/+$/, "");
-  const page = path === "/history" ? "history" : path === "/settings" ? "settings" : "today";
+  const page = path === "/history" ? "history" : path === "/settings" ? "settings" : path === "/friends" ? "friends" : path.startsWith("/join/") ? "join" : "today";
+  const inviteCode = page === "join" ? decodeURIComponent(path.slice("/join/".length)) : "";
   let reminders: [ReminderKey, string][] = [];
-  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false};
+  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null};
   document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = page === "settings" ? "settings" : "today";
   // Text waits for translations; restore() does too, so reminders are set before any render.
   void AnkiQuestI18n.ready.then(() => {
-    const titles = {today:tr("Today"), history:tr("Study history"), settings:tr("Your settings")};
+    const titles = {today:tr("Today"), history:tr("Study history"), settings:tr("Your settings"), friends:tr("Friends and groups"), join:tr("Join a group")};
     const intros = {
       today:tr("Your progress, one day at a time."),
       history:tr("Every day you showed up adds to your story."),
       settings:tr("Choose how AnkiQuest encourages you and what you share."),
+      friends:tr("Study with the people you choose. Only they see your progress unless you make your profile public."),
+      join:tr("You were invited to study together."),
     };
     reminders = [
       ["gentle_daily",tr("Gentle daily reminder")], ["urgent_streak",tr("Unprotected streak warning")],
@@ -72,7 +79,9 @@
     state.session = null;
     state.profile = state.study = state.challenges = state.activity = null;
     state.settings = {};
+    state.social = state.invite = null;
     $("personal-gate").hidden = false;
+    void site.status().then(access => { if (access?.registration) $("personal-login").hidden = false; });
     ($<HTMLFormElement>("personal-connect").elements.namedItem("token") as HTMLInputElement).value = "";
     $("personal-connect").querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach(control => control.disabled = false);
     $("personal-content").hidden = true;
@@ -135,7 +144,19 @@
     $<HTMLButtonElement>("personal-refresh").disabled = true;
     $("personal-content").innerHTML = html`<p class="loading-copy" role="status">${tr("Loading your progress…")}</p>`;
     try {
-      if (page === "settings") {
+      if (page === "friends") {
+        const social = await owner<Social>("/api/social",undefined,session);
+        if (state.session !== session || state.epoch !== epoch) return;
+        state.social = social;
+        renderFriends();
+      } else if (page === "join") {
+        const [invite,social] = await Promise.allSettled([request<Invite>(`/api/invites/${encodeURIComponent(inviteCode)}`,undefined,session),owner<Social>("/api/social",undefined,session)]);
+        if (state.session !== session || state.epoch !== epoch) return;
+        if (social.status === "rejected") throw social.reason;
+        state.social = social.value;
+        state.invite = invite.status === "fulfilled" ? invite.value : null;
+        renderJoin();
+      } else if (page === "settings") {
         const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks"];
         const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session)];
         const results = await Promise.allSettled(calls);
@@ -236,6 +257,62 @@
     const reviews = days.reduce((sum,day)=>sum+Number(day.reviews),0), studied = days.filter(day=>day.reviews>0).length, xp=days.reduce((sum,day)=>sum+Number(day.xp),0);
     $("personal-content").innerHTML = html`<div class="personal-year"><label for="history-year">${tr("Study year")}</label><select id="history-year">${years.map(item=>html`<option value="${item}" ${item===year?"selected":""}>${item}</option>`).join("")}</select>${freshness()}</div><div class="kpis">${site.kpi(tr("Reviews"),number(reviews),tr("This year"),"blue")}${site.kpi(tr("Study days"),number(studied),tr("This year"),"green")}${site.kpi(tr("XP earned"),number(xp),tr("This year"),"gold")}</div>${dayDetail()}<div class="personal-months">${Array.from({length:12},(_,month)=>calendarMonth(year,month,map,max)).join("")}</div><p class="settings-hint">${tr("A day follows your Anki cutoff. These are uploaded reviews, so another device may have newer activity until it syncs.")}</p>`;
   }
+  function personRow(person: Person, actions: string) {
+    return html`<div class="list-row">${site.avatar(person.user,person.display)}<div class="row-text"><strong>${esc(person.display)}</strong><small>${esc(person.user)}</small></div>${actions}</div>`;
+  }
+  const action = (label: string, body: Record<string, unknown>, extra = "") => html`<button type="button" data-social="${esc(JSON.stringify(body))}" ${extra}>${esc(label)}</button>`;
+  const inviteLink = (code: string) => location.origin + site.href("/join/" + encodeURIComponent(code));
+  const members = (count: number) => count === 1 ? tr("1 member") : tr`${count} members`;
+  function renderFriends() {
+    const social = state.social!, me = state.session!.user;
+    const visibility = html`<article class="card"><div class="card-head"><div><h2>${tr("Your profile")}</h2><p>${social.public ? tr("Anyone can see your profile.") : tr("Only your friends and groups can see your profile.")}</p></div></div>${check("",tr("Public profile"),social.public,tr("Show my profile and standings on the global leaderboard."),"data-social-public")}</article>`;
+    const requests = social.incoming.length ? html`<h3>${tr("Friend requests")}</h3><div class="stack">${social.incoming.map(person=>personRow(person,action(tr("Accept"),{action:"befriend",user:person.user},'class="primary"')+action(tr("Decline"),{action:"unfriend",user:person.user}))).join("")}</div>` : "";
+    const waiting = social.outgoing.length ? html`<h3>${tr("Waiting for an answer")}</h3><div class="stack">${social.outgoing.map(person=>personRow(person,action(tr("Cancel request"),{action:"unfriend",user:person.user}))).join("")}</div>` : "";
+    const friendList = social.friends.length
+      ? html`<div class="stack">${social.friends.map(person=>personRow(person,action(tr("Remove"),{action:"unfriend",user:person.user},`data-confirm="${esc(tr`Remove ${person.display} from your friends?`)}"`))).join("")}</div>`
+      : html`<p class="settings-hint">${tr("No friends yet. Send a request with their username.")}</p>`;
+    const friendsCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Friends")}</h2><p>${tr("Friends see each other's progress and can share decks, goals and nudges.")}</p></div></div><form id="friend-form" class="social-form"><label class="field"><span>${tr("Username")}</span><input name="user" required maxlength="32" autocomplete="off" spellcheck="false"></label><button class="primary" type="submit">${tr("Send friend request")}</button></form>${requests}${waiting}<h3>${tr("Your friends")}</h3>${friendList}</article>`;
+    const invite = (item: Group) => item.owner && item.invite
+      ? html`<div class="social-invite"><label class="field"><span>${tr("Invite link")}</span><input readonly value="${esc(inviteLink(item.invite))}" data-invite-link></label><div class="setting-actions"><button type="button" data-copy-invite>${tr("Copy link")}</button>${action(tr("New link"),{action:"new_invite",group:item.id},`data-confirm="${esc(tr("The old link will stop working. Make a new one?"))}"`)}</div><p class="settings-hint">${tr("Anyone with this link can join. Share it only with people you want in the group.")}</p></div>`
+      : "";
+    const member = (item: Group, person: Person) => personRow(person,item.owner && person.user !== me ? action(tr("Remove"),{action:"remove",group:item.id,member:person.user},`data-confirm="${esc(tr`Remove ${person.display} from ${item.name}?`)}"`) : "");
+    const group = (item: Group) => html`<details class="card social-group" data-group="${item.id}" open><summary><strong>${esc(item.name)}</strong><small>${esc(members(item.members.length))}</small></summary>${invite(item)}<div class="stack">${item.members.map(person=>member(item,person)).join("")}</div><div class="setting-actions">${action(tr("Leave group"),{action:"leave",group:item.id},`data-confirm="${esc(tr`Leave ${item.name}?`)}"`)}</div></details>`;
+    const groupsCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Groups")}</h2><p>${tr("Everyone in a group sees each other on the group's leaderboard.")}</p></div></div><form id="group-form" class="social-form"><label class="field"><span>${tr("Group name")}</span><input name="name" required maxlength="40" autocomplete="off"></label><button class="primary" type="submit">${tr("Create group")}</button></form></article>${social.groups.map(group).join("")}`;
+    $("personal-content").innerHTML = html`<div class="personal-settings">${visibility}${friendsCard}${groupsCard}</div><p id="social-status" class="status" role="status"></p>`;
+  }
+  function renderJoin() {
+    const invite = state.invite;
+    $("personal-content").innerHTML = invite
+      ? html`<article class="card"><div class="card-head"><div><div class="eyebrow">${tr("Group invitation")}</div><h2>${esc(invite.name)}</h2><p>${esc(members(invite.members))}</p></div></div><p class="section-intro">${tr("Members see each other's progress on the group's leaderboard and can share decks, goals and nudges.")}</p><div class="setting-actions"><button class="primary" type="button" id="join-group">${tr("Join group")}</button>${link("/friends",tr("Not now"))}</div><p id="social-status" class="status" role="status"></p></article>`
+      : html`<article class="card"><h2>${tr("This invite link is not valid any more.")}</h2><p class="section-intro">${tr("Ask whoever sent it for a new link.")}</p><div class="setting-actions">${link("/friends",tr("Friends and groups"),true)}</div></article>`;
+  }
+  function socialError(status: number | undefined, body: Record<string, unknown>) {
+    if (status === 404) return body.action === "join" ? tr("This invite link is not valid any more.") : tr("There is nobody with that username.");
+    if (status === 409) return body.action === "befriend" ? tr("Wait for some friend requests to be answered first.") : tr("That group, or your list of groups, is full.");
+    if (status === 400) return tr("Group names are 1 to 40 characters.");
+    return tr("That could not be saved. Please try again.");
+  }
+  async function social(body: Record<string, unknown>, controls: (HTMLInputElement | HTMLButtonElement)[]) {
+    const session = state.session;
+    if (!session) return false;
+    const status = document.getElementById("social-status");
+    controls.forEach(control => control.disabled = true);
+    if (status) { status.className = "status"; status.textContent = tr("Saving…"); }
+    try {
+      const saved = await owner<Social>("/api/social",body,session);
+      if (state.session !== session) return false;
+      state.social = saved;
+      if (page === "friends") { renderFriends(); $("social-status").textContent = tr("Saved."); }
+      return true;
+    } catch (cause) {
+      if (state.session === session) {
+        controls.forEach(control => control.disabled = false);
+        const notice = document.getElementById("social-status");
+        if (notice) { notice.className = "status error"; notice.textContent = socialError((cause as {status?: number}).status, body); }
+      }
+      return false;
+    }
+  }
   function check(name: string,title: string,checked: boolean,description="",extra="") {
     return html`<label class="check"><input type="checkbox" ${name?`name="${esc(name)}"`:""} ${extra} ${checked?"checked":""}><span><strong>${esc(title)}</strong>${description?html`<small>${esc(description)}</small>`:""}</span></label>`;
   }
@@ -283,6 +360,13 @@
       catch(cause){(form.elements.namedItem("token") as HTMLInputElement).value="";$("connect-status").textContent=(cause as Error).message;controls.forEach(c=>c.disabled=false);}
       return;
     }
+    if (state.session && page==="friends" && (form.id === "friend-form" || form.id === "group-form")) {
+      event.preventDefault();
+      const controls=[...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button")];
+      const body=form.id === "friend-form" ? {action:"befriend",user:(form.elements.namedItem("user") as HTMLInputElement).value.trim().toLowerCase()} : {action:"create_group",name:(form.elements.namedItem("name") as HTMLInputElement).value.trim()};
+      social(body,controls);
+      return;
+    }
     if (!state.session || page!=="settings") return;
     if (form.id === "companion-form") {
       event.preventDefault();submitForm(form,"/api/companion",{companion:(form.elements.namedItem("companion") as RadioNodeList).value},"companion");
@@ -306,6 +390,7 @@
   document.addEventListener("change", async event => {
     const target=event.target as HTMLInputElement;
     if (target.id==="history-year") {state.year=Number(target.value);state.selected=null;load();return;}
+    if (target.hasAttribute("data-social-public") && state.session && page==="friends") {social({action:"visibility",public:target.checked},[target]);return;}
     if (!state.session || page!=="settings") return;
     const session=state.session;
     if (target.id==="freeze-toggle") {
@@ -322,6 +407,25 @@
   });
   document.addEventListener("click", async event => {
     const day=(event.target as Element).closest<HTMLElement>("[data-day]");
+    const target=event.target as Element, socialButton=target.closest<HTMLButtonElement>("[data-social]");
+    if (socialButton && state.session) {
+      if (socialButton.dataset.confirm && !socialButton.dataset.armed) {
+        socialButton.dataset.armed = "1";
+        socialButton.textContent = tr("Tap again to confirm");
+        $("social-status").className = "status";
+        $("social-status").textContent = socialButton.dataset.confirm;
+        return;
+      }
+      social(JSON.parse(socialButton.dataset.social!),[socialButton]);
+    }
+    if (target.closest("[data-copy-invite]")) {
+      const input=target.closest(".social-invite")!.querySelector<HTMLInputElement>("[data-invite-link]")!;
+      try { await navigator.clipboard.writeText(input.value); $("social-status").textContent=tr("Invite link copied."); }
+      catch { input.select(); }
+    }
+    if (target.id==="join-group" && state.session) {
+      if (await social({action:"join",invite:inviteCode},[target as HTMLButtonElement])) location.assign(site.href("/friends"));
+    }
     if(day && page==="history") {state.selected=day.dataset.day!;document.querySelectorAll("[data-day]").forEach(button=>button.setAttribute("aria-pressed",String(button===day)));$("day-detail").outerHTML=dayDetail();$("day-detail").focus();}
     if((event.target as Element).id==="personal-disconnect") {
       const button=event.target as HTMLButtonElement;button.disabled=true;

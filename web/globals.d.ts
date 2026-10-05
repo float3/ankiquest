@@ -18,6 +18,7 @@ declare global {
   /** Who a signed-in browser session belongs to, from `/auth/status`. */
   interface Access {
     private_site?: boolean;
+    registration?: boolean;
     authenticated?: boolean;
     member?: {user?: unknown} | null;
     [key: string]: unknown;
