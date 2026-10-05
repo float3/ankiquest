@@ -21,6 +21,7 @@ mod freezes;
 mod friend_nudges;
 mod game;
 mod i18n;
+mod privacy;
 mod reminders;
 mod social;
 mod store;
@@ -87,6 +88,9 @@ struct Config {
     /// Lets anyone create an account with a username and password.
     #[serde(default)]
     registration: bool,
+    /// Who runs this server, for the privacy notice.
+    #[serde(default)]
+    privacy: privacy::Notice,
 }
 
 fn default_log_retention_days() -> u32 {
@@ -2227,6 +2231,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
         .merge(social::routes())
+        .merge(privacy::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))

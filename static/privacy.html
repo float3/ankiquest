@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101418">
+<title>Privacy · AnkiQuest</title>
+<link rel="icon" href="/aki/face.png" type="image/png">
+<link rel="stylesheet" href="/site.css">
+<style>
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif}
+.privacy{max-width:720px;margin:auto;padding:32px 20px 64px;line-height:1.65}
+.privacy h1{font-size:34px;letter-spacing:-.03em;margin:24px 0 4px}
+.privacy h2{font-size:20px;margin:36px 0 8px}
+.privacy p,.privacy li{color:var(--ink);font-size:15px}
+.privacy .lead{font-size:17px}
+.privacy .updated{color:var(--dim);font-size:13px;margin:0 0 20px}
+.privacy a{color:var(--accent)}
+.privacy-brand{display:inline-flex;align-items:center;gap:10px;font-weight:750;color:inherit;text-decoration:none}
+.privacy-brand img{width:30px;height:30px}
+</style>
+</head>
+<body>
+<main class="privacy">
+<a class="privacy-brand" href="/"><img src="/aki/face.png" alt=""><span>AnkiQuest</span></a>
+<h1>Privacy</h1>
+<p class="updated">Datenschutzerklärung · last updated 5 October 2026</p>
+
+<p class="lead">AnkiQuest keeps what it needs to run the game: your account, the reviews your Anki uploads, and your settings. There are no ads, no analytics and no tracking, and nothing is sold. You can download all of it or delete your account at any time under Settings.</p>
+
+<h2>Who is responsible</h2>
+<p>{{operator}}.{{contact}}{{imprint}}</p>
+
+<h2>What is stored, and why</h2>
+<ul>
+<li><strong>Your account</strong>: username, display name, your password as an Argon2 hash (never the password itself), and a hashed token for each device you sign in on, with the device name and when it signed in. This lets you sign in.</li>
+<li><strong>Your study data</strong>: for each review, when it happened, the card's number, its interval, how long you took and the kind of review. Never the content of your cards. Also your Anki day (time zone offset and when your day starts). This is what XP, streaks, quests and leaderboards are calculated from.</li>
+<li><strong>Decks</strong>: the names of your decks and when you finish them, but only for decks you choose to share.</li>
+<li><strong>What you share with others</strong>: friends, friend requests, groups and their invite links, goals, nudges, replies, and deck copies you send, which contain the deck itself.</li>
+<li><strong>Your settings</strong>: language, companion, reminders, streak protection and notification preferences, and your profile picture if you upload one.</li>
+</ul>
+<p>We process this to provide the service you signed up for (Art. 6(1)(b) GDPR).</p>
+
+<h2>Who can see it</h2>
+<p>Your progress and profile are visible to your friends and the people in your groups. If you make your profile public in Settings, anyone can see it and you appear on the global leaderboard. Everything else, like your settings and your study history, only you can see.</p>
+
+<h2>The website and server logs</h2>
+<p>When you sign in on the website it sets one cookie that keeps you signed in. It is needed for the site to work, so we don't ask for consent, and it does nothing else. The site loads nothing from other servers: no fonts, no scripts, no analytics.</p>
+<p>The web server sees your IP address with each request. AnkiQuest keeps it briefly in memory to slow down people guessing passwords or creating accounts in bulk; that is our legitimate interest (Art. 6(1)(f) GDPR). Errors that concern your account are logged with your username and kept {{logs}}.</p>
+
+<h2>Notifications</h2>
+<p>{{push}}</p>
+
+<h2>Who else handles your data</h2>
+<p>{{hosting}} Nobody else receives your data.</p>
+
+<h2>How long it is kept</h2>
+<p>Everything is kept while you have an account. When you delete it, your account and everything listed above is removed at once, including messages you sent to others and goals you created. Groups you own pass to their longest-standing member. Copies in server backups disappear as the backups rotate.</p>
+
+<h2>Your rights</h2>
+<p>You can get a copy of your data, have it corrected or deleted, restrict or object to how we use it, and take it elsewhere (Art. 15–21 GDPR). Settings has buttons to download everything and to delete your account; for anything else, write to the contact above. You can also complain to a data protection authority, for example the one where you live.</p>
+</main>
+</body>
+</html>
