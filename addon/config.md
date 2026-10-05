@@ -1,5 +1,7 @@
 Everything here is also under **Tools → ankiquest settings…**, which is easier to use.
 
+New here? **Tools → ankiquest: sign in or create account…** (or the link under the deck list) signs in with a username and password, or creates an account, and fills in the three settings below. The password is not stored; the add-on keeps only a token for this computer.
+
 - `url`: the ankiquest server, e.g. `https://anki.example.com`
 - `user`: your player name
 - `token`: your upload token

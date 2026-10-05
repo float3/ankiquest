@@ -1,3 +1,4 @@
+import platform
 import tempfile
 import time
 from pathlib import Path
@@ -14,10 +15,13 @@ from .client import (
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
+    AccountError,
     Client,
     offset_west_min,
     reconcile,
     rows_to_reviews,
+    sign_in,
+    sign_up,
 )
 from .deck_completion import deck_snapshots, study_day
 
@@ -217,6 +221,7 @@ def redraw():
 def on_deck_browser(deck_browser, content):
     api = client()
     if not api.configured:
+        content.stats += board.welcome(tr)
         return
     if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
@@ -227,6 +232,9 @@ def on_deck_browser(deck_browser, content):
 
 
 def on_js_message(handled, message, context):
+    if message == "ankiquest:account":
+        open_account()
+        return (True, None)
     if message.startswith("ankiquest:web:"):
         page = message.split(":", 2)[2]
         if page in board.PAGES:
@@ -251,8 +259,61 @@ def open_inbox():
     redraw()
 
 
+def account_error(error):
+    if isinstance(error, AccountError):
+        if error.status == 401:
+            return tr("Username or password not recognized.")
+        if error.status == 403:
+            return tr("This server does not take new accounts. Ask whoever runs it for a token.")
+        if error.status == 409:
+            return tr("That username is taken. Pick another one.")
+        if error.status == 429:
+            return tr("Too many attempts. Try again later.")
+        if error.status == 400 and error.message:
+            return error.message
+        return tr("The server could not sign you in (%s).") % (error.message or error.status)
+    return tr("Could not reach the server (%s).") % error
+
+
+def submit_account(values, finish):
+    device = "Anki desktop (%s)" % (platform.system() or "computer")
+
+    def work():
+        if values["new"]:
+            return sign_up(values["url"], values["user"], values["password"], values["display"], device)
+        return sign_in(values["url"], values["user"], values["password"], device)
+
+    def done(future):
+        try:
+            answer = future.result()
+        except Exception as e:
+            finish(None, account_error(e))
+            return
+        finish({"url": values["url"], "user": answer["user"], "token": answer["token"]}, None)
+
+    mw.taskman.run_in_background(work, done)
+
+
+def ask_account(url):
+    return ui.account_dialog(mw, url, submit_account, state["companion"])
+
+
+def open_account():
+    answer = ask_account(config().get("url", ""))
+    if not answer:
+        return
+    save_config(dict(config(), **answer))
+    state["profile"] = None
+    state["place"] = None
+    state["companion"], state["companion_account"] = "aki", None
+    refresh_shared_decks()
+    refresh(False, resync=True)
+    poll(quiet=True)
+    tooltip(tr("Signed in as %s.") % answer["user"])
+
+
 def open_settings():
-    values = ui.settings_dialog(mw, config(), test_connection, upload_everything, state["companion"])
+    values = ui.settings_dialog(mw, config(), test_connection, upload_everything, state["companion"], ask_account)
     if values is None:
         return
     if values.get("update_channel") != config().get("update_channel", "stable"):
@@ -467,6 +528,7 @@ def add_action(title, handler):
     mw.form.menuTools.addAction(action)
 
 
+add_action(tr("ankiquest: sign in or create account…"), open_account)
 add_action(tr("ankiquest settings…"), open_settings)
 add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)

@@ -22,6 +22,7 @@ from aqt.qt import (
 
 from aqt.qt import Qt
 
+from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
 
@@ -82,7 +83,84 @@ def _brand(dialog, layout, companion="aki"):
     layout.addWidget(_row(image, QLabel(tr("Your study companion."))))
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki"):
+def account_dialog(parent, url, on_submit, companion="aki"):
+    """Signs in or creates an account. `on_submit(values, finish)` talks to the server and calls
+    `finish(account, error)`; the dialog stays open with the error until it succeeds."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("ankiquest")
+    layout = QVBoxLayout(dialog)
+    _brand(dialog, layout, companion)
+
+    server = QLineEdit(url or DEFAULT_SERVER)
+    user = QLineEdit()
+    password = QLineEdit()
+    password.setEchoMode(_enum(QLineEdit, "EchoMode", "Password"))
+    display = QLineEdit()
+    display_label = QLabel(tr("Display name (optional)"))
+    for title, field in ((tr("Server"), server), (tr("Username"), user), (tr("Password"), password)):
+        layout.addWidget(QLabel(title))
+        layout.addWidget(field)
+    layout.addWidget(display_label)
+    layout.addWidget(display)
+    new = QCheckBox(tr("Create a new account"))
+    layout.addWidget(new)
+    hint = QLabel(tr("Usernames use lowercase letters, numbers, - and _. Passwords need at least 10 characters."))
+    hint.setWordWrap(True)
+    layout.addWidget(hint)
+    status = QLabel()
+    status.setWordWrap(True)
+    layout.addWidget(status)
+
+    row = QHBoxLayout()
+    row.addStretch(1)
+    cancel = QPushButton(tr("Cancel"))
+    cancel.clicked.connect(dialog.reject)
+    submit = QPushButton()
+    submit.setDefault(True)
+    row.addWidget(cancel)
+    row.addWidget(submit)
+    layout.addLayout(row)
+
+    def toggle():
+        creating = new.isChecked()
+        for widget in (display_label, display, hint):
+            widget.setVisible(creating)
+        submit.setText(tr("Create account") if creating else tr("Sign in"))
+
+    new.toggled.connect(toggle)
+    toggle()
+    result = {}
+
+    def finish(account, error):
+        submit.setEnabled(True)
+        if error:
+            status.setText(error)
+            return
+        result.update(account)
+        dialog.accept()
+
+    def go():
+        values = {
+            "url": server.text().strip().rstrip("/"),
+            "user": user.text().strip().lower(),
+            "password": password.text(),
+            "display": display.text().strip(),
+            "new": new.isChecked(),
+        }
+        if not values["url"] or not values["user"] or not values["password"]:
+            status.setText(tr("Fill in the server, username and password."))
+            return
+        submit.setEnabled(False)
+        status.setText(tr("Connecting…"))
+        on_submit(values, finish)
+
+    submit.clicked.connect(go)
+    if not dialog.exec():
+        return None
+    return result
+
+
+def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None):
     """Everything the phone keeps in its ankiquest preference screen."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("ankiquest")
@@ -90,7 +168,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki"):
     _brand(dialog, layout, companion)
 
     url = QLineEdit(config.get("url", ""))
-    url.setPlaceholderText("https://anki.example.com")
+    url.setPlaceholderText(DEFAULT_SERVER)
     user = QLineEdit(config.get("user", ""))
     token = QLineEdit(config.get("token", ""))
     token.setEchoMode(_enum(QLineEdit, "EchoMode", "Password"))
@@ -113,6 +191,19 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki"):
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
     layout.addWidget(_row(QLabel(tr("Update channel")), channel))
+
+    if on_account is not None:
+        account = QPushButton(tr("Sign in or create account…"))
+
+        def signed_in():
+            answer = on_account(url.text().strip())
+            if answer:
+                url.setText(answer["url"])
+                user.setText(answer["user"])
+                token.setText(answer["token"])
+
+        account.clicked.connect(signed_in)
+        layout.addWidget(account)
 
     test = QPushButton(tr("Test connection"))
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))

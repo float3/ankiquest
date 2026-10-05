@@ -44,6 +44,21 @@ SPANISH = {
     "ankiquest settings…": "Ajustes de ankiquest…", "ankiquest deck notifications…": "Avisos de mazos de ankiquest…",
     "ankiquest inbox…": "Bandeja de entrada de ankiquest…", "ankiquest on the web…": "ankiquest en la web…",
     "ankiquest: could not sign in to the website (%s)": "ankiquest: no se pudo iniciar sesión en la web (%s)",
+    "Display name (optional)": "Nombre visible (opcional)", "Username": "Nombre de usuario", "Password": "Contraseña",
+    "Create a new account": "Crear una cuenta nueva", "Create account": "Crear cuenta", "Sign in": "Iniciar sesión",
+    "Usernames use lowercase letters, numbers, - and _. Passwords need at least 10 characters.": "Los nombres de usuario usan minúsculas, números, - y _. Las contraseñas necesitan al menos 10 caracteres.",
+    "Fill in the server, username and password.": "Rellena el servidor, el nombre de usuario y la contraseña.",
+    "Connecting…": "Conectando…",
+    "Sign in or create account…": "Iniciar sesión o crear cuenta…",
+    "Sign in or create an account": "Inicia sesión o crea una cuenta",
+    "ankiquest: sign in or create account…": "ankiquest: iniciar sesión o crear cuenta…",
+    "Username or password not recognized.": "Nombre de usuario o contraseña no reconocidos.",
+    "This server does not take new accounts. Ask whoever runs it for a token.": "Este servidor no admite cuentas nuevas. Pide un token a quien lo administra.",
+    "That username is taken. Pick another one.": "Ese nombre de usuario ya existe. Elige otro.",
+    "Too many attempts. Try again later.": "Demasiados intentos. Vuelve a intentarlo más tarde.",
+    "The server could not sign you in (%s).": "El servidor no pudo iniciar tu sesión (%s).",
+    "Could not reach the server (%s).": "No se pudo conectar con el servidor (%s).",
+    "Signed in as %s.": "Sesión iniciada como %s.",
 }
 
 
