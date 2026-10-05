@@ -25,6 +25,15 @@ def link(page, text):
     )
 
 
+def welcome(translate=lambda value: value):
+    """Shown under the deck list until the add-on is connected to a server."""
+    return (
+        "<div id=ankiquest style='max-width:600px;margin:2em auto 0;font-size:13px;text-align:center'>"
+        "<b>ankiquest</b> <a href=# onclick=\"pycmd('ankiquest:account');return false\">%s</a></div>"
+        % escape(translate("Sign in or create an account"))
+    )
+
+
 def html(profile, place=None, unread=0, translate=lambda value: value, mascot=None):
     """A block for `deck_browser_will_render_content`, so it lands under the stats."""
     parts = []

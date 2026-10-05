@@ -1,7 +1,10 @@
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+
+DEFAULT_SERVER = "https://ankiquest.rationality-munich.com"
 
 MAX_PENDING = 5000
 UNDO_WINDOW_MS = 2 * 86_400_000
@@ -21,6 +24,45 @@ def rows_to_reviews(rows):
         {"id": r[0], "cid": r[1], "last_ivl": r[2], "time_ms": r[3], "kind": r[4]}
         for r in rows
     ]
+
+
+class AccountError(Exception):
+    """The server turned down a sign-in or sign-up. `status` says why; `message` is the server's own words."""
+
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def _account(base, path, body):
+    request = urllib.request.Request(
+        base.strip().rstrip("/") + path,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        try:
+            message = json.load(error).get("error") or ""
+        except (ValueError, AttributeError):
+            message = ""
+        raise AccountError(error.code, message) from None
+
+
+def sign_in(base, user, password, device):
+    """Trades an account's password for a token for this device. The password is not kept."""
+    return _account(base, "/api/accounts/tokens", {"user": user, "password": password, "device": device})
+
+
+def sign_up(base, user, password, display, device):
+    """Creates an account and returns its first device token."""
+    body = {"user": user, "password": password, "device": device}
+    if display:
+        body["display"] = display
+    return _account(base, "/api/accounts", body)
 
 
 class Client:
