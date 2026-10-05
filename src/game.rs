@@ -972,9 +972,6 @@ fn review_base_xp(r: &Review) -> f64 {
 }
 
 fn review_base_xp_with(r: &Review, weighting: ReviewWeighting) -> f64 {
-    if r.time_ms < 500 {
-        return 1.0;
-    }
     let base = match (r.kind, weighting) {
         (1, _) => 10.0,
         (0, ReviewWeighting::Diminishing) => 9.0,
@@ -2281,6 +2278,18 @@ mod tests {
             cid: 1,
             last_ivl: 30,
             time_ms: 4_000,
+            kind: 1,
+        };
+        assert_eq!(review_base_xp(&r), 15.0);
+    }
+
+    #[test]
+    fn quick_answers_earn_full_xp() {
+        let r = Review {
+            id: 0,
+            cid: 1,
+            last_ivl: 30,
+            time_ms: 200,
             kind: 1,
         };
         assert_eq!(review_base_xp(&r), 15.0);
