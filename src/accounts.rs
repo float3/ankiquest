@@ -40,6 +40,7 @@ const RESERVED: &[&str] = &[
     "static",
     "support",
     "system",
+    "tokens",
     "undefined",
 ];
 
@@ -104,6 +105,15 @@ impl Directory {
 
     pub fn users(&self) -> Vec<String> {
         self.accounts.read().unwrap().keys().cloned().collect()
+    }
+
+    /// Forgets an account and every device token it signed in with.
+    pub fn remove(&self, user: &str) {
+        self.accounts.write().unwrap().remove(user);
+        self.tokens
+            .write()
+            .unwrap()
+            .retain(|_, owner| owner != user);
     }
 
     pub fn token_owner(&self, token: &str) -> Option<String> {
@@ -231,11 +241,11 @@ impl App {
     }
 }
 
-fn reply(status: StatusCode, body: serde_json::Value) -> Response {
+pub(crate) fn reply(status: StatusCode, body: serde_json::Value) -> Response {
     (status, [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
 
-fn refuse(status: StatusCode, message: &str) -> Response {
+pub(crate) fn refuse(status: StatusCode, message: &str) -> Response {
     reply(status, serde_json::json!({"error": message}))
 }
 

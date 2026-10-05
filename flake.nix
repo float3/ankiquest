@@ -64,6 +64,7 @@
         log_retention_days = cfg.logRetentionDays;
         private_site = cfg.privateSite;
         registration = cfg.registration;
+        privacy = lib.filterAttrs (_: value: value != null) cfg.privacy;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
           if cfg.sitePasswordFile == null
@@ -119,6 +120,34 @@
           description = "Serve through nginx with ACME on this domain.";
         };
         registration = lib.mkEnableOption "self-service accounts: anyone can sign up with a username and password, and sign in from the website, the add-on and the app";
+        privacy = lib.mkOption {
+          description = "Who runs this server, shown on the /privacy notice.";
+          default = {};
+          type = lib.types.submodule {
+            options = {
+              operator = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "The person or organisation responsible for the data.";
+              };
+              contact = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Email address for privacy requests.";
+              };
+              hosting = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Who hosts the server, for example \"Hetzner Online GmbH, Gunzenhausen, Germany\".";
+              };
+              imprint = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "URL of the legal notice (Impressum).";
+              };
+            };
+          };
+        };
         privateSite = lib.mkOption {
           type = lib.types.bool;
           default = false;

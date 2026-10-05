@@ -482,33 +482,7 @@ async fn change(
                 Ok(())
             }
             Change::Leave { group } => {
-                let owner = owns(conn, group, &user)?;
-                conn.execute(
-                    "delete from group_members where group_id = ?1 and user = ?2",
-                    params![group, user],
-                )?;
-                let next: Option<String> = conn
-                    .query_row("select user from group_members where group_id = ?1 order by joined_at limit 1", [group], |r| r.get(0))
-                    .optional()?;
-                match next {
-                    None => {
-                        conn.execute("delete from groups where id = ?1", [group])?;
-                    }
-                    Some(next)
-                        if owner
-                            && !conn
-                                .prepare(
-                                    "select 1 from group_members where group_id = ?1 and owner = 1",
-                                )?
-                                .exists([group])? =>
-                    {
-                        conn.execute(
-                            "update group_members set owner = 1 where group_id = ?1 and user = ?2",
-                            params![group, next],
-                        )?;
-                    }
-                    Some(_) => {}
-                }
+                leave(conn, group, &user)?;
                 prune(&app, conn, &user)?;
                 Ok(())
             }
@@ -595,6 +569,40 @@ async fn change(
         Ok(Err((status, message))) => refuse(status, message),
         Err(error) => failed(error),
     }
+}
+
+/// Takes `user` out of a group. The longest-standing member inherits it, and an empty group is deleted.
+pub fn leave(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<()> {
+    let owner = owns(conn, group, user)?;
+    conn.execute(
+        "delete from group_members where group_id = ?1 and user = ?2",
+        params![group, user],
+    )?;
+    let next: Option<String> = conn
+        .query_row(
+            "select user from group_members where group_id = ?1 order by joined_at, user limit 1",
+            [group],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match next {
+        None => {
+            conn.execute("delete from groups where id = ?1", [group])?;
+        }
+        Some(next)
+            if owner
+                && !conn
+                    .prepare("select 1 from group_members where group_id = ?1 and owner = 1")?
+                    .exists([group])? =>
+        {
+            conn.execute(
+                "update group_members set owner = 1 where group_id = ?1 and user = ?2",
+                params![group, next],
+            )?;
+        }
+        Some(_) => {}
+    }
+    Ok(())
 }
 
 /// Stops deck notifications between people who no longer share a group or friendship.

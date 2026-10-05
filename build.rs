@@ -15,7 +15,7 @@ const ENTRIES: [&str; 6] = [
     "pages/community",
     "pages/login",
 ];
-const PAGES: [&str; 4] = ["index", "community", "login", "personal"];
+const PAGES: [&str; 5] = ["index", "community", "login", "personal", "privacy"];
 
 type Error = Box<dyn std::error::Error>;
 

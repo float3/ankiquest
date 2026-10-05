@@ -296,6 +296,7 @@ fn public_path(path: &str) -> bool {
                 | "/auth/logout"
                 | "/api/accounts"
                 | "/api/accounts/tokens"
+                | "/privacy"
         )
         || path.starts_with("/api/invites/")
 }
