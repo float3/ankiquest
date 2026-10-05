@@ -1,209 +1,31 @@
-# ankiquest
+# AnkiQuest
 
-XP, levels, streaks, daily quests, achievements and a leaderboard for Anki. Clients send review log rows (card id, timestamp, previous interval, time taken, review type), never card content. Deck names and daily counts are only sent by players who use deck completion notifications.
+XP, streaks, daily quests, friends and leaderboards for Anki. Only the timing of your reviews is sent, never the content of your cards.
 
-XP never depends on which answer button was pressed, so there is no incentive to grade dishonestly.
+## Use it
 
-`review_weighting` (Nix: `reviewWeighting`) chooses how reviews are weighted. The default, `"flat"`, pays every answer its full rate. `"diminishing"` makes each further answer of the same card on the same day worth half as much, so a card you keep failing cannot out-earn one you learn, and pays learning steps 9 XP instead of 6. XP is recalculated from review history, so changing it applies to past reviews too.
+1. Create an account on an AnkiQuest server, such as [ankiquest.rationality-munich.com](https://ankiquest.rationality-munich.com).
+2. Connect Anki:
+   - **Desktop:** download `ankiquest.ankiaddon` from the [latest release](https://github.com/float3/ankiquest/releases/latest), open it with Anki, then choose **Tools → ankiquest: sign in or create account…**
+   - **Android:** install `AnkiDroid-Quest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). It installs next to AnkiDroid; sync your collection through AnkiWeb as usual. Then open **Settings → ankiquest → Account & connection → Sign in or create account**.
+3. Study as usual. Add friends, or start a group and share its invite link, on the website's **Friends** page.
 
-## Administer
-
-`ankiquest [config.json] admin <command>` (on NixOS: `sudo ankiquest-admin <command>`) works on the state of a running server:
-
-- `settings` shows the settings in effect and where each comes from.
-- `set review_weighting diminishing` or `set log_retention_days 365` overrides a setting; `reset <setting>` returns to the configured value. The service applies changes within a minute, without a restart.
-- `logs [--since 30m|12h|7d|all] [--level info|error] [--user <player>] [--limit <n>]` prints the server log. Errors and setting changes are kept in the state database for `log_retention_days` (default 90; 0 keeps them forever), and still go to stderr for the journal.
-- `sql "<query>"` runs a read-only query against the state database.
-
-## Run
-
-Requires Rust 1.88 or later with the `wasm32-unknown-unknown` target, and esbuild (`npm ci` installs it; build.rs also finds it on `PATH` or in `ESBUILD`).
-
-```sh
-cargo run -- ankiquest.json
-```
-
-```json
-{
-  "addr": "127.0.0.1:8097",
-  "state_dir": "state",
-  "ntfy": "https://ntfy.sh",
-  "public_url": "https://anki.example.com",
-  "week_timezone": "Europe/Berlin",
-  "week_rollover_hour": 4,
-  "review_weighting": "flat",
-  "log_retention_days": 90,
-  "users": {
-    "hill": { "display": "hill", "ntfy_topic": "some-secret-topic", "token_file": "hill.token" }
-  }
-}
-```
-
-Open `/#<user>` for a profile, `/` for the leaderboard. `/hour`, `/day`, `/week`, `/month`, `/year` and `/all` show the same board for another period, as does `GET /api/leaderboard?period=<name>`; each standing carries `xp` for the requested period and `periods` with all of them. The hour is the last 60 minutes and counts review XP only, the day is each player's own Anki day, and month and year follow the calendar in `week_timezone`. The leaderboard week runs Monday to Sunday in `week_timezone` and turns over at `week_rollover_hour` for everyone at once; each Anki day counts towards the week it started in. Streaks, quests and "today" still follow each player's own Anki day.
-
-`/records` and `GET /api/records` name whoever has had the best hour, day, week, month and year here, with the XP and the review count of each and the two who came closest, along with the longest streak and the most days studied; a profile shows the same as personal bests. The record hour is any 60 minutes, not a clock hour.
-
-## Clients
-
-The Android app and the desktop add-on show what the server writes, so they word things the same way. Upload and preview responses carry `feedback` (`headlines` and an XP `status` line). Profiles carry `day_ends_at` and a `streak_warning` while the streak is at risk. `POST /api/rank/<user>` with `{"previous": [...]}` returns the weekly `order` and a `change` notice for the player. Behavior that has to stay in each client, such as the study day, the review row format and undo reconciliation, is pinned by `tests/fixtures/clients.json`, which the server, the add-on and the app all test against.
-
-## Community and reminders
-
-`/today` is the member's home page on the website. It puts daily quests, streak and XP progress, friend invitations, recent updates, and a direct study link together. It also shows when study data was last updated, so an old sync is visible. `/history` has a selectable study-day calendar with review counts, time, XP, new cards, streaks, and freeze days; `/settings` brings reminder, nudge, freeze, and deck-notification controls together. Sign in with your own player token to use these personal pages. A shared site password can unlock the public areas, but cannot view another member's study history or change their settings.
-
-The latest-session recap on Today groups uploaded reviews from the same Anki day when gaps between their timestamps are under five minutes. It is an estimate from review logs, not a separate live study timer. `GET /api/study/<user>?year=YYYY` supplies the selected year's study days, available years, last review/upload timestamps, and latest estimated session to that member only.
-
-Open `/community` for the winners calendar, weekly and monthly results, trophy cabinet, improvement and consistency awards, head-to-head history, comeback recognition, records, and year in review. Coverage starts with the earliest retained reviews and is labeled **available history**. Historical reconstructions and provisional results are identified; results become permanent after a 24-hour late-sync window. Existing review XP weights are unchanged.
-
-Choose daily, urgent streak, freeze-used, freeze-refill, milestone, weekly closing, and weekly recap reminders, or invite friends to private challenges and shared goals. In AnkiDroid, **Settings → ankiquest → Community reminders** opens this page using your saved account. In a standalone browser, connect with your own upload token. All seven reminder types are off by default, with personal quiet hours and a daily limit. Bearer tokens stay in page memory only. Supported servers issue a secure account session that works across pages until you disconnect; older servers keep the connection only for the current page. See [the community guide](docs/community.md) for details and API endpoints.
-
-The old server-wide `remind_hour` / NixOS `remindHour` setting is deprecated; enable personal reminders in `/community` instead. Existing device-only AnkiDroid and desktop add-on alarms are controlled separately in each client's settings.
-
-## Deck copies with friends
-
-In AnkiDroid's Today screen, choose **Share a deck**, select a deck and up to 20 friends, and send them an independent copy. The app exports cards, deck settings, and media as an Anki package without scheduling or review history. Each selected friend sees the offer on Today and chooses whether to import it into their own collection; importing does not keep later edits in sync. Offers expire after 30 days and recipients can remove them sooner. Packages are limited to 25 MiB, and each sender can have up to ten active offers. For larger decks, use Anki's usual export workflow.
-
-Only the sender can create an offer, and only a selected recipient can list, download, or dismiss it. The server stores package bytes in its existing state database. `GET /api/deck-copies/<user>` lists offers and eligible friends; `POST /api/deck-copies/<user>?deck=<name>&recipients=<JSON array>` accepts the raw `.apkg` body; `GET /api/deck-copies/<user>/<id>` downloads it; and `DELETE /api/deck-copies/<user>/<id>` removes a recipient's offer. These endpoints require that member's own token or session, with the usual CSRF protection for browser writes.
-
-## Profile pictures
-
-Profile pictures are optional. Open your profile and choose **Profile picture**, or connect your account in Community and use the same control there. Choose a JPEG or PNG, preview its center square, then save with your own AnkiQuest token. **Remove picture** restores your initials. Photos appear on the leaderboard and community views; compatible Android clients also display them in widgets and offer a picture picker in AnkiQuest settings.
-
-The website accepts files up to 20 MB and reduces them before upload. The server accepts PNG/JPEG bodies up to 2 MiB and 4096 × 4096 pixels, stores a normalized 256 × 256 PNG in its existing database, and strips original file metadata. Pictures have the same visibility as the community’s player profiles: private sites require a browser session or a member’s token to read pictures and their revision list. Uploading and removing always require the owner’s bearer token; the shared site password and browser session do not grant permission to change someone’s picture. Tokens are never stored by the picture editor.
-
-- `GET /api/avatars` returns an object mapping usernames with pictures to revision strings.
-- `GET /api/avatar/<user>?v=<revision>` returns the current PNG or 404, with an ETag for conditional requests. Like other site data, responses use `Cache-Control: no-store` so photos cannot remain readable through a browser cache after logout.
-- `POST /api/avatar/<user>` accepts the raw picture body with `Authorization: Bearer <token>` and returns `{"revision":"1"}`.
-- `DELETE /api/avatar/<user>` removes the picture and returns 204.
-
-Browser regression checks are in `tests/avatar_layout.test.ts`, `tests/avatar_index_layout.test.ts`, and `tests/avatar_photos.test.ts`. Run them with Node and Playwright installed; `PLAYWRIGHT_MODULE` and `PLAYWRIGHT_CHANNEL` optionally select an existing installation/browser. The tests use synthetic users and mocked requests.
-
-## Private website access
-
-The leaderboard, profiles, records, and Community share the same navigation, colors, cards, and controls, including light and dark themes. Enable private access to put those pages and their data behind a sign-in screen:
-
-```json
-{
-  "private_site": true,
-  "site_password_file": "/run/secrets/ankiquest-site-password",
-  "public_url": "https://anki.example.com"
-}
-```
-
-Add these fields to your existing configuration. Store the shared member password in the named file, readable only by the service and server administrator; do not commit the password or put it in the Nix store. Existing nonempty player upload tokens also unlock the website. The shared password is optional when at least one player has a token. Private mode refuses to start without a usable password or token. Existing installations remain public until `private_site` is enabled.
-
-For NixOS, add these options to the existing service definition:
-
-```nix
-services.ankiquest = {
-  privateSite = true;
-  sitePasswordFile = "/etc/nixos/secrets/ankiquest-site-password";
-};
-```
-
-The module loads the password through a systemd credential. Use HTTPS and set `public_url` to the actual HTTPS address (the NixOS `domain` option does this). Browser sign-in creates an opaque, HttpOnly, SameSite cookie that lasts seven days. Select **Lock site** to end the session. Restarting the service clears browser sessions; restart after changing the password or token files to load the new credentials. Passwords and tokens are never placed in website URLs or browser storage.
-
-The shared password and browser session grant access to community pages and read data. Managing profile pictures, reminders, challenges, deck notifications, freezes, or an inbox still requires that player's own upload token; the shared password cannot impersonate members.
-
-Update the Android app before enabling private mode: authenticated reads and automatic embedded-page sign-in are required. The desktop add-on already sends its configured token on API requests; when opening the website in an external browser, sign in there once. Configure each app with its player's token, not the shared website password. Tokenless clients cannot read a private server. See [the access guide](docs/private-site.md) for API behavior and rollout checks.
-
-## Getting reviews in
-
-Both clients upload new review rows after each answer and show XP feedback while reviewing. Sync itself can stay on AnkiWeb.
-
-- AnkiDroid: install the [fork](https://github.com/float3/Anki-Android/tree/ankiquest) and fill in Settings → ankiquest.
-- Desktop: zip the contents of `addon/` into `ankiquest.ankiaddon`, open it with Anki, then fill in **Tools → ankiquest settings…**. The leaderboard appears under the deck list, with the period links it shares with the website.
-
-`POST /api/reviews/<user>` with `Authorization: Bearer <token>` and
-
-```json
-{
-  "reviews": [{ "id": 0, "cid": 0, "last_ivl": 0, "time_ms": 0, "kind": 0 }],
-  "clock": { "offset_west_min": -120, "rollover_hour": 4 },
-  "silent": false
-}
-```
-
-stores the rows and returns the profile. `POST /api/preview/<user>` takes the same `reviews` without storing anything.
-
-Alternatively set `sync_base` to the `SYNC_BASE` of a self-hosted Anki sync server: every folder in it with a `collection.anki2` becomes a player, and collections are copied before reading and never written.
-
-## Streak freezes
-
-Streak freezes are on by default and start at zero. Open **Settings → ankiquest → Streak protection** in AnkiDroid, or choose **Manage streak freezes** on your dashboard profile, to turn protection off or back on. The updated AnkiDroid dashboard reuses your saved token for your own player; its toolbar's **Settings** action opens all AnkiQuest preferences. In a standalone browser, connect once to use streak, deck, and Community settings. Supported servers reuse your account session across pages; older servers reuse the token only within the current page. Complete all three daily quests while enabled to earn one freeze per Anki day, up to three stored. This replaces the automatic freeze awarded every seven study days. On an existing server, previously protected days and their streak/XP history are preserved; unused automatic freezes are cleared on the upgrade's Anki day. Re-enabling freezes does not award any for quests completed while protection was off, including earlier today; completing extra reviews or toggling the setting cannot claim that day's reward again. Completing the quests with a full inventory does not bank a fourth freeze for later.
-
-When upgrading from the opt-in default, protection turns on for players without a saved choice. Recorded opt-outs remain off, and saved freezes and past protection are preserved. The server saves the rollout time once; earlier quest completions are not retroactively rewarded, and restarting does not move that boundary.
-
-When an Anki day ends with no reviews, one available freeze automatically protects an existing streak. A protected day preserves the streak count without adding a study day. Consecutive missed days each need one freeze; once there is none available, the next missed day resets the streak. Turning freezes off pauses earning and spending, keeps stored freezes, and leaves previously protected days intact. Enabling them again cannot repair days missed while they were off. Day boundaries follow the player's Anki timezone and rollover, not midnight on the server.
-
-`GET /api/streak-freezes/<user>` and `POST` with `{"enabled":true}` or `{"enabled":false}` require that player's bearer token and return `{"enabled":true,"freezes":0,"capacity":3}`. The server calculates the balance from reviews and the saved preference timeline; clients cannot set it. The public profile includes `freezes_enabled`, `stored_freezes`, and `freeze_earned_today`. Its existing `freezes` field is the available balance (zero while disabled), so older clients do not mistake paused stock for active protection. Review previews can show a projected reward but do not save it. As with XP and quests, importing or deleting review history recalculates the result.
-
-## Deck completion notifications
-
-Notifications are off by default for every deck. To set them up, tick the decks you want to share and the people to notify: in AnkiDroid under **Settings → ankiquest → Deck completion notifications**, on desktop under **Tools → ankiquest deck notifications…**, or on the dashboard through **Manage deck notifications** with your upload token. Ticking a deck ticks its subdecks.
-
-After you review at least one card in a deck and finish its scheduled work for the day, selected people receive a message such as “cerro has finished their Spanish studies for today.” A parent deck includes its subdecks. Daily limits are respected, and learning cards due later that day still count as unfinished work. Each deck is announced at most once per Anki day, using your Anki day rollover, even across retries or a server restart. Turning sharing on after finishing a deck does not send a retrospective announcement.
-
-When a deck and its subdeck complete together with the same review total, each recipient hears only about the most specific deck they follow. Parent notifications remain when they cover additional reviews or different recipients. Suppressed parent completions are still recorded for the day, so later uploads cannot announce them again.
-
-Recipients receive announcements through the updated AnkiDroid client's background notification checks (roughly every 15 minutes, subject to Android's background limits), on desktop through the add-on's own check every five minutes, and through their configured ntfy topic when available (the server checks every 20 seconds). Each announcement can be answered once, with a cheer or your own words: from the Android notification itself, or from **Tools → ankiquest inbox…** on desktop. `POST /api/reply/<user>` with `{"notification": 1, "message": "Good job!"}` delivers the answer, which can be answered in turn. The upload response lists what it just announced, so the client that finished a deck can say who was told. Deck names and recipient preferences are private to the authenticated player; only selected recipients receive the completion message. The dashboard reuses the current server account session, or keeps a token only in page memory on older servers, shared between settings dialogs for that player. It never stores the token in URLs, local storage or session storage. AnkiDroid supplies its saved token only to its configured dashboard; browsing another player does not reuse that credential.
-
-To control announcements you receive, open **Notifications I receive** on the leaderboard or your dashboard profile. Your signed-in account is reused; otherwise connect with your player name and AnkiQuest token. Select a person under **Unsubscribe from specific people** and save to remove yourself from all of their deck-sharing lists. They cannot select you again, including through an older client or an already-open settings window. Only you can subscribe again by clearing their name and saving. Previous deck selections are restored unless the sender has since edited or deleted them; subscribing never adds you to other private decks. These controls work on the website and the Android dashboard and apply to desktop, Android, and ntfy delivery without a native app update.
-
-Receiving stays enabled by default. Unsubscribing cancels that sender's pending completion pushes, including retries, and removes matching completion alerts from the server inbox and Activity. Subscribing again does not replay old alerts; a deck already finished when reporting resumes is treated as a baseline. Turn off **Receive deck completion notifications** to pause every sender without changing your subscriptions. Sender subscriptions remain editable while all alerts are off. Previous per-person mutes are preselected in the new editor; saving converts those selections into unsubscriptions. Already delivered device notifications cannot be recalled. Streak reminders, nudges, messages, replies, and your own outgoing sharing remain unaffected.
-
-Players can opt into nudges through **Manage deck notifications** on the dashboard. When a place on the weekly board, their best day ever or the next level is within 150 XP, they hear about it once a day each, in reviews as well as XP. Nudges only arrive between 9:00 and 22:00 of a player's own day, and only after they have already reviewed something, so they never tell anyone to start studying.
-
-Messages can also be written by hand on the server: `sudo ankiquest-message --from cerro aldanita "you are doing great, keep going"`, or `ankiquest <config> message <player> <text>` without the NixOS module. They arrive like any other notification, and with `--from` the recipient can answer them.
-
-An ntfy push is marked delivered only after a successful HTTP response. Urgent streak warnings and existing notification types request high priority; other community reminders use normal priority, subject to the phone's notification settings. Failed pushes retry after 20 seconds, backing off to at most 15 minutes; missing ntfy configuration leaves inbox messages pending. The queue and inbox retain messages for seven days. Retries take turns between recipients and limit network work to 20 seconds per server check. Unlocks retain their existing ntfy-only delivery. Community reminders are available through both the inbox and ntfy; their relevance and quiet hours are rechecked before delivery. Upgrading retires pending legacy streak warnings. A server restart or a lost HTTP response can occasionally cause a duplicate push, but retries keep the same inbox notification.
-
-The server and the client used to study must both be updated. Clients only report progress for decks you share, so players who never enable a deck send no deck data. Sending the deck list again replaces the stored one, which removes deleted decks.
-
-AnkiQuest supports English and Spanish. Updated Android and desktop clients pass the language selected in Anki, including when it differs from the phone's language. Standalone browsers use their preferred language. Other languages currently fall back to English. The catalogs are in `static/translations-*.json` (Spanish: `static/translations-es.json`); Android strings are in `values-es/ankiquest*.xml`. Names, deck names, goal titles and written messages are kept as authored.
-
-Authenticated profile, upload and inbox requests remember the owner's `Accept-Language` for later server pushes. Public profile views do not change it. `GET` and `POST /api/language/<user>` also require the owner's bearer token or personal session; cookie writes require CSRF protection. A POST accepts `{"language":"es-ES"}`. Stored notification text remains unchanged so each recipient can receive their own translation.
-
-Clients may include a `decks` array in the review upload. Each entry has `id` (a string), `name`, `remaining`, `reviewed_today`, and `day` (the local Anki day number, days since the Unix epoch after applying timezone and rollover). Omit this field when a reliable snapshot is unavailable. Initial silent uploads populate the deck list without announcing completions. Set `"catalog": true` when `decks` is the full deck list; decks missing from it are removed.
-
-`GET /api/decks/<user>` with the user's bearer token returns private deck preferences and available recipients. `POST` to the same endpoint accepts `{"decks":[{"id":"123","enabled":true,"recipients":["hill"]}]}`. `GET /api/notifications/<user>` with the recipient's bearer token returns their recent completion announcements, with `id`, `title`, `body`, `day`, and `created_at` (Unix seconds). These endpoints never expose another player's deck settings or notification inbox without that player's token.
-
-`GET /api/deck-subscriptions/<user>` requires the recipient's token or personal member session and returns `{"enabled":true,"muted_senders":[],"unsubscribed_senders":[],"sharing_senders":["hill"],"senders":[{"user":"hill","display":"Hill"}]}`. `sharing_senders` lists owners of enabled decks that currently select this recipient, even if the recipient has paused all alerts. The editor shows those senders plus saved unsubscriptions and legacy mutes; `senders` supplies identity labels and validation choices. `POST` accepts `{"enabled":true,"unsubscribed_senders":["hill"]}` and returns the updated settings. At most 100 distinct sender IDs can be selected. IDs must be in the available senders; unknown fields, duplicates, invalid names, and unsubscribing from yourself are rejected. The response exposes identities, never another person's deck names. Personal-session writes require the site's CSRF header. Saving subscriptions also clears legacy mutes; the website first includes those mutes in the unsubscribe selection.
-
-The older `GET`/`POST /api/notification-preferences/<user>` API remains compatible with `{"enabled":false,"muted_senders":["hill"]}`. It can still change alert filters, but cannot undo an unsubscribe. Older outgoing settings cannot restore a recipient who has unsubscribed either.
-
-## NixOS
-
-```nix
-inputs.ankiquest.url = "github:float3/ankiquest";
-
-imports = [inputs.ankiquest.nixosModules.default];
-
-services.ankiquest = {
-  enable = true;
-  domain = "anki.example.com";
-  weekTimezone = "Europe/Berlin";
-  ntfy = "https://ntfy.sh";
-  users.hill = {
-    tokenFile = "/etc/nixos/secrets/ankiquest-hill";
-    ntfyTopic = "some-secret-topic";
-  };
-};
-```
-
-The module runs the server in a tight sandbox. systemd holds the port and
-passes it in, and the service may not connect to loopback or private
-addresses, only out to the internet for ntfy. So `ntfy` must be a public
-server. Outside systemd, `addr` is bound as usual.
-
-## Development
-
-The pages' scripts are TypeScript in `web/`; build.rs bundles them with esbuild and the server embeds the result, with `web/pages/*.ts` inlined where a page has `<script data-entry="pages/…"></script>`. Translation lives in `crates/i18n`, which the server links directly and the pages load as `/i18n.wasm` (built from `crates/i18n-wasm`), so both look up the same catalogs the same way.
+## Run your own server
 
 ```sh
 rustup target add wasm32-unknown-unknown
 npm ci
-npm run typecheck
-cargo test --workspace
-npm run test:web
+cargo run -- ankiquest.json
 ```
+
+```json
+{ "addr": "127.0.0.1:8097", "state_dir": "state", "registration": true }
+```
+
+On NixOS, import `inputs.ankiquest.nixosModules.default` and set `services.ankiquest = { enable = true; domain = "anki.example.com"; registration = true; };`.
+
+Configuration, administration, the API and development: [docs/server.md](docs/server.md).
+
+## License
+
+AGPL-3.0-only.
