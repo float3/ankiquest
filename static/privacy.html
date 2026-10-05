@@ -46,7 +46,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-s
 
 <h2>The website and server logs</h2>
 <p>When you sign in on the website it sets one cookie that keeps you signed in. It is needed for the site to work, so we don't ask for consent, and it does nothing else. The site loads nothing from other servers: no fonts, no scripts, no analytics.</p>
-<p>The web server sees your IP address with each request. AnkiQuest keeps it briefly in memory to slow down people guessing passwords or creating accounts in bulk; that is our legitimate interest (Art. 6(1)(f) GDPR). Errors that concern your account are logged with your username and kept {{logs}}.</p>
+<p>The web server sees your IP address with each request. Its access log records the address, the time, the page requested and your browser's user agent, and is deleted after 7 days. AnkiQuest itself keeps the address briefly in memory to slow down people guessing passwords or creating accounts in bulk. Both serve to keep the service running and to deal with abuse, which is our legitimate interest (Art. 6(1)(f) GDPR). Errors that concern your account are logged with your username and kept {{logs}}.</p>
 
 <h2>Notifications</h2>
 <p>{{push}}</p>
