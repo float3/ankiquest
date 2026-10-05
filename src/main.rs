@@ -22,6 +22,7 @@ mod friend_nudges;
 mod game;
 mod i18n;
 mod reminders;
+mod social;
 mod store;
 mod subscriptions;
 mod weekly_challenges;
@@ -191,6 +192,36 @@ impl App {
         users.iter().filter_map(|u| self.profile(u)).collect()
     }
 
+    fn profiles_among(&self, users: &BTreeSet<String>) -> Vec<Profile> {
+        let players: Vec<String> = self
+            .players
+            .read()
+            .unwrap()
+            .keys()
+            .filter(|user| users.contains(*user))
+            .cloned()
+            .collect();
+        players.iter().filter_map(|u| self.profile(u)).collect()
+    }
+
+    /// Players `user` can send things to: members of their circle other than themselves.
+    fn reachable(&self, store: &Store, user: &str) -> rusqlite::Result<BTreeSet<String>> {
+        let circle = self.circle(&store.conn, user)?;
+        Ok(self
+            .members()
+            .into_iter()
+            .filter(|other| other != user && circle.contains(other))
+            .collect())
+    }
+
+    /// The monthly competition still covers the original community only.
+    fn legacy_participants(&self) -> Vec<competition::Participant> {
+        self.participants()
+            .into_iter()
+            .filter(|participant| self.legacy(&participant.user))
+            .collect()
+    }
+
     fn participants(&self) -> Vec<competition::Participant> {
         let players = self.players.read().unwrap();
         let users: BTreeSet<_> = self
@@ -240,21 +271,40 @@ struct Standing {
     today_reviews: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct BoardQuery {
     period: Option<String>,
+    scope: Option<String>,
+}
+
+/// The players a board shows this viewer, or why it cannot.
+fn board_users(
+    app: &App,
+    headers: &HeaderMap,
+    scope: Option<&str>,
+) -> Result<BTreeSet<String>, StatusCode> {
+    let scope = social::Scope::parse(scope).ok_or(StatusCode::BAD_REQUEST)?;
+    let viewer = access::viewer(app, headers);
+    app.board(&app.store.lock().unwrap().conn, &viewer, scope)
+        .map_err(store_error)?
+        .ok_or(StatusCode::FORBIDDEN)
 }
 
 async fn leaderboard(
     State(app): State<Arc<App>>,
     Query(query): Query<BoardQuery>,
-) -> Json<Vec<Standing>> {
-    let period = query
-        .period
+    headers: HeaderMap,
+) -> Result<Json<Vec<Standing>>, StatusCode> {
+    let users = board_users(&app, &headers, query.scope.as_deref())?;
+    Ok(Json(standings(&app, &users, query.period)))
+}
+
+fn standings(app: &App, users: &BTreeSet<String>, period: Option<String>) -> Vec<Standing> {
+    let period = period
         .filter(|name| Periods::NAMES.contains(&name.as_str()))
         .unwrap_or_else(|| "week".into());
     let mut standings: Vec<Standing> = app
-        .profiles()
+        .profiles_among(users)
         .into_iter()
         .map(|p| Standing {
             user: p.user,
@@ -272,7 +322,7 @@ async fn leaderboard(
         })
         .collect();
     standings.sort_by_key(|s| std::cmp::Reverse((s.xp, s.xp_total)));
-    Json(standings)
+    standings
 }
 
 async fn profile(
@@ -290,6 +340,13 @@ async fn profile(
         }
     }
     .map_err(store_error)?;
+    let viewer = access::viewer(&app, &headers);
+    if !app
+        .visible(&app.store.lock().unwrap().conn, &viewer, &user)
+        .map_err(store_error)?
+    {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
     i18n::profile(&mut profile, &language);
     Ok(Json(profile))
@@ -536,10 +593,16 @@ async fn rank(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
     Json(query): Json<RankQuery>,
-) -> Json<RankResponse> {
+) -> Result<Json<RankResponse>, StatusCode> {
     let language =
         i18n::selected(&headers, &app.store.lock().unwrap(), &user).unwrap_or_else(|_| "en".into());
-    let Json(board) = leaderboard(State(app), Query(BoardQuery { period: None })).await;
+    let users = if authorized(&app, &user, &headers) {
+        app.circle(&app.store.lock().unwrap().conn, &user)
+            .map_err(store_error)?
+    } else {
+        board_users(&app, &headers, None)?
+    };
+    let board = standings(&app, &users, None);
     let places: Vec<feedback::Place> = board
         .iter()
         .map(|standing| feedback::Place {
@@ -552,10 +615,10 @@ async fn rank(
     if let Some(change) = &mut change {
         i18n::notice(change, &language);
     }
-    Json(RankResponse {
+    Ok(Json(RankResponse {
         order: board.iter().map(|standing| standing.user.clone()).collect(),
         change,
-    })
+    }))
 }
 
 #[derive(Deserialize)]
@@ -658,8 +721,10 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings
         .as_deref()
         .is_some_and(|base| !base.trim().is_empty());
     let unsubscribed = store.unsubscribed_recipients(user)?;
+    let circle = app.circle(&store.conn, user)?;
     users.retain(|candidate| {
         candidate != user
+            && circle.contains(candidate)
             && !unsubscribed.contains(candidate)
             && (app.accounts.contains(candidate)
                 || app.config.users.get(candidate).is_some_and(|config| {
@@ -725,12 +790,15 @@ async fn deck_copy_inbox(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let offers = deck_copies::inbox(&app.store.lock().unwrap().conn, &user, now_ms())
-        .map_err(store_error)?;
-    let mut friends: Vec<_> = app
-        .members()
+    let (offers, reachable) = {
+        let store = app.store.lock().unwrap();
+        (
+            deck_copies::inbox(&store.conn, &user, now_ms()).map_err(store_error)?,
+            app.reachable(&store, &user).map_err(store_error)?,
+        )
+    };
+    let mut friends: Vec<_> = reachable
         .into_iter()
-        .filter(|id| id != &user)
         .map(|id| decks::Recipient {
             display: app.display(&id),
             user: id,
@@ -759,14 +827,11 @@ async fn offer_deck_copy(
     if package.len() > deck_copies::MAX_BYTES {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
+    let reachable = app
+        .reachable(&app.store.lock().unwrap(), &user)
+        .map_err(store_error)?;
     if !deck_copies::valid_request(&user, &request.deck, &recipients, &package)
-        || recipients.iter().any(|id| {
-            !app.config
-                .users
-                .get(id)
-                .and_then(|config| config.token.as_deref())
-                .is_some_and(|token| !token.is_empty())
-        })
+        || recipients.iter().any(|id| !reachable.contains(id))
     {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -857,7 +922,7 @@ async fn set_decks(
         .map_err(store_error)
 }
 
-fn store_error(error: Error) -> StatusCode {
+fn store_error(error: impl std::fmt::Display) -> StatusCode {
     log_error!("community storage failed: {error}");
     StatusCode::INTERNAL_SERVER_ERROR
 }
@@ -876,8 +941,11 @@ fn incoming_preferences(
     store: &Store,
     user: &str,
 ) -> Result<IncomingPreferences, Error> {
-    let mut users: BTreeSet<String> = app.config.users.keys().cloned().collect();
-    users.extend(app.accounts.users());
+    let mut users: BTreeSet<String> = app
+        .circle(&store.conn, user)?
+        .into_iter()
+        .filter(|other| app.is_user(other))
+        .collect();
     users.extend(store.known_incoming_senders(user)?);
     let unsubscribed_senders = store.unsubscribed_senders(user)?;
     users.extend(unsubscribed_senders.iter().cloned());
@@ -1178,8 +1246,12 @@ fn podium(
 /// The best rolling hour, 24 hours, 7, 30 and 365 days anyone here has ever had, plus the
 /// longest streak and the most days studied. Each names whoever came closest,
 /// so a near miss is visible rather than hidden.
-async fn records(State(app): State<Arc<App>>) -> Json<Vec<RecordBoard>> {
-    let profiles = app.profiles();
+async fn records(
+    State(app): State<Arc<App>>,
+    Query(query): Query<BoardQuery>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<RecordBoard>>, StatusCode> {
+    let profiles = app.profiles_among(&board_users(&app, &headers, query.scope.as_deref())?);
     let mut board: Vec<RecordBoard> = Records::NAMES
         .iter()
         .map(|window| {
@@ -1205,7 +1277,7 @@ async fn records(State(app): State<Arc<App>>) -> Json<Vec<RecordBoard>> {
             player.lifetime.first_day_at,
         )
     }));
-    Json(board)
+    Ok(Json(board))
 }
 
 #[derive(Deserialize)]
@@ -1347,7 +1419,7 @@ async fn community_dashboard(
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
-    let participants = app.participants();
+    let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now).map_err(store_error)?;
     let language = i18n::selected(&headers, &store, "").map_err(store_error)?;
     let mut dashboard = competition::dashboard(&store, &participants, &app.week, now, year, month)
@@ -1364,7 +1436,7 @@ async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>,
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
-    let participants = app.participants();
+    let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now_ms()).map_err(store_error)?;
     competition::winner_history(&store, &participants)
         .map(Json)
@@ -1408,13 +1480,20 @@ struct ChallengeList {
     weekly_suggestion: Option<weekly_challenges::Suggestion>,
 }
 
-fn challenge_roster(app: &App) -> std::collections::BTreeMap<String, String> {
-    app.config
-        .users
-        .iter()
-        .filter(|(_, config)| config.token.as_deref().is_some_and(|t| !t.is_empty()))
-        .map(|(name, _)| (name.clone(), app.display(name)))
-        .collect()
+/// The player and everyone they can challenge, with display names.
+fn challenge_roster(
+    app: &App,
+    store: &Store,
+    user: &str,
+) -> rusqlite::Result<std::collections::BTreeMap<String, String>> {
+    let mut roster = app.reachable(store, user)?;
+    if app.members().contains(user) {
+        roster.insert(user.to_string());
+    }
+    Ok(roster
+        .into_iter()
+        .map(|name| (name.clone(), app.display(&name)))
+        .collect())
 }
 
 type ChallengeFailure = (StatusCode, Json<serde_json::Value>);
@@ -1442,19 +1521,11 @@ fn challenge_list(
     players: &[competition::Participant],
 ) -> Result<ChallengeList, challenges::Error> {
     let mut recipients: Vec<_> = app
-        .config
-        .users
-        .iter()
-        .filter(|(name, config)| {
-            name.as_str() != user
-                && config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-        })
-        .map(|(name, _)| decks::Recipient {
-            user: name.clone(),
-            display: app.display(name),
+        .reachable(store, user)?
+        .into_iter()
+        .map(|name| decks::Recipient {
+            display: app.display(&name),
+            user: name,
         })
         .collect();
     recipients.sort_by(|a, b| a.display.cmp(&b.display).then_with(|| a.user.cmp(&b.user)));
@@ -1464,7 +1535,7 @@ fn challenge_list(
         weekly_suggestion: weekly_challenges::suggestion(
             store,
             user,
-            &challenge_roster(app),
+            &challenge_roster(app, store, user)?,
             &app.week,
             now_ms(),
         )?,
@@ -1507,14 +1578,10 @@ async fn create_challenge(
             Json(serde_json::json!({"error":"Check your player and token."})),
         ));
     }
-    let eligible = app
-        .config
-        .users
-        .iter()
-        .filter(|(_, config)| config.token.as_deref().is_some_and(|t| !t.is_empty()))
-        .map(|(name, _)| name.clone())
-        .collect();
     let mut store = app.store.lock().unwrap();
+    let eligible = app
+        .reachable(&store, &user)
+        .map_err(|error| challenge_error(error.into()))?;
     let participants = app.participants();
     challenges::create(&mut store, &user, &request, &eligible, now_ms())
         .map_err(challenge_error)?;
@@ -1563,15 +1630,10 @@ async fn act_on_weekly_challenge(
     }
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
-    weekly_challenges::act(
-        &mut store,
-        &user,
-        &action,
-        &challenge_roster(&app),
-        &app.week,
-        now_ms(),
-    )
-    .map_err(challenge_error)?;
+    let roster =
+        challenge_roster(&app, &store, &user).map_err(|error| challenge_error(error.into()))?;
+    weekly_challenges::act(&mut store, &user, &action, &roster, &app.week, now_ms())
+        .map_err(challenge_error)?;
     challenge_list(&app, &store, &user, &participants)
         .map(Json)
         .map_err(challenge_error)
@@ -1738,7 +1800,7 @@ fn tick(app: &App) -> Result<(), Error> {
     let participants = app.participants();
     let now = now_ms();
     if import_complete {
-        refresh_community(app, &mut store, &participants, now)?;
+        refresh_community(app, &mut store, &app.legacy_participants(), now)?;
     }
     challenges::refresh(&mut store, &participants, now)?;
     let users: Vec<String> = app.players.read().unwrap().keys().cloned().collect();
@@ -1752,9 +1814,10 @@ fn tick(app: &App) -> Result<(), Error> {
         store.queue_events(&user, &profile.events, profile.day, now_ms(), push_enabled)?;
         if store.nudges_enabled(&user)? {
             let gap = |other: &Profile| (other.display.clone(), other.week_xp);
+            let circle = app.circle(&store.conn, &user)?;
             let ahead = ranking
                 .iter()
-                .filter(|other| other.week_xp > profile.week_xp)
+                .filter(|other| other.week_xp > profile.week_xp && circle.contains(&other.user))
                 .min_by_key(|other| other.week_xp)
                 .map(gap);
             for nudge in game::nudges(&profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
@@ -2163,6 +2226,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(aki::routes())
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
+        .merge(social::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))
@@ -2570,7 +2634,9 @@ mod tests {
             },
         );
         let expected = app.profile("cerro").unwrap();
-        let Json(board) = leaderboard(State(app), Query(BoardQuery { period: None })).await;
+        let Json(board) = leaderboard(State(app), Query(BoardQuery::default()), HeaderMap::new())
+            .await
+            .unwrap();
         let value = serde_json::to_value(&board).unwrap();
         assert_eq!(value[0]["streak_state"], "pending");
         assert_eq!(value[0]["today_reviews"], 0);
@@ -4899,7 +4965,14 @@ mod tests {
             .await
             .unwrap();
         }
-        let board = records(State(app.clone())).await.0;
+        let board = records(
+            State(app.clone()),
+            Query(BoardQuery::default()),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap()
+        .0;
         assert_eq!(
             board.iter().map(|r| r.window.as_str()).collect::<Vec<_>>(),
             [Records::NAMES.as_slice(), &["streak", "days"]].concat()
@@ -5596,6 +5669,7 @@ mod tests {
             }),
         )
         .await
+        .unwrap()
         .0;
         assert_eq!(answer.order, vec!["cerro", "hill"]);
         let change = answer.change.unwrap();
@@ -5608,6 +5682,7 @@ mod tests {
             Json(RankQuery { previous: vec![] }),
         )
         .await
+        .unwrap()
         .0;
         assert!(first_look.change.is_none());
         drop(app);

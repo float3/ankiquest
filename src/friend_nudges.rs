@@ -80,10 +80,10 @@ async fn settings(
     let day = store.clock(&user).map_err(store_error)?.day(now_ms());
     let mut friends = Vec::new();
     for recipient in app
-        .config
-        .users
-        .keys()
-        .filter(|recipient| **recipient != user)
+        .circle(&store.conn, &user)
+        .map_err(store_error)?
+        .iter()
+        .filter(|recipient| **recipient != user && app.is_user(recipient))
     {
         friends.push(Friend {
             user: recipient.clone(),
@@ -120,7 +120,12 @@ async fn nudge(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    if request.recipient == user || !app.is_user(&request.recipient) {
+    if request.recipient == user
+        || !app.is_user(&request.recipient)
+        || !app
+            .connected(&app.store.lock().unwrap().conn, &user, &request.recipient)
+            .map_err(store_error)?
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
     let result = send(
