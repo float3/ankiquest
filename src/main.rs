@@ -1869,6 +1869,7 @@ fn tick(app: &App) -> Result<(), Error> {
                 log_info!("review weighting is now {:?}", settings.review_weighting);
             }
             admin::flush(&store.conn, now, settings.log_retention_days)?;
+            privacy::carry_out_removals(app, &store.conn)?;
             let import_complete = app.config.sync_base.as_ref().is_none_or(|base| {
                 match import(app, &mut store, base) {
                     Ok(()) => true,

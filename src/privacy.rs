@@ -100,6 +100,7 @@ const OWNED: &[(&str, &str)] = &[
     ("friendships", "a = ?1 or b = ?1"),
     ("avatars", "user = ?1"),
     ("server_log", "user = ?1"),
+    ("account_removals", "user = ?1"),
     ("accounts", "user = ?1"),
 ];
 
@@ -208,6 +209,22 @@ pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<()> {
         transaction.execute(&format!("delete from {table} where {condition}"), [user])?;
     }
     transaction.commit()
+}
+
+/// Removes the accounts an admin asked to remove with `admin remove-account`.
+pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> {
+    let users: Vec<String> = conn
+        .prepare("select user from account_removals")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for user in users {
+        forget(conn, &user)?;
+        app.accounts.remove(&user);
+        app.players.write().unwrap().remove(&user);
+        app.forget_standing(&user);
+        log_info!("an account was removed, as an admin asked");
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -716,6 +733,53 @@ mod tests {
             anonymous.contains("the person who runs this AnkiQuest server")
                 && !anonymous.contains("{{")
         );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_admin_can_remove_an_account_while_the_server_runs() {
+        let (app, path) = fixture();
+        let ana = sign_up(&app, "ana").await;
+        seed(&app, "ana", "alice");
+        let run = |user: &str| {
+            crate::admin::run(
+                &path,
+                app.config.settings(),
+                crate::admin::Command::RemoveAccount(user.into()),
+                now_ms(),
+            )
+        };
+        assert!(
+            run("alice").is_err(),
+            "configured players are removed from the configuration"
+        );
+        assert!(run("nobody").is_err());
+        assert!(run("ana").unwrap().contains("within a minute"));
+        assert!(
+            app.accounts.contains("ana"),
+            "nothing happens until the service picks it up"
+        );
+        carry_out_removals(&app, &app.store.lock().unwrap().conn).unwrap();
+        assert!(!app.accounts.contains("ana"));
+        assert_eq!(
+            count(&app, "select count(*) from reviews where user = 'ana'"),
+            0
+        );
+        assert_eq!(count(&app, "select count(*) from account_removals"), 0);
+        assert_eq!(
+            count(&app, "select count(*) from reviews where user = 'alice'"),
+            1
+        );
+        let (status, _) = call(
+            &app,
+            "GET",
+            "/api/export/ana",
+            &ana,
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
