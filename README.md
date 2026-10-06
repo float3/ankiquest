@@ -14,6 +14,7 @@ XP never depends on which answer button was pressed, so there is no incentive to
 - `set review_weighting diminishing` or `set log_retention_days 365` overrides a setting; `reset <setting>` returns to the configured value. The service applies changes within a minute, without a restart.
 - `logs [--since 30m|12h|7d|all] [--level info|error] [--user <player>] [--limit <n>]` prints the server log. Errors and setting changes are kept in the state database for `log_retention_days` (default 90; 0 keeps them forever), and still go to stderr for the journal.
 - `sql "<query>"` runs a read-only query against the state database.
+- `remove-account <user>` deletes a self-service account and everything about it, as if they had deleted it themselves; the service carries it out within a minute. Players from the configuration are removed there instead.
 
 ## Run
 

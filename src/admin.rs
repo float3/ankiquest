@@ -179,7 +179,8 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
   reset <setting>                 go back to the configured value
   logs [--since <n>m|h|d|all] [--level info|error] [--user <player>] [--limit <n>]
                                   print the server log (default: last 7 days, 200 lines)
-  sql <query>                     run a read-only SQL query against the state";
+  sql <query>                     run a read-only SQL query against the state
+  remove-account <user>           delete a self-service account and everything about it";
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -188,6 +189,7 @@ pub enum Command {
     Reset(String),
     Logs(LogFilter),
     Sql(String),
+    RemoveAccount(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -209,6 +211,7 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["set", key, value] => Command::Set(key_of(key), value.to_string()),
         ["reset", key] => Command::Reset(key_of(key)),
         ["sql", query] => Command::Sql(query.to_string()),
+        ["remove-account", user] => Command::RemoveAccount(user.to_string()),
         ["logs", options @ ..] => {
             let mut filter = LogFilter {
                 since_ms: Some(7 * DAY_MS),
@@ -314,6 +317,23 @@ pub fn run(
             }
         }
         Command::Logs(filter) => logs(conn, &filter, now_ms)?,
+        Command::RemoveAccount(user) => {
+            if !conn
+                .prepare("select 1 from accounts where user = ?1")?
+                .exists([&user])?
+            {
+                return Err(format!(
+                    "{user} is not a self-service account; remove configured players from the configuration"
+                )
+                .into());
+            }
+            conn.execute(
+                "insert or ignore into account_removals (user, requested_at) values (?1, ?2)",
+                params![user, now_ms],
+            )?;
+            admin_log(conn, now_ms, "admin asked to remove an account".into())?;
+            format!("{user} and everything about them will be removed within a minute.\n")
+        }
         Command::Sql(_) => unreachable!(),
     })
 }

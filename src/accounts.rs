@@ -58,7 +58,11 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              device text not null,
              created_at integer not null
          ) without rowid;
-         create index if not exists account_tokens_user on account_tokens (user);",
+         create index if not exists account_tokens_user on account_tokens (user);
+         create table if not exists account_removals (
+             user text primary key,
+             requested_at integer not null
+         ) without rowid;",
     )?;
     Ok(())
 }
