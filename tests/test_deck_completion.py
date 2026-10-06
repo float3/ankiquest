@@ -203,7 +203,7 @@ class RefreshTests(unittest.TestCase):
         self.api = SimpleNamespace(
             configured=True, base="https://example.test", user="cerro", token="secret", upload=Mock(return_value={})
         )
-        self.pending = [[(101, 1, 1, 1000, 1)]]
+        self.pending = [[(101, 1, 1, 3, 1000, 1)]]
         self.settings = {"url": "https://example.test", "user": "cerro", "token": "secret"}
         self.mw = SimpleNamespace(
             col=SimpleNamespace(get_config=lambda *args: 4, db=SimpleNamespace(all=self.read_rows)),
@@ -221,7 +221,7 @@ class RefreshTests(unittest.TestCase):
         aqt = ModuleType("aqt")
         aqt.mw = self.mw
         aqt.gui_hooks = SimpleNamespace(**{name: [] for name in (
-            "reviewer_did_answer_card", "operation_did_execute", "sync_did_finish", "profile_did_open",
+            "reviewer_did_answer_card", "operation_did_execute", "state_did_change", "sync_did_finish", "profile_did_open",
             "deck_browser_will_render_content", "webview_did_receive_js_message",
         )})
         utils = ModuleType("aqt.utils")
@@ -394,7 +394,7 @@ class RefreshTests(unittest.TestCase):
         self.addon.refresh(False, resync=True)
         self.assertTrue(self.api.upload.call_args.args[2])
         self.assertEqual(self.mw.pm.profile["ankiquestUploadedThrough"], 0)
-        self.pending = [[(101, 1, 1, 1000, 1)]]
+        self.pending = [[(101, 1, 1, 3, 1000, 1)]]
         self.addon.refresh(False)
         self.assertFalse(self.api.upload.call_args.args[2])
 
@@ -403,7 +403,7 @@ class RefreshTests(unittest.TestCase):
         self.pending = []
         self.addon.refresh(False, resync=True)
         self.api.user = "other-player"
-        self.pending = [[(101, 1, 1, 1000, 1)]]
+        self.pending = [[(101, 1, 1, 3, 1000, 1)]]
         self.addon.refresh(False)
         self.assertTrue(self.api.upload.call_args.args[2])
 
