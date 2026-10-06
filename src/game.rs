@@ -32,6 +32,10 @@ pub struct Review {
     pub id: i64,
     pub cid: i64,
     pub last_ivl: i64,
+    /// The interval the answer gave the card: days, or negative seconds for a
+    /// learning step. Clients that predate it leave it out.
+    #[serde(default)]
+    pub ivl: Option<i64>,
     pub time_ms: i64,
     pub kind: u8,
 }
@@ -758,6 +762,8 @@ pub struct Lifetime {
     pub best_day: u64,
     pub best_combo: u64,
     pub quests: u64,
+    /// Hard cards learned at last; see [`conquests`].
+    pub conquered: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -815,6 +821,8 @@ pub struct Profile {
     pub quests: Vec<QuestView>,
     pub achievements: Vec<AchievementView>,
     pub heatmap: Vec<HeatCell>,
+    /// The latest hard cards learned at last, newest first.
+    pub conquests: Vec<Conquest>,
     pub last_review_id: i64,
     #[serde(skip)]
     pub day: i64,
@@ -1396,6 +1404,20 @@ pub fn compute_with_freezes(
         });
     }
 
+    let all_conquests = conquests(reviews, now_ms);
+    events.extend(
+        all_conquests
+            .iter()
+            .filter(|c| now_ms - c.at <= ANNOUNCE_CONQUESTS_MS)
+            .map(conquest_event),
+    );
+    let conquered = all_conquests.len() as u64;
+    let recent_conquests: Vec<Conquest> = all_conquests
+        .into_iter()
+        .rev()
+        .take(RECENT_CONQUESTS)
+        .collect();
+
     let now = days.get(&today).unwrap_or(&empty);
     let at_risk = streak > 0 && !days.contains_key(&today);
     let day_ends_at = clock.day_start_ms(today + 1);
@@ -1456,14 +1478,110 @@ pub fn compute_with_freezes(
             best_day: totals.best_day,
             best_combo: totals.best_combo,
             quests: totals.quests,
+            conquered,
         },
         quests: today_quests,
         achievements,
         heatmap,
+        conquests: recent_conquests,
         last_review_id: reviews.last().map_or(0, |r| r.id),
         day: today,
         events,
         history,
+    }
+}
+
+/// Lapses before a card counts as hard to learn, and before Anki calls it a leech by default.
+pub const HARD_LAPSES: u32 = 4;
+pub const LEECH_LAPSES: u32 = 8;
+const RECENT_CONQUESTS: usize = 12;
+/// Older conquests are listed but not announced, so resending a history that now
+/// carries intervals does not celebrate cards learned long ago.
+const ANNOUNCE_CONQUESTS_MS: i64 = 2 * 86_400_000;
+/// Without the new interval, a pass is trusted once no relearning step followed it for this long.
+const UNCONFIRMED_PASS_MS: i64 = 86_400_000;
+
+/// A card that lapsed at least [`HARD_LAPSES`] times and has since earned a mature interval.
+/// It carries no card id or content: only what can be shared.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct Conquest {
+    /// The answer that earned the mature interval. It also names the conquest in links.
+    pub at: i64,
+    pub lapses: u32,
+    /// Answers of the card up to and including this one.
+    pub answers: u32,
+    /// The card's first answer in the retained history.
+    pub since: i64,
+    pub leech: bool,
+}
+
+/// Hard cards learned at last, oldest first.
+///
+/// A lapse is a review answered into relearning: a negative new interval, or, from
+/// clients that do not send it, a relearning step right after the review. A card is
+/// conquered when an answer gives it a mature interval after its latest lapse; without
+/// the new interval, when a review finds it after a mature interval and it is not failed.
+/// Lapses without relearning steps cannot be told from a pass, so they go uncounted.
+pub fn conquests(reviews: &[Review], now_ms: i64) -> Vec<Conquest> {
+    let mut cards: HashMap<i64, Vec<&Review>> = HashMap::new();
+    for r in reviews {
+        cards.entry(r.cid).or_default().push(r);
+    }
+    let mut found = Vec::new();
+    for rows in cards.values() {
+        let mut lapses = 0u32;
+        let mut conquered_at = None;
+        for (i, r) in rows.iter().enumerate() {
+            let next = rows.get(i + 1);
+            let failed = r.kind == 1
+                && match r.ivl {
+                    Some(ivl) => ivl < 0,
+                    None => next.is_some_and(|n| n.kind == 2),
+                };
+            if failed {
+                lapses += 1;
+                continue;
+            }
+            if lapses < HARD_LAPSES || conquered_at == Some(lapses) {
+                continue;
+            }
+            let mature = match r.ivl {
+                Some(ivl) => r.kind <= 2 && ivl >= MATURE_IVL,
+                None => {
+                    r.kind == 1
+                        && r.last_ivl >= MATURE_IVL
+                        && (next.is_some() || now_ms - r.id >= UNCONFIRMED_PASS_MS)
+                }
+            };
+            if mature {
+                conquered_at = Some(lapses);
+                found.push(Conquest {
+                    at: r.id,
+                    lapses,
+                    answers: i as u32 + 1,
+                    since: rows[0].id,
+                    leech: lapses >= LEECH_LAPSES,
+                });
+            }
+        }
+    }
+    found.sort_by_key(|c| c.at);
+    found
+}
+
+fn conquest_event(c: &Conquest) -> Event {
+    Event {
+        key: format!("conquered:{}", c.at),
+        title: if c.leech {
+            "Leech tamed"
+        } else {
+            "Card conquered"
+        }
+        .into(),
+        body: format!(
+            "A card you forgot {} times now stays with you for weeks.",
+            c.lapses
+        ),
     }
 }
 
@@ -1473,6 +1591,126 @@ mod tests {
 
     const DAY_MS: i64 = 86_400_000;
     const NOON: i64 = 12 * 3_600_000;
+
+    /// One card's answers a day apart: (kind, last_ivl, ivl).
+    fn card(cid: i64, answers: &[(u8, i64, Option<i64>)]) -> Vec<Review> {
+        answers
+            .iter()
+            .enumerate()
+            .map(|(i, &(kind, last_ivl, ivl))| Review {
+                id: (cid * 1000 + i as i64) * DAY_MS,
+                cid,
+                last_ivl,
+                ivl,
+                time_ms: 5000,
+                kind,
+            })
+            .collect()
+    }
+
+    /// A review failed into relearning, then the relearning step.
+    fn lapse(last_ivl: i64, ivl: Option<i64>) -> [(u8, i64, Option<i64>); 2] {
+        [(1, last_ivl, ivl.map(|_| -600)), (2, -600, ivl.map(|_| 1))]
+    }
+
+    #[test]
+    fn a_card_forgotten_four_times_is_conquered_when_it_earns_a_mature_interval() {
+        let mut answers = vec![(0, 0, Some(1))];
+        for _ in 0..4 {
+            answers.extend(lapse(3, Some(1)));
+        }
+        answers.extend([(1, 1, Some(8)), (1, 8, Some(25)), (1, 25, Some(60))]);
+        let reviews = card(7, &answers);
+        let found = conquests(&reviews, i64::MAX / 2);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].lapses, 4);
+        assert!(!found[0].leech);
+        assert_eq!(found[0].at, reviews[10].id, "the answer that gave 25 days");
+        assert_eq!(found[0].answers, 11);
+        assert_eq!(found[0].since, reviews[0].id);
+
+        let three: Vec<_> = card(
+            8,
+            &[lapse(3, Some(1)), lapse(3, Some(1)), lapse(3, Some(1))].concat(),
+        )
+        .into_iter()
+        .chain(card(8, &[(1, 8, Some(25))]).into_iter().map(|r| Review {
+            id: r.id + 99 * DAY_MS,
+            ..r
+        }))
+        .collect();
+        assert!(
+            conquests(&three, i64::MAX / 2).is_empty(),
+            "three lapses are not hard enough"
+        );
+    }
+
+    #[test]
+    fn a_leech_is_tamed_and_lapsing_again_lets_it_be_conquered_again() {
+        let mut answers = Vec::new();
+        for _ in 0..8 {
+            answers.extend(lapse(5, Some(1)));
+        }
+        answers.push((1, 10, Some(30)));
+        answers.push((1, 30, Some(70)));
+        answers.extend(lapse(70, Some(1)));
+        answers.push((1, 10, Some(28)));
+        let found = conquests(&card(3, &answers), i64::MAX / 2);
+        assert_eq!(
+            found
+                .iter()
+                .map(|c| (c.lapses, c.leech))
+                .collect::<Vec<_>>(),
+            [(8, true), (9, true)]
+        );
+    }
+
+    #[test]
+    fn older_clients_are_judged_by_relearning_steps_and_the_next_review() {
+        let mut answers = Vec::new();
+        for _ in 0..4 {
+            answers.extend(lapse(3, None));
+        }
+        // The review that finds a mature interval: unconfirmed until something follows it.
+        answers.push((1, 21, None));
+        let reviews = card(5, &answers);
+        let last = reviews.last().unwrap().id;
+        assert!(conquests(&reviews, last + 3_600_000).is_empty());
+        assert_eq!(conquests(&reviews, last + DAY_MS).len(), 1);
+
+        // Failed again: the relearning step that follows shows it was not learned.
+        let mut failed = answers.clone();
+        failed.push((2, -600, None));
+        assert!(conquests(&card(5, &failed), i64::MAX / 2).is_empty());
+    }
+
+    #[test]
+    fn recent_conquests_are_announced_and_listed_newest_first() {
+        let mut answers = vec![(0, 0, Some(1))];
+        for _ in 0..4 {
+            answers.extend(lapse(3, Some(1)));
+        }
+        answers.push((1, 1, Some(30)));
+        let reviews = card(9, &answers);
+        let at = reviews.last().unwrap().id;
+        let clock = Clock::default();
+        let week = Week::default();
+        let profile = compute("hill", "Hill", &reviews, &clock, &week, at + 60_000);
+        assert_eq!(profile.conquests.len(), 1);
+        assert_eq!(profile.lifetime.conquered, 1);
+        assert!(
+            profile
+                .events
+                .iter()
+                .any(|e| e.key == format!("conquered:{at}"))
+        );
+        let later = compute("hill", "Hill", &reviews, &clock, &week, at + 3 * DAY_MS);
+        assert!(
+            !later.events.iter().any(|e| e.key.starts_with("conquered:")),
+            "old conquests are listed, not announced"
+        );
+        assert_eq!(later.conquests.len(), 1);
+    }
 
     fn utc() -> Clock {
         Clock::default()
@@ -1484,6 +1722,7 @@ mod tests {
                 id: day * DAY_MS + NOON + i * 10_000,
                 cid: cid_base + i,
                 last_ivl: 0,
+                ivl: None,
                 time_ms: 5_000,
                 kind: 1,
             })
@@ -1583,6 +1822,7 @@ mod tests {
                     id,
                     cid: id,
                     last_ivl: MATURE_IVL,
+                    ivl: None,
                     time_ms: 60_000,
                     kind: 0,
                 }
@@ -1634,6 +1874,7 @@ mod tests {
             id: ms,
             cid: ms,
             last_ivl: 0,
+            ivl: None,
             time_ms: 5_000,
             kind: 1,
         };
@@ -1693,6 +1934,7 @@ mod tests {
             id,
             cid: id,
             last_ivl: 0,
+            ivl: None,
             time_ms: 5_000,
             kind: 1,
         };
@@ -2277,6 +2519,7 @@ mod tests {
             id: 0,
             cid: 1,
             last_ivl: 30,
+            ivl: None,
             time_ms: 4_000,
             kind: 1,
         };
@@ -2289,6 +2532,7 @@ mod tests {
             id: 0,
             cid: 1,
             last_ivl: 30,
+            ivl: None,
             time_ms: 200,
             kind: 1,
         };
@@ -2301,6 +2545,7 @@ mod tests {
             id: day * DAY_MS + NOON + index * 10_000,
             cid,
             last_ivl: 0,
+            ivl: None,
             time_ms: 5_000,
             kind: 1,
         };
@@ -2323,6 +2568,7 @@ mod tests {
                     id: DAY_MS + NOON + index * 600_000,
                     cid: 7,
                     last_ivl: 0,
+                    ivl: None,
                     time_ms: 5_000,
                     kind,
                 })
@@ -2340,6 +2586,7 @@ mod tests {
             id: day * DAY_MS + NOON + index * 10_000,
             cid,
             last_ivl: 0,
+            ivl: None,
             time_ms: 5_000,
             kind: 1,
         };
@@ -2377,6 +2624,7 @@ mod tests {
             id: DAY_MS + NOON + index * 600_000,
             cid: 7,
             last_ivl,
+            ivl: None,
             time_ms: 5_000,
             kind,
         };
@@ -2457,6 +2705,7 @@ mod tests {
                     id: day * DAY_MS + hour * 3_600_000 + i * 10_000,
                     cid: cid + i,
                     last_ivl: 0,
+                    ivl: None,
                     time_ms: 5_000,
                     kind: 1,
                 })
@@ -2543,6 +2792,7 @@ mod tests {
                     id: DAY_MS + NOON + minute * 60_000,
                     cid: 500 + index as i64,
                     last_ivl: 0,
+                    ivl: None,
                     time_ms: 5_000,
                     kind: 1,
                 })

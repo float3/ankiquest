@@ -9,7 +9,7 @@ DEFAULT_SERVER = "https://ankiquest.rationality-munich.com"
 MAX_PENDING = 5000
 UNDO_WINDOW_MS = 2 * 86_400_000
 PENDING_SQL = (
-    "select id, cid, lastIvl, time, type from revlog "
+    "select id, cid, lastIvl, ivl, time, type from revlog "
     "where id > ? and ease > 0 and type < 4 order by id limit %d" % MAX_PENDING
 )
 
@@ -21,7 +21,7 @@ def offset_west_min():
 
 def rows_to_reviews(rows):
     return [
-        {"id": r[0], "cid": r[1], "last_ivl": r[2], "time_ms": r[3], "kind": r[4]}
+        {"id": r[0], "cid": r[1], "last_ivl": r[2], "ivl": r[3], "time_ms": r[4], "kind": r[5]}
         for r in rows
     ]
 

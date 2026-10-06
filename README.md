@@ -1,6 +1,6 @@
 # ankiquest
 
-XP, levels, streaks, daily quests, achievements and a leaderboard for Anki. Clients send review log rows (card id, timestamp, previous interval, time taken, review type), never card content. Deck names and daily counts are only sent by players who use deck completion notifications.
+XP, levels, streaks, daily quests, achievements and a leaderboard for Anki. Clients send review log rows (card id, timestamp, previous and new interval, time taken, review type), never card content. Deck names and daily counts are only sent by players who use deck completion notifications.
 
 XP never depends on which answer button was pressed, so there is no incentive to grade dishonestly.
 
@@ -58,6 +58,14 @@ Open `/community` for the winners calendar, weekly and monthly results, trophy c
 Choose daily, urgent streak, freeze-used, freeze-refill, milestone, weekly closing, and weekly recap reminders, or invite friends to private challenges and shared goals. In AnkiDroid, **Settings → ankiquest → Community reminders** opens this page using your saved account. In a standalone browser, connect with your own upload token. All seven reminder types are off by default, with personal quiet hours and a daily limit. Bearer tokens stay in page memory only. Supported servers issue a secure account session that works across pages until you disconnect; older servers keep the connection only for the current page. See [the community guide](docs/community.md) for details and API endpoints.
 
 The old server-wide `remind_hour` / NixOS `remindHour` setting is deprecated; enable personal reminders in `/community` instead. Existing device-only AnkiDroid and desktop add-on alarms are controlled separately in each client's settings.
+
+## Conquered cards
+
+A card that lapsed at least four times and then earns an interval of 21 days or more is *conquered*; from eight lapses, Anki's default leech threshold, it is a *tamed leech*. A lapse is a review answered into relearning: a negative new interval, or, from clients that do not send the new interval, a relearning step right after a review. Without the new interval a card counts once a review finds it after a mature interval and no relearning step follows it within a day. Lapses on decks without relearning steps cannot be told from a pass and go uncounted. Only retained history counts, so a card's earlier lapses may be missing.
+
+Conquests from the last two days are celebrated like achievements: upload feedback carries a `🏆` headline, and the player's inbox and push get a celebration. Profiles list the latest twelve in `conquests` (`at`, `lapses`, `answers`, `since`, `leech`) and count them all in `lifetime.conquered`. `/conquered/<user>/<at>` shows one as a big companion card with a shareable picture and link, visible to whoever may see the player's profile. Its owner can tell their friends once, which puts it in their friends' activity. `GET /api/conquests/<user>/<at>` returns the card's numbers; `POST /api/conquests/<user>/<at>/tell` needs the owner's token or session. No card id or content is shared.
+
+Re-uploading reviews with their new intervals (**Upload everything again** in the add-on's settings) fills in intervals that older uploads left out.
 
 ## Deck copies with friends
 

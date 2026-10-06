@@ -59,6 +59,7 @@ impl Store {
                  id integer not null,
                  cid integer not null,
                  last_ivl integer not null,
+                 ivl integer,
                  time_ms integer not null,
                  kind integer not null,
                  primary key (user, id)
@@ -78,6 +79,14 @@ impl Store {
                  received_at integer not null
              ) without rowid;",
         )?;
+        let has_ivl: bool = conn.query_row(
+            "select exists (select 1 from pragma_table_info('reviews') where name = 'ivl')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_ivl {
+            conn.execute_batch("alter table reviews add column ivl integer")?;
+        }
         crate::accounts::initialize(&conn)?;
         crate::social::initialize(&conn)?;
         crate::avatars::initialize(&conn)?;
@@ -110,7 +119,7 @@ impl Store {
 
     pub fn reviews(&self, user: &str) -> Result<Vec<Review>, Error> {
         let mut stmt = self.conn.prepare(
-            "select id, cid, last_ivl, time_ms, kind from reviews where user = ?1 order by id",
+            "select id, cid, last_ivl, ivl, time_ms, kind from reviews where user = ?1 order by id",
         )?;
         let reviews = stmt
             .query_map([user], |r| {
@@ -118,8 +127,9 @@ impl Store {
                     id: r.get(0)?,
                     cid: r.get(1)?,
                     last_ivl: r.get(2)?,
-                    time_ms: r.get(3)?,
-                    kind: r.get(4)?,
+                    ivl: r.get(3)?,
+                    time_ms: r.get(4)?,
+                    kind: r.get(5)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -234,11 +244,15 @@ impl Store {
         let tx = self.conn.transaction()?;
         {
             let mut insert = tx.prepare(
-                "insert or ignore into reviews (user, id, cid, last_ivl, time_ms, kind)
-                 values (?1, ?2, ?3, ?4, ?5, ?6)",
+                // A resend from a newer client fills in the interval older uploads left out.
+                "insert into reviews (user, id, cid, last_ivl, ivl, time_ms, kind)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 on conflict (user, id) do update set ivl = coalesce(reviews.ivl, excluded.ivl)",
             )?;
             for r in reviews {
-                insert.execute(params![user, r.id, r.cid, r.last_ivl, r.time_ms, r.kind])?;
+                insert.execute(params![
+                    user, r.id, r.cid, r.last_ivl, r.ivl, r.time_ms, r.kind
+                ])?;
             }
             let mut delete = tx.prepare("delete from reviews where user = ?1 and id = ?2")?;
             for id in deleted {
@@ -265,7 +279,7 @@ impl Store {
 fn read_collection(path: &Path) -> Result<(Vec<Review>, Clock), Error> {
     let conn = Connection::open(path)?;
     let mut stmt = conn.prepare(
-        "select id, cid, lastIvl, time, type from revlog where ease > 0 and type < 4 order by id",
+        "select id, cid, lastIvl, ivl, time, type from revlog where ease > 0 and type < 4 order by id",
     )?;
     let reviews = stmt
         .query_map([], |r| {
@@ -273,8 +287,9 @@ fn read_collection(path: &Path) -> Result<(Vec<Review>, Clock), Error> {
                 id: r.get(0)?,
                 cid: r.get(1)?,
                 last_ivl: r.get(2)?,
-                time_ms: r.get(3)?,
-                kind: r.get(4)?,
+                ivl: Some(r.get(3)?),
+                time_ms: r.get(4)?,
+                kind: r.get(5)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -356,6 +371,36 @@ mod tests {
     }
 
     #[test]
+    fn a_resend_fills_in_intervals_older_uploads_left_out() {
+        let dir = temp_dir("intervals");
+        let mut store = Store::open(&dir).unwrap();
+        let review = |ivl| Review {
+            id: 1,
+            cid: 1,
+            last_ivl: 0,
+            ivl,
+            time_ms: 5000,
+            kind: 1,
+        };
+        let clock = Clock::default();
+        store.upsert("hill", &[review(None)], &[], clock).unwrap();
+        assert_eq!(store.reviews("hill").unwrap()[0].ivl, None);
+        store
+            .upsert("hill", &[review(Some(4))], &[], clock)
+            .unwrap();
+        store
+            .upsert("hill", &[review(Some(9))], &[], clock)
+            .unwrap();
+        assert_eq!(
+            store.reviews("hill").unwrap()[0].ivl,
+            Some(4),
+            "a known interval stays"
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn undone_reviews_are_deleted() {
         let dir = temp_dir("undo");
         let mut store = Store::open(&dir).unwrap();
@@ -363,6 +408,7 @@ mod tests {
             id,
             cid: 1,
             last_ivl: 0,
+            ivl: None,
             time_ms: 4000,
             kind: 1,
         };

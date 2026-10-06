@@ -80,7 +80,7 @@ test('authored labels and substitution slots have Spanish catalog entries',()=>{
   const missing: string[]=[];
   const sources=[
     ...fs.readdirSync(path.join(root,'web'),{recursive:true,encoding:'utf8'}).filter(name=>name.endsWith('.ts')).map(name=>path.join('web',name)),
-    ...['community.html','index.html','personal.html'].map(name=>path.join('static',name)),
+    ...['community.html','index.html','personal.html','conquered.html'].map(name=>path.join('static',name)),
   ];
   for(const name of sources){
     const source=fs.readFileSync(path.join(root,name),'utf8');

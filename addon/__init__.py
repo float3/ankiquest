@@ -47,6 +47,8 @@ state = {
     "companion": "aki",
     "companion_account": None,
     "inbox": [],
+    # A conquered card's big celebration, held until the player leaves the reviewer.
+    "conquest": None,
 }
 
 mw.addonManager.setWebExports(__name__, r"(aki|ankilope)_face\.png")
@@ -130,6 +132,11 @@ def refresh(show_feedback, resync=False):
         message = notify.feedback(profile, show_feedback)
         if message:
             tooltip(message[0], period=3500 if message[1] else 1800)
+        conquest = notify.conquest_path(profile)
+        if conquest:
+            state["conquest"] = conquest
+            if mw.state != "review":
+                show_conquest()
         if state["again"]:
             state["again"] = False
             refresh(True)
@@ -249,6 +256,17 @@ def open_page(path):
         tooltip(tr("Set the server in ankiquest settings first."))
         return
     web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
+
+
+def show_conquest():
+    path, state["conquest"] = state["conquest"], None
+    if path:
+        open_page(path)
+
+
+def on_state_change(new_state, _old_state):
+    if new_state != "review":
+        show_conquest()
 
 
 def open_inbox():
@@ -539,6 +557,7 @@ add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=Fa
 
 gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))
 gui_hooks.operation_did_execute.append(on_operation)
+gui_hooks.state_did_change.append(on_state_change)
 gui_hooks.sync_did_finish.append(on_sync)
 gui_hooks.profile_did_open.append(on_profile_open)
 gui_hooks.deck_browser_will_render_content.append(on_deck_browser)

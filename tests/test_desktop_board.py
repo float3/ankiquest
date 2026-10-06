@@ -78,6 +78,13 @@ class FeedbackTests(unittest.TestCase):
         self.assertIsNone(notify.feedback({}, True))
         self.assertIsNone(notify.feedback({"feedback": {"headlines": [], "status": None}}, True))
 
+    def test_an_announced_conquest_opens_its_card_and_nothing_else_does(self):
+        conquests = [{"at": 1789000000456, "lapses": 9}, {"at": 1700000000000, "lapses": 4}]
+        announced = {"feedback": {"headlines": ["🏆 Leech tamed after 9 lapses"]}, "conquests": conquests}
+        self.assertEqual("/conquered/{user}/1789000000456", notify.conquest_path(announced))
+        self.assertIsNone(notify.conquest_path({"feedback": {"headlines": ["Level 5!"]}, "conquests": conquests}))
+        self.assertIsNone(notify.conquest_path({"feedback": {"headlines": ["🏆 Card conquered after 4 lapses"]}}))
+
 
 class NotifyTests(unittest.TestCase):
     def test_the_streak_warning_waits_for_the_last_hours_and_speaks_once(self):
@@ -164,7 +171,7 @@ class WebTests(unittest.TestCase):
     base = "https://anki.example.com"
 
     def test_only_the_servers_own_pages_are_signed_in(self):
-        for url in ("/", "/week", "/community#activity", "/#hill", "/community?period=week"):
+        for url in ("/", "/week", "/community#activity", "/#hill", "/community?period=week", "/conquered/hill/1789000000456"):
             self.assertTrue(web.allowed(self.base, self.base + url), url)
         for url in (
             "https://evil.example.com/week",
@@ -173,6 +180,9 @@ class WebTests(unittest.TestCase):
             "https://user:pw@anki.example.com/week",
             "https://anki.example.com/api/profile/hill",
             "https://anki.example.com/login",
+            "https://anki.example.com/conquered/hill",
+            "https://anki.example.com/conquered/hill/12x",
+            "https://anki.example.com/conquered/hill/12/more",
         ):
             self.assertFalse(web.allowed(self.base, url), url)
 

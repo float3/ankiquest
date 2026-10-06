@@ -2,7 +2,7 @@
 //! add-on and the website cannot drift apart.
 
 use crate::decks::Announcement;
-use crate::game::Profile;
+use crate::game::{Conquest, Profile};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -55,6 +55,14 @@ fn announcement(item: &Announcement) -> String {
     )
 }
 
+fn conquest_headline(conquest: &Conquest) -> String {
+    if conquest.leech {
+        format!("🏆 Leech tamed after {} lapses", conquest.lapses)
+    } else {
+        format!("🏆 Card conquered after {} lapses", conquest.lapses)
+    }
+}
+
 fn level_status(profile: &Profile) -> String {
     format!(
         "Lv {}  {}/{}",
@@ -90,6 +98,16 @@ pub fn feedback(before: Option<&Profile>, after: &Profile, announced: &[Announce
             status: None,
         };
     };
+    // Only answers this upload added: resending history with intervals finds old
+    // conquests, which the inbox already keeps quiet about.
+    headlines.extend(
+        after
+            .conquests
+            .iter()
+            .rev()
+            .filter(|c| c.at > before.last_review_id)
+            .map(conquest_headline),
+    );
     let combo = after.today.current_combo;
     let status = match after.xp_total.cmp(&before.xp_total) {
         std::cmp::Ordering::Equal => None,
