@@ -65,7 +65,7 @@ test('friends, groups and invite links', async () => {
     for (const width of [320, 1440]) {
       const f = await fixture(browser, width);
       await f.page.goto('http://ankiquest.test/friends');
-      await f.page.getByRole('heading', {name: 'Groups'}).waitFor();
+      await f.page.getByRole('heading', {name: 'Groups', exact: true}).waitFor();
       assert.equal(await f.page.locator('b').count(), 0, 'display names are escaped');
       assert.equal(await f.page.locator('[data-invite-link]').inputValue(), 'http://ankiquest.test/join/abc123');
       await noOverflow(f.page);
