@@ -655,6 +655,7 @@ mod tests {
                 id: now - DAY,
                 cid: 1,
                 last_ivl: 1,
+                ivl: None,
                 time_ms: 10_000,
                 kind: 1,
             }],

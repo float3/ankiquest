@@ -220,6 +220,7 @@ mod tests {
                     id: *id,
                     cid: 1,
                     last_ivl: 0,
+                    ivl: None,
                     time_ms: 1000,
                     kind: 1,
                 })

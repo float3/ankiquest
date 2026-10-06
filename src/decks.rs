@@ -47,7 +47,7 @@ pub struct ActivityOptions {
 const ACTIVITY_CATEGORY_SQL: &str = "case
     when n.kind in ('message','reply','nudge') then 'messages'
     when n.kind glob 'challenge_*' then 'challenges'
-    when n.kind='completion' then 'deck_completions'
+    when n.kind in ('completion','conquest') then 'deck_completions'
     else 'study_updates' end";
 
 const ACTION_REQUIRED_SQL: &str = "exists(select 1 from community_members m
@@ -124,7 +124,7 @@ pub struct Notification {
     /// Who this is about, and so who a reply goes to. Empty for older rows.
     pub sender: String,
     pub replied: bool,
-    /// What put this here: "completion", "reply", "nudge" or "message". Clients
+    /// What put this here: "completion", "conquest", "reply", "nudge" or "message". Clients
     /// choose how loudly to announce each.
     pub kind: String,
     /// Unix seconds, independently of push/delivery state.
@@ -402,7 +402,7 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
 }
 
 fn is_celebration(key: &str) -> bool {
-    ["achievement:", "level:", "streak:", "record:"]
+    ["achievement:", "level:", "streak:", "record:", "conquered:"]
         .iter()
         .any(|prefix| key.starts_with(prefix))
 }

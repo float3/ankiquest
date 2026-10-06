@@ -35,7 +35,12 @@ def allowed(base, url):
         return False
     if origin(actual) != origin(expected):
         return False
-    return actual.path in {expected.path + route for route in ROUTES}
+    if actual.path in {expected.path + route for route in ROUTES}:
+        return True
+    # A conquered card's page: /conquered/<user>/<review id>.
+    rest = actual.path[len(expected.path):] if actual.path.startswith(expected.path) else ""
+    parts = rest.split("/")
+    return len(parts) == 3 and parts[0] == "conquered" and parts[1] != "" and parts[2].isdigit()
 
 
 def session_script(base, user, token, language="en"):

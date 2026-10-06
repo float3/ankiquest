@@ -53,12 +53,17 @@ interface Profile extends Person {
   day_ends_at: number;
   local_hour: number;
   today: {reviews: number; minutes: number; xp: number; max_combo: number; current_combo: number; new_cards: number};
-  lifetime: {reviews: number; hours: number; days_active: number; best_streak: number; best_streak_at: number; first_day_at: number; best_day: number; best_combo: number; quests: number};
+  lifetime: {reviews: number; hours: number; days_active: number; best_streak: number; best_streak_at: number; first_day_at: number; best_day: number; best_combo: number; quests: number; conquered?: number};
   quests: Quest[];
   achievements: Achievement[];
   heatmap: HeatCell[];
+  /** Missing from older servers. */
+  conquests?: Conquest[];
   last_review_id: number;
 }
+
+/** A hard card learned at last (`Conquest` in src/game.rs). */
+interface Conquest { at: number; lapses: number; answers: number; since: number; leech: boolean; }
 
 interface WinnerTotals extends Person { history_start: string | null; day_wins: number; week_wins: number; month_wins: number; }
 interface WinnerScope {
@@ -590,6 +595,16 @@ function streakFreezes(player: Profile) {
   </div>`;
 }
 
+function conquests(p: Profile) {
+  const items = p.conquests || [];
+  if (!items.length) return "";
+  const total = p.lifetime.conquered ?? items.length;
+  return aqHtml`<section class="card wide" id="conquests"><div class="card-head"><div><h2>Hard-won cards</h2><p>${total === 1 ? aqText("One card that kept slipping away is learned at last.") : aqText`${num(total)} cards that kept slipping away are learned at last.`}</p></div><span class="symbol" aria-hidden="true">🏆</span></div><div class="ach">${items.map(c => aqHtml`
+  <a class="got conquest" href="/conquered/${encodeURIComponent(p.user)}/${c.at}"><b>${c.leech ? aqText("Leech tamed") : aqText("Card conquered")}</b>${aqText`Forgotten ${c.lapses} times`}
+    <div class="sub">${esc(new Date(c.at).toLocaleDateString(AnkiQuestI18n.language, {year: "numeric", month: "short", day: "numeric"}))} · ${aqText("Share")} →</div>
+  </a>`).join("")}</div></section>`;
+}
+
 function view(p: Profile, rows: Standing[], canEditAvatar = false) {
   const unlocked = p.achievements.filter(a => a.unlocked).length;
   const achievements = [...p.achievements].sort((a, b) => Number(!!b.unlocked) - Number(!!a.unlocked) || pct(b.progress, b.target) - pct(a.progress, a.target));
@@ -644,6 +659,7 @@ ${winnerSection()}
     ${a.unlocked ? aqHtml`<div class="sub">${a.unlocked} · +${a.reward} XP</div>` : aqHtml`<div class="bar"><i style="width:${pct(a.progress, a.target)}%"></i></div>`}
   </div>`).join("")}</div>
 </section>
+${conquests(p)}
 </div>`;
 }
 

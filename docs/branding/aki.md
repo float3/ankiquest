@@ -25,10 +25,10 @@ branding works offline.
 | --- | --- |
 | `welcome.png` | Onboarding, sign-in and empty states |
 | `review.png` | A small next step, loading and studying |
-| `celebrate.png` | Confirmed completed daily quests |
+| `celebrate.png` | Confirmed completed daily quests and conquered cards |
 | `streak.png` | Studying today and general progress |
 | `freeze.png` | Confirmed protection; contextual settings illustration |
-| `winner.png` | Records, trophies and winners |
+| `winner.png` | Records, trophies, winners and tamed leeches |
 | `face.png` | Compact branding and installed app icon |
 
 Aki encourages small steps and celebrates confirmed progress. Avoid guilt,

@@ -14,6 +14,7 @@ mod avatars;
 mod challenges;
 mod companions;
 mod competition;
+mod conquests;
 mod deck_copies;
 mod decks;
 mod feedback;
@@ -2345,6 +2346,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(aki::routes())
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
+        .merge(conquests::routes())
         .merge(social::routes())
         .merge(privacy::routes())
         .route("/", get(index))
@@ -2674,6 +2676,7 @@ mod tests {
                 cid,
                 kind,
                 last_ivl: 1,
+                ivl: None,
                 time_ms: 30_000,
             });
             store
@@ -3266,6 +3269,7 @@ mod tests {
                 id: at + index * 1000,
                 cid: at + index,
                 last_ivl: 10,
+                ivl: None,
                 time_ms: 10_000,
                 kind: 1,
             })
@@ -3279,17 +3283,18 @@ mod tests {
             rusqlite::Connection::open(base.join(user).join("collection.anki2")).unwrap();
         conn.execute_batch(
             "create table revlog (id integer primary key, cid integer, lastIvl integer,
-                 time integer, type integer, ease integer);",
+                 ivl integer, time integer, type integer, ease integer);",
         )
         .unwrap();
         let tx = conn.transaction().unwrap();
         for review in reviews {
             tx.execute(
-                "insert into revlog values (?1,?2,?3,?4,?5,3)",
+                "insert into revlog values (?1,?2,?3,?4,?5,?6,3)",
                 rusqlite::params![
                     review.id,
                     review.cid,
                     review.last_ivl,
+                    review.ivl.unwrap_or(1),
                     review.time_ms,
                     review.kind
                 ],
@@ -3619,6 +3624,7 @@ mod tests {
                 id: start + 6 * 3_600_000 + i * 10_000 + if i >= 30 { 600_000 } else { 0 },
                 cid: i,
                 last_ivl: 30,
+                ivl: None,
                 time_ms: 10_000,
                 kind: 0,
             })
@@ -3829,6 +3835,7 @@ mod tests {
                 id: if studied { now } else { now - 86_400_000 },
                 cid: 1,
                 last_ivl: 30,
+                ivl: None,
                 time_ms: 5000,
                 kind: 1,
             };
@@ -3901,6 +3908,7 @@ mod tests {
                     id: start + 6 * 3_600_000 + i * 10_000 + if i >= 30 { 600_000 } else { 0 },
                     cid: i,
                     last_ivl: 30,
+                    ivl: None,
                     time_ms: 10_000,
                     kind: 0,
                 })
@@ -4336,6 +4344,7 @@ mod tests {
                 id: now - (100 - i) * 10_000,
                 cid: i,
                 last_ivl: 30,
+                ivl: None,
                 time_ms: 5000,
                 kind: 0,
             })
@@ -5064,6 +5073,7 @@ mod tests {
                     id: day * 86_400_000 + 12 * 3_600_000 + index * 60_000 + user.len() as i64,
                     cid: index + 1,
                     last_ivl: 30,
+                    ivl: None,
                     time_ms: 5_000,
                     kind: 1,
                 })
@@ -5683,6 +5693,7 @@ mod tests {
                 id: first + index * 1000,
                 cid: 1_000 + index,
                 last_ivl: 1,
+                ivl: None,
                 time_ms: 8_000,
                 kind: 1,
             })
@@ -5821,6 +5832,112 @@ mod tests {
         .0
     }
 
+    /// A card forgotten four times that then earns a 30-day interval, ending a minute ago.
+    fn hard_card(cid: i64) -> Vec<Review> {
+        let mut answers = vec![(0, 0, 1)];
+        for _ in 0..4 {
+            answers.extend([(1, 3, -600), (2, -600, 1)]);
+        }
+        answers.push((1, 1, 30));
+        let start = now_ms() - 60_000 - answers.len() as i64 * 1000;
+        answers
+            .iter()
+            .enumerate()
+            .map(|(i, &(kind, last_ivl, ivl))| Review {
+                id: start + i as i64 * 1000,
+                cid,
+                last_ivl,
+                ivl: Some(ivl),
+                time_ms: 8_000,
+                kind,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_conquered_card_is_announced_shared_and_told_to_friends_once() {
+        let (app, path) = fixture();
+        upload_as(
+            &app,
+            "hill",
+            plain_upload(reviews_at(now_ms() - 3_600_000, 2)),
+        )
+        .await;
+        let rows = hard_card(77);
+        let at = rows.last().unwrap().id;
+        let response = upload_as(&app, "hill", plain_upload(rows.clone())).await;
+        assert_eq!(response.profile.conquests.len(), 1);
+        assert!(
+            response
+                .feedback
+                .headlines
+                .contains(&"🏆 Card conquered after 4 lapses".to_string()),
+            "{:?}",
+            response.feedback
+        );
+        let resent = upload_as(&app, "hill", plain_upload(rows)).await;
+        assert!(
+            !resent
+                .feedback
+                .headlines
+                .iter()
+                .any(|h| h.starts_with('🏆')),
+            "resending history does not announce it again"
+        );
+
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute("insert into friendships (a, b, requested_by, accepted, created_at) values ('cerro', 'hill', 'hill', 1, 0)", [])
+            .unwrap();
+        let show = |viewer: &str, at: i64| {
+            conquests::show(
+                State(app.clone()),
+                UrlPath(("hill".into(), at)),
+                headers(viewer),
+            )
+        };
+        let mine = show("hill", at).await.unwrap().0;
+        assert_eq!(
+            (mine.conquest.lapses, mine.told, mine.friends),
+            (4, Some(false), Some(1))
+        );
+        let theirs = show("cerro", at).await.unwrap().0;
+        assert_eq!(
+            (theirs.told, theirs.friends),
+            (None, None),
+            "only the owner sees sharing state"
+        );
+        assert_eq!(
+            show("hill", at + 1).await.err(),
+            Some(StatusCode::NOT_FOUND)
+        );
+
+        let tell = |user: &str| {
+            conquests::tell(
+                State(app.clone()),
+                UrlPath(("hill".into(), at)),
+                headers(user),
+            )
+        };
+        assert_eq!(tell("cerro").await.err(), Some(StatusCode::UNAUTHORIZED));
+        assert_eq!(tell("hill").await.unwrap().0.told, 1);
+        assert_eq!(tell("hill").await.unwrap().0.told, 1);
+        let inbox = app
+            .store
+            .lock()
+            .unwrap()
+            .notifications("cerro", now_ms())
+            .unwrap();
+        let told: Vec<_> = inbox.iter().filter(|n| n.kind == "conquest").collect();
+        assert_eq!(told.len(), 1, "telling twice does not repeat it: {inbox:?}");
+        assert_eq!(told[0].title, "Hill conquered a hard card");
+        assert_eq!(show("hill", at).await.unwrap().0.told, Some(true));
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[tokio::test]
     async fn uploads_describe_what_they_changed() {
         let (app, path) = fixture();
@@ -5946,10 +6063,11 @@ mod tests {
                     review.id,
                     review.cid,
                     review.last_ivl,
+                    review.ivl,
                     review.time_ms,
                     i64::from(review.kind)
                 ),
-                (row[0], row[1], row[2], row[3], row[4])
+                (row[0], row[1], row[2], Some(row[3]), row[4], row[5])
             );
         }
     }

@@ -7,15 +7,23 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Scripts served as files, and the page scripts inlined into their HTML.
-const ENTRIES: [&str; 6] = [
+const ENTRIES: [&str; 7] = [
     "site",
     "avatars",
     "personal",
     "pages/index",
     "pages/community",
     "pages/login",
+    "pages/conquered",
 ];
-const PAGES: [&str; 5] = ["index", "community", "login", "personal", "privacy"];
+const PAGES: [&str; 6] = [
+    "index",
+    "community",
+    "login",
+    "personal",
+    "privacy",
+    "conquered",
+];
 
 type Error = Box<dyn std::error::Error>;
 

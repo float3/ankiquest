@@ -837,6 +837,7 @@ mod tests {
                     id: *id,
                     cid: i as i64,
                     last_ivl: 1,
+                    ivl: None,
                     time_ms: 5000,
                     kind: 1,
                 })

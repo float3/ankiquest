@@ -16,6 +16,15 @@ def feedback(response, show_feedback):
     return None
 
 
+def conquest_path(response):
+    """The page for the hard card this upload announced as learned at last, if any."""
+    headlines = (response.get("feedback") or {}).get("headlines") or []
+    conquests = response.get("conquests") or []
+    if not conquests or not any(line.startswith("🏆") for line in headlines):
+        return None
+    return "/conquered/{user}/%d" % conquests[0]["at"]
+
+
 def notice(entry):
     title, body = entry.get("title", ""), entry.get("body", "")
     return "%s<br>%s" % (title, body) if body else title
