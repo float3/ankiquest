@@ -5855,6 +5855,127 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_the_owner_labels_a_conquered_card_and_friends_hear_what_it_was() {
+        let (app, path) = fixture();
+        upload_as(
+            &app,
+            "hill",
+            plain_upload(reviews_at(now_ms() - 3_600_000, 2)),
+        )
+        .await;
+        let rows = hard_card(78);
+        let at = rows.last().unwrap().id;
+        upload_as(&app, "hill", plain_upload(rows)).await;
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute("insert into friendships (a, b, requested_by, accepted, created_at) values ('cerro', 'hill', 'hill', 1, 0)", [])
+            .unwrap();
+        let set = |user: &str, at: i64, label: &str| {
+            conquests::set_label(
+                State(app.clone()),
+                UrlPath(("hill".into(), at)),
+                headers(user),
+                Json(conquests::LabelUpdate {
+                    label: label.into(),
+                }),
+            )
+        };
+        let show = || {
+            conquests::show(
+                State(app.clone()),
+                UrlPath(("hill".into(), at)),
+                headers("cerro"),
+            )
+        };
+        assert_eq!(
+            show().await.unwrap().0.label,
+            None,
+            "nothing is shown until chosen"
+        );
+        assert_eq!(
+            set("cerro", at, "das Eichhörnchen").await.err(),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        assert_eq!(
+            set("hill", at, " \n\t ").await.err(),
+            Some(StatusCode::BAD_REQUEST)
+        );
+        assert_eq!(
+            set("hill", at, &"x".repeat(conquests::MAX_LABEL + 1))
+                .await
+                .err(),
+            Some(StatusCode::BAD_REQUEST)
+        );
+        assert_eq!(
+            set("hill", at + 1, "das Eichhörnchen").await.err(),
+            Some(StatusCode::NOT_FOUND),
+            "only a card that was conquered"
+        );
+        assert_eq!(
+            set("hill", at, "  das\nEichhörnchen\u{7}  ").await.unwrap(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            show().await.unwrap().0.label.as_deref(),
+            Some("das Eichhörnchen"),
+            "one plain line"
+        );
+
+        let told = conquests::tell(
+            State(app.clone()),
+            UrlPath(("hill".into(), at)),
+            headers("hill"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(told.0.told, 1);
+        let inbox = app
+            .store
+            .lock()
+            .unwrap()
+            .notifications("cerro", now_ms())
+            .unwrap();
+        let told = inbox.iter().find(|n| n.kind == "conquest").unwrap();
+        assert_eq!(
+            told.body,
+            "They forgot “das Eichhörnchen” 4 times and learned it anyway."
+        );
+
+        let remove = |user: &str| {
+            conquests::remove_label(
+                State(app.clone()),
+                UrlPath(("hill".into(), at)),
+                headers(user),
+            )
+        };
+        assert_eq!(remove("cerro").await.err(), Some(StatusCode::UNAUTHORIZED));
+        assert_eq!(remove("hill").await.unwrap(), StatusCode::NO_CONTENT);
+        assert_eq!(show().await.unwrap().0.label, None);
+
+        set("hill", at, "der Igel").await.unwrap();
+        let store = app.store.lock().unwrap();
+        privacy::forget(&store.conn, "hill").unwrap();
+        let left: i64 = store
+            .conn
+            .query_row(
+                "select (select count(*) from conquest_labels)
+                      + (select count(*) from seen where key like 'conquest:hill:%')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            left, 0,
+            "deleting the account takes labels and friends' told-markers"
+        );
+        drop(store);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn a_conquered_card_is_announced_shared_and_told_to_friends_once() {
         let (app, path) = fixture();
         upload_as(

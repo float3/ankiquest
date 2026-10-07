@@ -1194,5 +1194,15 @@
   "🏆 Card conquered after {0} lapses": "🏆 Karte nach {0} Fehlern gemeistert",
   "🏆 Leech tamed after {0} lapses": "🏆 Blutegel nach {0} Fehlern gezähmt",
   "Hard card, learned at last": "Schwere Karte, endlich gelernt",
-  "Card tamed": "Karte gezähmt"
+  "Card tamed": "Karte gezähmt",
+  "I finally learned “{0}”, a card I had forgotten {1} times. 🏆": "Ich habe endlich „{0}“ gelernt, eine Karte, die ich {1}-mal vergessen hatte. 🏆",
+  "{0} finally learned “{1}”, a card they had forgotten {2} times. 🏆": "{0} hat endlich „{1}“ gelernt, eine Karte, die {2}-mal vergessen war. 🏆",
+  "Removing…": "Wird entfernt …",
+  "That did not save. Please try again.": "Das wurde nicht gespeichert. Bitte versuche es erneut.",
+  "Stop showing the card": "Karte nicht mehr zeigen",
+  "Show what the card was": "Zeigen, welche Karte es war",
+  "The word or phrase friends will see": "Das Wort oder die Wendung, die Freunde sehen",
+  "Anyone who can open this page will see it, and so will friends you tell. You can take it back later.": "Alle, die diese Seite öffnen können, sehen es, ebenso Freunde, denen du Bescheid gibst. Du kannst es später zurücknehmen.",
+  "Show it on the card": "Auf der Karte zeigen",
+  "Its owner chose to show what the card was.": "Die Person hat sich entschieden zu zeigen, welche Karte es war."
 }

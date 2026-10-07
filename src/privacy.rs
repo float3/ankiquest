@@ -58,6 +58,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("friendships", "select case when a = ?1 then b else a end as friend, requested_by, accepted, created_at
          from friendships where a = ?1 or b = ?1"),
     ("avatar", "select revision, image from avatars where user = ?1"),
+    ("conquest_labels", "select at, label from conquest_labels where user = ?1 order by at"),
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
 ];
 
@@ -68,7 +69,10 @@ const OWNED: &[(&str, &str)] = &[
     ("reviews", "user = ?1"),
     ("clocks", "user = ?1"),
     ("review_syncs", "user = ?1"),
-    ("seen", "user = ?1 or key like 'friend-nudge:%:' || ?1"),
+    (
+        "seen",
+        "user = ?1 or key like 'friend-nudge:%:' || ?1 or key like 'conquest:' || ?1 || ':%'",
+    ),
     ("languages", "user = ?1"),
     ("companion_preferences", "user = ?1"),
     ("reminder_settings", "user = ?1"),
@@ -99,6 +103,7 @@ const OWNED: &[(&str, &str)] = &[
     ("community_weekly_suggestions", "owner = ?1 or friend = ?1"),
     ("friendships", "a = ?1 or b = ?1"),
     ("avatars", "user = ?1"),
+    ("conquest_labels", "user = ?1"),
     ("server_log", "user = ?1"),
     ("account_removals", "user = ?1"),
     ("accounts", "user = ?1"),
