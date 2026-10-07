@@ -66,6 +66,8 @@ A card that lapsed at least four times and then earns an interval of 21 days or 
 
 Conquests from the last two days are celebrated like achievements: upload feedback carries a `🏆` headline, and the player's inbox and push get a celebration. Profiles list the latest twelve in `conquests` (`at`, `lapses`, `answers`, `since`, `leech`) and count them all in `lifetime.conquered`. `/conquered/<user>/<at>` shows one as a big companion card with a shareable picture and link, visible to whoever may see the player's profile. Its owner can tell their friends once, which puts it in their friends' activity. `GET /api/conquests/<user>/<at>` returns the card's numbers; `POST /api/conquests/<user>/<at>/tell` needs the owner's token or session. No card id or content is shared.
 
+The owner may also say what the card was. `POST /api/conquests/<user>/<at>/label` with `{"label":"das Eichhörnchen"}` stores one line of plain text of up to 120 characters, shown on the card, in its picture and in the message friends get when told; `DELETE` takes it back. Both need the owner's token or session. Nothing about the card is stored until the owner saves a label: the desktop add-on offers the card's first field as a suggestion in the page's URL fragment (`#suggest=…`), which browsers never send to the server, and the page drops it from the address once read. Friends already told keep the message they received. Labels are part of the data download and are deleted with the account.
+
 Re-uploading reviews with their new intervals (**Upload everything again** in the add-on's settings) fills in intervals that older uploads left out.
 
 ## Deck copies with friends

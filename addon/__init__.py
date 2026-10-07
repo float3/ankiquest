@@ -258,10 +258,21 @@ def open_page(path):
     web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
 
 
+def conquered_card_text(path):
+    """The conquered card's first field, to offer as its label. Empty when unknown."""
+    try:
+        at = int(path.rsplit("/", 1)[1])
+        cid = mw.col.db.scalar("select cid from revlog where id = ?", at)
+        return notify.suggested_label(mw.col.get_card(cid).note().fields[0]) if cid else ""
+    except Exception as e:
+        print("ankiquest card label:", e)
+        return ""
+
+
 def show_conquest():
     path, state["conquest"] = state["conquest"], None
     if path:
-        open_page(path)
+        open_page(notify.with_suggestion(path, conquered_card_text(path)))
 
 
 def on_state_change(new_state, _old_state):

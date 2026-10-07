@@ -1,5 +1,8 @@
 """What the desktop says out loud. The server writes the words; this decides when."""
 
+import re
+import urllib.parse
+
 FRESH_SECONDS = 86_400
 HOUR_MS = 3_600_000
 
@@ -23,6 +26,24 @@ def conquest_path(response):
     if not conquests or not any(line.startswith("🏆") for line in headlines):
         return None
     return "/conquered/{user}/%d" % conquests[0]["at"]
+
+
+MAX_LABEL = 120
+
+
+def suggested_label(field):
+    """A card's first field as one line of plain text, short enough to be a label."""
+    text = re.sub(r"\[sound:[^\]]*\]", " ", field or "")
+    text = re.sub(r"<[^>]*>", " ", text)
+    for entity, char in (("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'"), ("&amp;", "&")):
+        text = text.replace(entity, char)
+    return " ".join(text.split())[:MAX_LABEL]
+
+
+def with_suggestion(path, label):
+    """Offers the label in the fragment: the page shows it to the player, but the
+    browser never sends a fragment to the server, so nothing leaves until they save it."""
+    return path + "#suggest=" + urllib.parse.quote(label) if label else path
 
 
 def notice(entry):

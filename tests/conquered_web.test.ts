@@ -62,3 +62,55 @@ test('a conquered card is a big companion card; only its owner can tell friends'
     await browser.close();
   }
 });
+
+test('the owner may show what the card was; a suggestion stays in the fragment until they save it', async () => {
+  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const shots = process.env.CONQUERED_SCREENSHOTS;
+  try {
+    const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 1000}});
+    let label: string | null = null;
+    const requested: string[] = [], saved: {csrf: string | null; body: unknown}[] = [];
+    await context.route('**/*', async route => {
+      const request = route.request(), url = new URL(request.url()), pathname = url.pathname;
+      requested.push(request.url());
+      if (pathname === `/conquered/hill/${AT}`) return route.fulfill({contentType: 'text/html', body: built('conquered')});
+      if (await fulfillAsset(route, pathname)) return;
+      if (/^\/(aki|ankilope)\/\w+\.png$/.test(pathname)) return route.fulfill({contentType: 'image/png', body: fs.readFileSync(path.join(root, 'static', pathname))});
+      if (pathname === '/auth/status') return route.fulfill({json: {private_site: false, authenticated: true, member: {user: 'hill'}}});
+      if (pathname === `/api/conquests/hill/${AT}`) {
+        const conquest = {at: AT, lapses: 6, answers: 31, since: AT - 52 * 86_400_000, leech: false};
+        return route.fulfill({json: {user: 'hill', display: 'Hill', conquest, told: false, friends: 2, ...(label ? {label} : {})}});
+      }
+      if (pathname === `/api/conquests/hill/${AT}/label` && request.method() === 'POST') {
+        saved.push({csrf: request.headers()['x-ankiquest-csrf'] ?? null, body: request.postDataJSON()});
+        label = (request.postDataJSON() as {label: string}).label;
+        return route.fulfill({status: 204});
+      }
+      return route.fulfill({status: 404, body: pathname});
+    });
+    const page = await context.newPage(), errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://ankiquest.test/conquered/hill/${AT}#suggest=${encodeURIComponent('das Eichhörnchen')}`);
+    const input = page.locator('#conquest-label-form input[name=label]');
+    await input.waitFor();
+    assert.equal(await input.inputValue(), 'das Eichhörnchen');
+    assert.equal(new URL(page.url()).hash, '', 'the suggestion leaves the address bar');
+    assert.ok(requested.every(url => !url.includes('Eichh')), 'the suggestion never reaches the server');
+    assert.equal(await page.locator('.conquest-label').count(), 0, 'nothing is shown before saving');
+    await input.fill('das Eichhörnchen — squirrel');
+    await page.locator('#conquest-label-form button[type=submit]').click();
+    await page.locator('.conquest-label').waitFor();
+    assert.equal(await page.locator('.conquest-label').textContent(), 'das Eichhörnchen — squirrel');
+    assert.deepEqual(saved, [{csrf: '1', body: {label: 'das Eichhörnchen — squirrel'}}]);
+    assert.equal(await page.locator('#conquest-label-remove').count(), 1);
+    if (shots) {
+      await page.screenshot({path: path.join(shots, 'labelled.png'), fullPage: true});
+      const [download] = await Promise.all([page.waitForEvent('download'), page.click('#conquest-download')]);
+      await download.saveAs(path.join(shots, 'pic-labelled.png'));
+    }
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+});

@@ -1,6 +1,6 @@
 # AnkiQuest
 
-XP, streaks, daily quests, friends and leaderboards for Anki. Only the timing of your reviews is sent, never the content of your cards.
+XP, streaks, daily quests, friends and leaderboards for Anki. Only the timing of your reviews is sent, never the content of your cards, unless you choose to show off a hard card you finally learned.
 
 ## Use it
 
