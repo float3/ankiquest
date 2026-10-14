@@ -1,16 +1,16 @@
 # AnkiQuest
 
-XP, streaks, daily quests, friends and leaderboards for Anki. Only the timing of your reviews is sent, never the content of your cards, unless you choose to show off a hard card you finally learned.
+XP, streaks, daily quests, friends and leaderboards for Anki. only the timing of your reviews is sent, never the content of your cards, unless you choose to show off a hard card you finally learned.
 
-## Use it
+## use it
 
-1. Create an account on an AnkiQuest server, such as [ankiquest.rationality-munich.com](https://ankiquest.rationality-munich.com).
+1. create an account on an AnkiQuest server, such as [ankiquest.rationality-munich.com](https://ankiquest.rationality-munich.com).
 2. Connect Anki:
-   - **Desktop:** download `ankiquest.ankiaddon` from the [latest release](https://github.com/float3/ankiquest/releases/latest), open it with Anki, then choose **Tools → ankiquest: sign in or create account…**
-   - **Android:** install `AnkiDroid-Quest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). It installs next to AnkiDroid; sync your collection through AnkiWeb as usual. Then open **Settings → ankiquest → Account & connection → Sign in or create account**.
-3. Study as usual. Add friends, or start a group and share its invite link, on the website's **Friends** page.
+   - **desktop:** download `ankiquest.ankiaddon` from the [latest release](https://github.com/float3/ankiquest/releases/latest), open it with Anki, then choose **Tools → ankiquest: sign in or create account…**
+   - **Android:** install `AnkiDroid-Quest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). it installs next to AnkiDroid; sync your collection through AnkiWeb as usual. then open **Settings → ankiquest → Account & connection → Sign in or create account**.
+3. study as usual. add friends, or start a group and share its invite link, on the website's **Friends** page.
 
-## Run your own server
+## run your own server
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -22,10 +22,10 @@ cargo run -- ankiquest.json
 { "addr": "127.0.0.1:8097", "state_dir": "state", "registration": true }
 ```
 
-On NixOS, import `inputs.ankiquest.nixosModules.default` and set `services.ankiquest = { enable = true; domain = "anki.example.com"; registration = true; };`.
+on NixOS, import `inputs.ankiquest.nixosModules.default` and set `services.ankiquest = { enable = true; domain = "anki.example.com"; registration = true; };`.
 
-Configuration, administration, the API and development: [docs/server.md](docs/server.md).
+configuration, administration, the API and development: [docs/server.md](docs/server.md).
 
-## License
+## license
 
 AGPL-3.0-only.
