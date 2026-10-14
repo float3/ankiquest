@@ -34,12 +34,12 @@ branding works offline.
 Aki encourages small steps and celebrates confirmed progress. avoid guilt,
 threats, fake rewards or implying a streak is protected merely because a user
 owns freezes. an expired daily profile receives neutral study encouragement.
-Contextual artwork on a settings dialog is decorative, not a protection status.
+contextual artwork on a settings dialog is decorative, not a protection status.
 
 artwork has empty alternative text and is excluded from interactive controls.
-Website encouragement is translated into English, Spanish, French, German and
+website encouragement is translated into English, Spanish, French, German and
 Portuguese; the desktop add-on currently translates English and Spanish.
-Useful encouragement is ordinary translated text. keep images static, allow
+useful encouragement is ordinary translated text. keep images static, allow
 text to wrap, preserve clear space and retain player avatars and names.
 
 Native Android assets ship with the companion Android change, so the app does
