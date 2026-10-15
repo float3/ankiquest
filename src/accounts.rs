@@ -3,7 +3,8 @@
 
 use crate::{App, Error, now_ms};
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, State};
@@ -173,12 +174,16 @@ fn clean_device(device: Option<&str>) -> String {
         .collect()
 }
 
+/// Hashes a password with a salt of argon2's own choosing.
+///
+/// This used to draw sixteen bytes itself and encode them as a `SaltString`.
+/// password-hash 0.6 takes the salt out of the caller's hands: `hash_password`
+/// generates a large one from the system CSPRNG, and `SaltString` is gone.
+/// Hashes written by the old code still verify, because the salt and the
+/// parameters are read back out of the PHC string rather than supplied.
 pub fn hash_password(password: &str) -> Result<String, Error> {
-    let mut salt = [0u8; 16];
-    getrandom::fill(&mut salt).map_err(|_| "password salt unavailable")?;
-    let salt = SaltString::encode_b64(&salt).map_err(|e| e.to_string())?;
     Ok(Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| e.to_string())?
         .to_string())
 }
