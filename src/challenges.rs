@@ -558,7 +558,7 @@ pub fn list(
                             && review.id <= now
                         {
                             count += 1;
-                            days.insert(player.clock.day(review.id));
+                            days.insert(player.clock_history.day(review.id));
                         }
                     }
                 }
@@ -628,7 +628,7 @@ pub fn list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::{Clock, FreezePolicy, Review};
+    use crate::game::{ClockHistory, FreezePolicy, Review};
 
     #[test]
     fn challenge_events_are_private_transactional_and_retry_safe() {
@@ -828,7 +828,7 @@ mod tests {
         Participant {
             user: user.into(),
             display: user.into(),
-            clock: Clock::default(),
+            clock_history: ClockHistory::default(),
             freeze_policy: FreezePolicy::default(),
             reviews: times
                 .iter()

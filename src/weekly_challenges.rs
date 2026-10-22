@@ -193,7 +193,7 @@ mod tests {
     use super::*;
     use crate::{
         competition::Participant,
-        game::{Clock, FreezePolicy, Review},
+        game::{ClockHistory, FreezePolicy, Review},
     };
     const NOW: i64 = 1_800_000_000_000;
     fn roster() -> BTreeMap<String, String> {
@@ -212,7 +212,7 @@ mod tests {
         Participant {
             user: user.into(),
             display: user.into(),
-            clock: Clock::default(),
+            clock_history: ClockHistory::default(),
             freeze_policy: FreezePolicy::default(),
             reviews: reviews
                 .iter()

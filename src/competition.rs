@@ -3,7 +3,7 @@
 //! keeps its existing scoring; this archive freezes each result after a late-sync
 //! grace period and never rewrites a finalized winner.
 
-use crate::game::{self, Clock, FreezePolicy, Week};
+use crate::game::{self, ClockHistory, FreezePolicy, Week};
 use crate::store::{Error, Store};
 use chrono::{Datelike, Duration, NaiveDate};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -17,7 +17,7 @@ pub struct Participant {
     pub user: String,
     pub display: String,
     pub reviews: std::sync::Arc<Vec<game::Review>>,
-    pub clock: Clock,
+    pub clock_history: ClockHistory,
     pub freeze_policy: FreezePolicy,
 }
 
@@ -241,11 +241,11 @@ pub fn refresh(
             .filter(|r| r.id <= now_ms)
             .copied()
             .collect();
-        let profile = game::compute_with_freezes(
+        let profile = game::compute_with_history(
             &player.user,
             &player.display,
             &reviews,
-            &player.clock,
+            &player.clock_history,
             &archive_week,
             now_ms,
             &player.freeze_policy,
@@ -931,6 +931,7 @@ pub fn dashboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::Clock;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -995,7 +996,7 @@ mod tests {
             user: user.into(),
             display: user.to_uppercase(),
             reviews: reviews.into(),
-            clock: Clock::default(),
+            clock_history: ClockHistory::default(),
             freeze_policy: FreezePolicy::default(),
         }
     }
@@ -1437,10 +1438,10 @@ mod tests {
         let mut db = Database::new();
         let week = Week::default();
         let mut eastern = player("east", reviews("2026-09-14", 1));
-        eastern.clock = Clock {
+        eastern.clock_history = ClockHistory::single(Clock {
             offset_west_min: -600,
             rollover_hour: 4,
-        };
+        });
         let players = vec![eastern, player("utc", reviews("2026-09-14", 1))];
         let now = at("2026-09-14", 14);
         refresh(db.get(), &players, &week, now, None).unwrap();
@@ -1456,11 +1457,11 @@ mod tests {
         );
         let current_week = period(db.get(), "week", "2026-09-14");
         for player in &players {
-            let profile = game::compute_with_freezes(
+            let profile = game::compute_with_history(
                 &player.user,
                 &player.display,
                 &player.reviews,
-                &player.clock,
+                &player.clock_history,
                 &week,
                 now,
                 &player.freeze_policy,
@@ -1486,7 +1487,9 @@ mod tests {
         let mut rows = reviews("2026-10-24", 1);
         rows.extend(reviews("2026-10-25", 1));
         let mut participant = player("a", rows);
-        participant.clock.rollover_hour = 2;
+        let mut clock = participant.clock_history.current();
+        clock.rollover_hour = 2;
+        participant.clock_history = ClockHistory::single(clock);
         refresh(db.get(), &[participant], &week, at("2026-10-27", 12), None).unwrap();
         let repeated = period(db.get(), "day", "2026-10-24");
         assert_eq!(repeated.standings[0].reviews, 2);

@@ -36,7 +36,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Datelike;
-use game::{Clock, Periods, Profile, Records, Review, Week};
+use game::{Clock, ClockHistory, Periods, Profile, Records, Review, Week};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -117,6 +117,8 @@ fn default_state() -> PathBuf {
 struct Player {
     reviews: Arc<Vec<Review>>,
     clock: Clock,
+    /// Every clock they have kept, so old reviews keep the days they fell in.
+    clock_history: ClockHistory,
     freeze_policy: game::FreezePolicy,
     /// Changes whenever anything above does, so cached standings know they are stale.
     revision: u64,
@@ -207,11 +209,11 @@ impl App {
         fresh.sort_by_key(|r| r.id);
         fresh.dedup_by_key(|r| r.id);
         let merged = [player.reviews.as_slice(), &fresh].concat();
-        Some(game::compute_with_freezes(
+        Some(game::compute_with_history(
             user,
             &self.display(user),
             &merged,
-            &player.clock,
+            &player.clock_history,
             &self.week,
             now_ms(),
             &player.freeze_policy,
@@ -228,7 +230,7 @@ impl App {
         let key = (
             player.revision,
             game::review_weighting(),
-            player.clock.day(now),
+            player.clock_history.day(now),
             now.div_euclid(3_600_000),
         );
         if let Some(cached) = self.standings.0.lock().unwrap().get(user)
@@ -241,11 +243,11 @@ impl App {
             .reviews
             .last()
             .is_some_and(|r| r.id > now - 3_600_000);
-        let mut profile = game::compute_with_freezes(
+        let mut profile = game::compute_with_history(
             user,
             &self.display(user),
             &player.reviews,
-            &player.clock,
+            &player.clock_history,
             &self.week,
             now,
             &player.freeze_policy,
@@ -319,7 +321,8 @@ impl App {
                 competition::Participant {
                     display: self.display(&user),
                     reviews: player.map_or_else(Default::default, |p| p.reviews.clone()),
-                    clock: player.map_or_else(Clock::default, |p| p.clock),
+                    clock_history: player
+                        .map_or_else(ClockHistory::default, |p| p.clock_history.clone()),
                     freeze_policy: player
                         .map_or_else(game::FreezePolicy::default, |p| p.freeze_policy.clone()),
                     user,
@@ -458,7 +461,7 @@ struct StudyHistory {
 
 fn latest_study_session(player: &Player) -> Option<StudySession> {
     let last = player.reviews.last()?;
-    let day = player.clock.day(last.id);
+    let day = player.clock_history.day(last.id);
     let mut session = StudySession {
         started_at: last.id,
         ended_at: last.id,
@@ -469,7 +472,7 @@ fn latest_study_session(player: &Player) -> Option<StudySession> {
     let mut next_at = last.id;
     let mut new_cards = HashSet::new();
     for review in player.reviews.iter().rev() {
-        if player.clock.day(review.id) != day
+        if player.clock_history.day(review.id) != day
             || next_at.saturating_sub(review.id) >= game::SESSION_GAP_MS
         {
             break;
@@ -1779,6 +1782,7 @@ fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
     Ok(Player {
         reviews: Arc::new(store.reviews(user)?),
         clock: store.clock(user)?,
+        clock_history: store.clock_history(user)?,
         freeze_policy: store.freeze_policy(user)?,
         revision: next_revision(),
     })
@@ -1903,7 +1907,12 @@ fn tick(app: &App) -> Result<(), Error> {
     legacy.sort_unstable();
     let clocks: HashMap<&str, Clock> = participants
         .iter()
-        .map(|participant| (participant.user.as_str(), participant.clock))
+        .map(|participant| {
+            (
+                participant.user.as_str(),
+                participant.clock_history.current(),
+            )
+        })
         .collect();
     for user in &users {
         let Some(profile) = ranking.get(user.as_str()) else {
@@ -2756,6 +2765,7 @@ mod tests {
             Player {
                 reviews: Default::default(),
                 clock: Clock::default(),
+                clock_history: ClockHistory::default(),
                 freeze_policy: game::FreezePolicy::default(),
                 revision: next_revision(),
             },
@@ -5706,6 +5716,7 @@ mod tests {
             Player {
                 reviews: Arc::new(reviews_at(now_ms() - 600_000, count)),
                 clock: Clock::default(),
+                clock_history: ClockHistory::default(),
                 freeze_policy: game::FreezePolicy::default(),
                 revision: next_revision(),
             },

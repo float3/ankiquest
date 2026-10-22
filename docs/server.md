@@ -137,6 +137,17 @@ both clients upload new review rows after each answer and show XP feedback while
 
 stores the rows and returns the profile. `POST /api/preview/<user>` takes the same `reviews` without storing anything.
 
+the `clock` is the one a player keeps now. each upload that reports a different `offset_west_min` or `rollover_hour` than the last records an entry in `clock_history`, dated from that upload, and every review is read against the clock that was in force when it happened. moving time zone therefore cannot relabel days already studied: a player who studied every morning in Berlin and then moved to California keeps those Berlin mornings on the Berlin days, instead of having them slide back one and leaving an empty day behind. travelling west gains hours, and the day that repeats counts once; travelling far enough east to step the numbering over a day entirely leaves a day nobody could have studied in, and that day reads as protected rather than missed.
+
+a move made before a server recorded any history cannot be recovered from the review data, since Anki stores only a timestamp. such a player gets one entry holding the clock the server knows about, reaching back over everything they have uploaded. declaring the earlier clock takes two statements: point the existing entry at the instant of the move, and insert the clock kept before it.
+
+```sql
+update clock_history set effective_from_ms = <move in epoch ms> where user = '<player>' and effective_from_ms = 0;
+insert into clock_history (user, effective_from_ms, offset_west_min, rollover_hour) values ('<player>', 0, -120, 4);
+```
+
+pick an instant after their last study session on the old clock and before the first on the new one. the earliest entry always reaches back to the beginning of time, whatever instant it carries.
+
 alternatively set `sync_base` to the `SYNC_BASE` of a self-hosted Anki sync server: every folder in it with a `collection.anki2` becomes a player, and collections are copied before reading and never written.
 
 ## streak freezes

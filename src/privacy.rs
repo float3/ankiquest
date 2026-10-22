@@ -31,6 +31,8 @@ const EXPORT: &[(&str, &str)] = &[
     ("visibility", "select public from visibility where user = ?1"),
     ("reviews", "select id, cid, last_ivl, ivl, time_ms, kind from reviews where user = ?1 order by id"),
     ("anki_day", "select offset_west_min, rollover_hour from clocks where user = ?1"),
+    ("anki_day_history", "select effective_from_ms, offset_west_min, rollover_hour
+         from clock_history where user = ?1 order by effective_from_ms"),
     ("syncs", "select received_at from review_syncs where user = ?1"),
     ("language", "select language from languages where user = ?1"),
     ("companion", "select companion from companion_preferences where user = ?1"),
@@ -68,6 +70,7 @@ const OWNED: &[(&str, &str)] = &[
     ("visibility", "user = ?1"),
     ("reviews", "user = ?1"),
     ("clocks", "user = ?1"),
+    ("clock_history", "user = ?1"),
     ("review_syncs", "user = ?1"),
     (
         "seen",

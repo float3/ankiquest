@@ -103,6 +103,135 @@ impl Clock {
     }
 }
 
+/// A clock the player kept from `effective_from_ms` until the next change.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClockChange {
+    pub effective_from_ms: i64,
+    pub clock: Clock,
+}
+
+/// A player's clocks over time. A review belongs to the day it belonged to when
+/// it happened, so moving time zone or a daylight-saving shift cannot relabel
+/// days the player has already lived through.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClockHistory {
+    /// Never empty, ordered by instant, the first entry reaching back forever.
+    changes: Vec<ClockChange>,
+}
+
+impl Default for ClockHistory {
+    fn default() -> Self {
+        Self::single(Clock::default())
+    }
+}
+
+impl From<Clock> for ClockHistory {
+    fn from(clock: Clock) -> Self {
+        Self::single(clock)
+    }
+}
+
+impl ClockHistory {
+    /// One clock for all of time: how a player with no recorded changes reads.
+    pub fn single(clock: Clock) -> Self {
+        Self {
+            changes: vec![ClockChange {
+                effective_from_ms: i64::MIN,
+                clock,
+            }],
+        }
+    }
+
+    /// Orders the changes and reaches the earliest one back to the beginning of
+    /// time, so that every instant resolves to exactly one clock.
+    pub fn new(mut changes: Vec<ClockChange>) -> Self {
+        if changes.is_empty() {
+            return Self::default();
+        }
+        changes.sort_by_key(|change| change.effective_from_ms);
+        changes.dedup_by_key(|change| change.effective_from_ms);
+        changes[0].effective_from_ms = i64::MIN;
+        Self { changes }
+    }
+
+    /// The clock the player keeps now, which is the one a new review arrives on.
+    pub fn current(&self) -> Clock {
+        self.changes.last().expect("never empty").clock
+    }
+
+    /// The clock in force at `ms`.
+    pub fn at(&self, ms: i64) -> Clock {
+        let index = self
+            .changes
+            .partition_point(|change| change.effective_from_ms <= ms)
+            .saturating_sub(1);
+        self.changes[index].clock
+    }
+
+    pub fn day(&self, ms: i64) -> i64 {
+        self.at(ms).day(ms)
+    }
+
+    pub fn hour(&self, ms: i64) -> i64 {
+        self.at(ms).hour(ms)
+    }
+
+    /// When a day began. Days are numbered by the clock that was in force during
+    /// them, so the inverse has to find the change that owns the number.
+    pub fn day_start_ms(&self, day: i64) -> i64 {
+        for change in self.changes.iter().rev() {
+            let start = change.clock.day_start_ms(day);
+            if start >= change.effective_from_ms {
+                return start;
+            }
+        }
+        self.changes[0].clock.day_start_ms(day)
+    }
+
+    /// Day numbers no instant falls in. Moving the clock east loses hours, which
+    /// can step the numbering over a day the player never got to study in; such
+    /// a day is not a day they missed.
+    pub fn skipped_days(&self) -> BTreeSet<i64> {
+        let mut skipped = BTreeSet::new();
+        for pair in self.changes.windows(2) {
+            let at = pair[1].effective_from_ms;
+            let before = pair[0].clock.day(at.saturating_sub(1));
+            let after = pair[1].clock.day(at);
+            skipped.extend((before + 1)..after);
+        }
+        skipped
+    }
+}
+
+/// Numbers the days of timestamps read in ascending order, never going
+/// backwards. Moving the clock west gains hours, which can otherwise place a
+/// later review in an earlier day than the review before it; a streak reads
+/// days as a sequence, so the long day counts once.
+struct DayWalk<'a> {
+    clock: &'a ClockHistory,
+    floor: i64,
+}
+
+impl<'a> DayWalk<'a> {
+    fn new(clock: &'a ClockHistory) -> Self {
+        Self {
+            clock,
+            floor: i64::MIN,
+        }
+    }
+
+    fn day(&mut self, ms: i64) -> i64 {
+        let day = self.peek(ms);
+        self.floor = day;
+        day
+    }
+
+    /// The day `ms` falls in, without advancing the walk.
+    fn peek(&self, ms: i64) -> i64 {
+        self.clock.day(ms).max(self.floor)
+    }
+}
+
 /// The leaderboard week shared by every player: Monday to Sunday in one time zone,
 /// turning over at the same hour for everyone.
 #[derive(Clone, Copy, Debug)]
@@ -687,14 +816,15 @@ fn best_window(entries: &[(i64, f64, u64)], window_ms: i64) -> Record {
 fn timeline(
     earned: &[(i64, f64)],
     day_xp: &BTreeMap<i64, u64>,
-    clock: &Clock,
+    clock: &ClockHistory,
 ) -> Vec<(i64, f64, u64)> {
     let mut entries = Vec::with_capacity(earned.len() + day_xp.len());
     let mut index = 0;
+    let mut walk = DayWalk::new(clock);
     while index < earned.len() {
-        let day = clock.day(earned[index].0);
+        let day = walk.day(earned[index].0);
         let mut reviewed = 0.0;
-        while index < earned.len() && clock.day(earned[index].0) == day {
+        while index < earned.len() && walk.peek(earned[index].0) == day {
             entries.push((earned[index].0, earned[index].1, 1));
             reviewed += earned[index].1;
             index += 1;
@@ -998,12 +1128,17 @@ fn collect_days(
     reviews: &[Review],
     clock: &Clock,
 ) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
-    collect_days_weighted(reviews, clock, 0, ReviewWeighting::Flat)
+    collect_days_weighted(
+        reviews,
+        &ClockHistory::single(*clock),
+        0,
+        ReviewWeighting::Flat,
+    )
 }
 
 fn collect_days_with_quests(
     reviews: &[Review],
-    clock: &Clock,
+    clock: &ClockHistory,
     seed: u64,
 ) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
     collect_days_weighted(reviews, clock, seed, review_weighting())
@@ -1011,7 +1146,7 @@ fn collect_days_with_quests(
 
 fn collect_days_weighted(
     reviews: &[Review],
-    clock: &Clock,
+    clock: &ClockHistory,
     seed: u64,
     weighting: ReviewWeighting,
 ) -> (BTreeMap<i64, DayStats>, u64, Vec<(i64, f64)>) {
@@ -1025,8 +1160,9 @@ fn collect_days_weighted(
     let mut recent = VecDeque::new();
     let mut quests = Vec::new();
     let mut answers: HashMap<i64, i32> = HashMap::new();
+    let mut walk = DayWalk::new(clock);
     for r in reviews {
-        let day = clock.day(r.id);
+        let day = walk.day(r.id);
         let hour = clock.hour(r.id);
         if counted_day != Some(day) {
             answers.clear();
@@ -1067,7 +1203,7 @@ fn collect_days_weighted(
         if r.last_ivl >= MATURE_IVL {
             s.mature += 1;
         }
-        let morning = hour >= clock.rollover_hour;
+        let morning = hour >= clock.at(r.id).rollover_hour;
         if morning && hour < 12 {
             s.before_noon += 1;
         }
@@ -1115,6 +1251,10 @@ pub fn compute(
     )
 }
 
+/// A profile read against one clock held for all of time. Production reads a
+/// player's [`ClockHistory`] through [`compute_with_history`]; this is the
+/// single-clock shorthand the tests are written against.
+#[cfg(test)]
 pub fn compute_with_freezes(
     user: &str,
     display: &str,
@@ -1124,11 +1264,32 @@ pub fn compute_with_freezes(
     now_ms: i64,
     freeze_policy: &FreezePolicy,
 ) -> Profile {
+    compute_with_history(
+        user,
+        display,
+        reviews,
+        &ClockHistory::single(*clock),
+        week,
+        now_ms,
+        freeze_policy,
+    )
+}
+
+pub fn compute_with_history(
+    user: &str,
+    display: &str,
+    reviews: &[Review],
+    clock: &ClockHistory,
+    week: &Week,
+    now_ms: i64,
+    freeze_policy: &FreezePolicy,
+) -> Profile {
     let (days, last_combo, earned) = collect_days_with_quests(reviews, clock, seed_of(user));
     let today = clock.day(now_ms);
     let legacy_until = freeze_policy.legacy_until.map(|at| clock.day(at));
     let seed = seed_of(user);
     let first = days.keys().next().copied().unwrap_or(today);
+    let skipped = clock.skipped_days();
 
     let mut totals = Totals::default();
     let mut streak = 0u64;
@@ -1191,7 +1352,12 @@ pub fn compute_with_freezes(
                 freezes += 1;
             }
         } else if day != today {
-            if streak > 0
+            if skipped.contains(&day) {
+                // Moving the clock east stepped over this day. There were no
+                // hours in it to study, so it costs neither the streak nor a
+                // freeze, and it reads as protected rather than missed.
+                frozen.insert(day);
+            } else if streak > 0
                 && freezes > 0
                 && (legacy || freeze_policy.enabled_at(clock.day_start_ms(day + 1) - 1))
             {
@@ -1804,7 +1970,8 @@ mod tests {
 
     /// Finish every possible quest metric, with a second session before noon.
     fn perfect_day(prior: &[Review], day: i64, clock: &Clock) -> Vec<Review> {
-        let (days, _, _) = collect_days_with_quests(prior, clock, seed_of("a"));
+        let (days, _, _) =
+            collect_days_with_quests(prior, &ClockHistory::single(*clock), seed_of("a"));
         let recent = days
             .values()
             .rev()
@@ -1839,7 +2006,7 @@ mod tests {
     }
 
     fn first_completion(reviews: &[Review], day: i64) -> i64 {
-        collect_days_with_quests(reviews, &utc(), seed_of("a"))
+        collect_days_with_quests(reviews, &ClockHistory::single(utc()), seed_of("a"))
             .0
             .get(&day)
             .unwrap()
@@ -2591,7 +2758,13 @@ mod tests {
             kind: 1,
         };
         let run = |reviews: &[Review]| {
-            collect_days_weighted(reviews, &utc(), 0, ReviewWeighting::Diminishing).2
+            collect_days_weighted(
+                reviews,
+                &ClockHistory::single(utc()),
+                0,
+                ReviewWeighting::Diminishing,
+            )
+            .2
         };
         let total = |earned: &[(i64, f64)]| earned.iter().map(|(_, xp)| xp).sum::<f64>();
 
@@ -2629,7 +2802,13 @@ mod tests {
             kind,
         };
         let run = |reviews: &[Review]| {
-            collect_days_weighted(reviews, &utc(), 0, ReviewWeighting::Diminishing).2
+            collect_days_weighted(
+                reviews,
+                &ClockHistory::single(utc()),
+                0,
+                ReviewWeighting::Diminishing,
+            )
+            .2
         };
         let learning = run(&[answer(0, 0, 0), answer(1, 0, 0), answer(2, 0, 0)]);
         let learned: f64 = learning.iter().map(|(_, xp)| xp).sum();
@@ -2984,5 +3163,171 @@ mod tests {
         assert_eq!(p.streak, 0);
         assert_eq!(p.quests.len(), 3);
         assert_eq!(p.heatmap.len(), HEATMAP_DAYS as usize);
+    }
+
+    const BERLIN: Clock = Clock {
+        offset_west_min: -120,
+        rollover_hour: 4,
+    };
+    const CALIFORNIA: Clock = Clock {
+        offset_west_min: 420,
+        rollover_hour: 4,
+    };
+
+    fn moment(at: i64, cid: i64) -> Review {
+        Review {
+            id: at,
+            cid,
+            last_ivl: 0,
+            ivl: None,
+            time_ms: 5_000,
+            kind: 1,
+        }
+    }
+
+    fn moments(times: &[i64]) -> Vec<Review> {
+        times
+            .iter()
+            .enumerate()
+            .map(|(index, at)| moment(*at, index as i64))
+            .collect()
+    }
+
+    fn kept(clock: &ClockHistory, reviews: &[Review], now: i64) -> Profile {
+        compute_with_history(
+            "a",
+            "a",
+            reviews,
+            clock,
+            &Week::default(),
+            now,
+            &FreezePolicy::default(),
+        )
+    }
+
+    #[test]
+    fn moving_west_keeps_earlier_days_on_the_clock_they_were_studied_under() {
+        // Four mornings studied in Berlin, then two afternoons in California.
+        // Read on one California clock, the Berlin mornings each slide back a
+        // day and 3 October empties out although it was studied.
+        let moved_at = 1_791_115_200_000; // 2026-10-04 12:00 UTC, first sync from California
+        let now = 1_791_241_200_000; // 2026-10-05 23:00 UTC
+        let reviews = moments(&[
+            1_790_751_600_000, // 30 Sep 09:00 Berlin
+            1_790_838_000_000, // 1 Oct 09:00
+            1_790_924_400_000, // 2 Oct 09:00
+            1_791_010_800_000, // 3 Oct 09:00
+            1_791_151_200_000, // 4 Oct 15:00 California
+            1_791_237_600_000, // 5 Oct 15:00
+        ]);
+
+        let one_clock = compute("a", "a", &reviews, &CALIFORNIA, &Week::default(), now);
+        assert_eq!(
+            one_clock.streak, 2,
+            "one clock for all of time invents a day the player missed"
+        );
+
+        let history = ClockHistory::new(vec![
+            ClockChange {
+                effective_from_ms: i64::MIN,
+                clock: BERLIN,
+            },
+            ClockChange {
+                effective_from_ms: moved_at,
+                clock: CALIFORNIA,
+            },
+        ]);
+        let profile = kept(&history, &reviews, now);
+        assert_eq!(
+            profile.streak, 6,
+            "every day studied counts, on the clock it was studied under"
+        );
+        assert_eq!(profile.lifetime.days_active, 6);
+    }
+
+    #[test]
+    fn moving_west_never_numbers_a_later_review_into_an_earlier_day() {
+        // The hours between 03:00 and 04:00 come round twice on the way west.
+        // The second pass is still the same day: a streak reads days in order.
+        let history = ClockHistory::new(vec![
+            ClockChange {
+                effective_from_ms: i64::MIN,
+                clock: BERLIN,
+            },
+            ClockChange {
+                effective_from_ms: 1_791_082_800_000, // 4 Oct 03:00 UTC
+                clock: CALIFORNIA,
+            },
+        ]);
+        let reviews = moments(&[
+            1_791_081_000_000, // 4 Oct 04:30 Berlin
+            1_791_108_000_000, // 4 Oct 03:00 California, numbered a day earlier on its own
+        ]);
+        assert_eq!(
+            history.day(reviews[1].id),
+            history.day(reviews[0].id) - 1,
+            "the later review does fall in an earlier California day"
+        );
+        let profile = kept(&history, &reviews, 1_791_144_000_000);
+        assert_eq!(
+            profile.lifetime.days_active, 1,
+            "the long day is one day, not a day and the day before it"
+        );
+        assert_eq!(profile.streak, 1);
+    }
+
+    #[test]
+    fn moving_east_does_not_count_a_stepped_over_day_as_missed() {
+        // Crossing the date line from UTC-12 to UTC+14 steps the numbering over
+        // a day entirely. There were no hours in it to study.
+        let before = Clock {
+            offset_west_min: 720,
+            rollover_hour: 4,
+        };
+        let after = Clock {
+            offset_west_min: -840,
+            rollover_hour: 4,
+        };
+        let crossed_at = 1_791_644_400_000; // 10 Oct 15:00 UTC
+        let history = ClockHistory::new(vec![
+            ClockChange {
+                effective_from_ms: i64::MIN,
+                clock: before,
+            },
+            ClockChange {
+                effective_from_ms: crossed_at,
+                clock: after,
+            },
+        ]);
+        let stepped_over = history.skipped_days();
+        assert_eq!(
+            stepped_over.len(),
+            1,
+            "the date line steps over exactly one day number"
+        );
+
+        let reviews = moments(&[
+            1_791_471_600_000, // three days running before the crossing
+            1_791_558_000_000,
+            1_791_640_800_000,
+            1_791_648_000_000, // and three after it
+            1_791_734_400_000,
+            1_791_820_800_000,
+        ]);
+        let now = 1_791_824_400_000;
+        let profile = kept(&history, &reviews, now);
+        assert_eq!(
+            profile.streak, 6,
+            "a day that never happened neither breaks the streak nor costs a freeze"
+        );
+        assert_eq!(profile.freezes, 0, "and it is not paid for out of the bank");
+        let missing = *stepped_over.iter().next().unwrap();
+        assert!(
+            profile
+                .history
+                .iter()
+                .any(|day| day.date == date_string(missing) && day.frozen),
+            "it reads as protected rather than missed"
+        );
     }
 }

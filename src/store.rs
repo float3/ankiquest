@@ -1,4 +1,4 @@
-use crate::game::{Clock, Review};
+use crate::game::{Clock, ClockChange, ClockHistory, Review};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::fs;
@@ -69,6 +69,13 @@ impl Store {
                  offset_west_min integer not null,
                  rollover_hour integer not null
              );
+             create table if not exists clock_history (
+                 user text not null,
+                 effective_from_ms integer not null,
+                 offset_west_min integer not null,
+                 rollover_hour integer not null,
+                 primary key (user, effective_from_ms)
+             ) without rowid;
              create table if not exists seen (
                  user text not null,
                  key text not null,
@@ -87,6 +94,15 @@ impl Store {
         if !has_ivl {
             conn.execute_batch("alter table reviews add column ivl integer")?;
         }
+        // Players recorded before clocks had a history keep the only clock we
+        // know about, reaching back over all of their reviews. A move they made
+        // before this point has to be declared; it is not in the review data.
+        conn.execute(
+            "insert into clock_history (user, effective_from_ms, offset_west_min, rollover_hour)
+             select user, 0, offset_west_min, rollover_hour from clocks
+             where not exists (select 1 from clock_history where clock_history.user = clocks.user)",
+            [],
+        )?;
         crate::accounts::initialize(&conn)?;
         crate::social::initialize(&conn)?;
         crate::avatars::initialize(&conn)?;
@@ -152,6 +168,30 @@ impl Store {
             )
             .optional()?;
         Ok(clock.unwrap_or_default())
+    }
+
+    /// Every clock the player has kept, so each review reads against the one it
+    /// was recorded under rather than the one they keep today.
+    pub fn clock_history(&self, user: &str) -> Result<ClockHistory, Error> {
+        let mut statement = self.conn.prepare(
+            "select effective_from_ms, offset_west_min, rollover_hour from clock_history
+             where user = ?1 order by effective_from_ms",
+        )?;
+        let changes = statement
+            .query_map([user], |r| {
+                Ok(ClockChange {
+                    effective_from_ms: r.get(0)?,
+                    clock: Clock {
+                        offset_west_min: r.get(1)?,
+                        rollover_hour: r.get(2)?,
+                    },
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if changes.is_empty() {
+            return Ok(ClockHistory::single(self.clock(user)?));
+        }
+        Ok(ClockHistory::new(changes))
     }
 
     pub fn is_known(&self, user: &str) -> Result<bool, Error> {
@@ -266,6 +306,38 @@ impl Store {
                      rollover_hour = excluded.rollover_hour",
                 params![user, clock.offset_west_min, clock.rollover_hour],
             )?;
+            // A clock that differs from the last one we saw starts a new entry,
+            // dated from this upload: the reviews already here were kept under
+            // the old one. The first entry a player gets reaches back forever,
+            // since there is nothing before it to date the change against.
+            let latest = tx
+                .query_row(
+                    "select offset_west_min, rollover_hour from clock_history
+                     where user = ?1 order by effective_from_ms desc limit 1",
+                    params![user],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            let moved = latest.is_none_or(|(offset_west_min, rollover_hour)| {
+                offset_west_min != clock.offset_west_min || rollover_hour != clock.rollover_hour
+            });
+            if moved {
+                let effective_from_ms = if latest.is_none() { 0 } else { received_at };
+                tx.execute(
+                    "insert into clock_history
+                         (user, effective_from_ms, offset_west_min, rollover_hour)
+                     values (?1, ?2, ?3, ?4)
+                     on conflict (user, effective_from_ms) do update set
+                         offset_west_min = excluded.offset_west_min,
+                         rollover_hour = excluded.rollover_hour",
+                    params![
+                        user,
+                        effective_from_ms,
+                        clock.offset_west_min,
+                        clock.rollover_hour
+                    ],
+                )?;
+            }
             tx.execute(
                 "insert into review_syncs (user, received_at) values (?1, ?2)
                  on conflict(user) do update set received_at = max(review_syncs.received_at, excluded.received_at)",
@@ -327,6 +399,90 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn a_changed_clock_is_recorded_and_older_reviews_keep_the_old_one() {
+        let dir = temp_dir("clock-history");
+        let mut store = Store::open(&dir).unwrap();
+        let berlin = Clock {
+            offset_west_min: -120,
+            rollover_hour: 4,
+        };
+        let california = Clock {
+            offset_west_min: 420,
+            rollover_hour: 4,
+        };
+        let study = |id| Review {
+            id,
+            cid: id,
+            last_ivl: 0,
+            ivl: None,
+            time_ms: 5_000,
+            kind: 1,
+        };
+        let morning = study(1_791_010_800_000); // 3 Oct 09:00 Berlin
+        let afternoon = study(1_791_151_200_000); // 4 Oct 15:00 California
+
+        store
+            .upsert_at("hill", &[morning], &[], berlin, 1_791_011_000_000)
+            .unwrap();
+        store
+            .upsert_at("hill", &[], &[], berlin, 1_791_050_000_000)
+            .unwrap();
+        store
+            .upsert_at("hill", &[afternoon], &[], california, 1_791_151_500_000)
+            .unwrap();
+
+        let history = store.clock_history("hill").unwrap();
+        assert_eq!(history.current(), california);
+        assert_eq!(
+            history.at(morning.id),
+            berlin,
+            "the Berlin morning is still read on the clock it was studied under"
+        );
+        assert_eq!(
+            history.day(morning.id) + 1,
+            history.day(afternoon.id),
+            "the two days run consecutively, with no empty day between them"
+        );
+
+        store
+            .upsert_at("hill", &[], &[], california, 1_791_200_000_000)
+            .unwrap();
+        assert_eq!(
+            store.clock_history("hill").unwrap(),
+            history,
+            "an unchanged clock does not record another move"
+        );
+    }
+
+    #[test]
+    fn a_player_recorded_before_clocks_had_a_history_gets_one_reaching_back() {
+        let dir = temp_dir("clock-history-migration");
+        let berlin = Clock {
+            offset_west_min: -120,
+            rollover_hour: 4,
+        };
+        {
+            let store = Store::open(&dir).unwrap();
+            store
+                .conn
+                .execute(
+                    "insert into clocks (user, offset_west_min, rollover_hour) values (?1, ?2, ?3)",
+                    params!["hill", berlin.offset_west_min, berlin.rollover_hour],
+                )
+                .unwrap();
+            store.conn.execute("delete from clock_history", []).unwrap();
+        }
+        let store = Store::open(&dir).unwrap();
+        let history = store.clock_history("hill").unwrap();
+        assert_eq!(history.current(), berlin);
+        assert_eq!(
+            history.at(0),
+            berlin,
+            "the only clock we know about covers everything already uploaded"
+        );
     }
 
     #[test]
