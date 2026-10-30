@@ -48,6 +48,7 @@
       cfg = config.services.ankiquest;
       syncMount = "/run/ankiquest-sync";
       withToken = lib.filterAttrs (_: u: u.tokenFile != null) cfg.users;
+      withOAuth = lib.filterAttrs (name: c: lib.elem name ["google" "github" "gitlab"] && c != null) cfg.oauth;
       configFile = pkgs.writeText "ankiquest.json" (builtins.toJSON {
         addr = "127.0.0.1:${toString cfg.port}";
         sync_base =
@@ -67,6 +68,14 @@
         registration = cfg.registration;
         devs = cfg.devs;
         privacy = lib.filterAttrs (_: value: value != null) cfg.privacy;
+        oauth =
+          lib.mapAttrs (name: c:
+            {
+              client_id = c.clientId;
+              client_secret_file = "/run/credentials/ankiquest.service/oauth-${name}";
+            }
+            // lib.optionalAttrs ((c.baseUrl or null) != null) {base_url = c.baseUrl;})
+          withOAuth;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
           if cfg.sitePasswordFile == null
@@ -87,6 +96,22 @@
           })
           cfg.users;
       });
+      oauthClient = extra:
+        lib.types.nullOr (lib.types.submodule {
+          options =
+            {
+              clientId = lib.mkOption {
+                type = lib.types.str;
+                description = "Client ID of the OAuth app.";
+              };
+              clientSecretFile = lib.mkOption {
+                type = lib.types.str;
+                example = "/run/secrets/ankiquest-oauth";
+                description = "Runtime file with the app's client secret. Loaded with systemd credentials; the secret never enters the Nix store.";
+              };
+            }
+            // extra;
+        });
       user = lib.types.submodule {
         options = {
           display = lib.mkOption {
@@ -127,6 +152,33 @@
           default = [];
           example = ["hill"];
           description = "Players who can open the dev console at /dev: announcements to everyone or to groups, statistics and recent errors. Names listed here cannot be taken by a new sign-up, so create a self-service account before listing it.";
+        };
+        oauth = lib.mkOption {
+          description = "Sign-in with Google, GitHub and GitLab. Each is offered once configured; the callback is https://<domain>/auth/oauth/<provider>/callback. New accounts also need registration.";
+          default = {};
+          type = lib.types.submodule {
+            options = {
+              google = lib.mkOption {
+                type = oauthClient {};
+                default = null;
+              };
+              github = lib.mkOption {
+                type = oauthClient {};
+                default = null;
+              };
+              gitlab = lib.mkOption {
+                type = oauthClient {
+                  baseUrl = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    example = "https://gitlab.example.com";
+                    description = "A self-hosted GitLab instead of gitlab.com.";
+                  };
+                };
+                default = null;
+              };
+            };
+          };
         };
         privacy = lib.mkOption {
           description = "Who runs this server, shown on the /privacy notice.";
@@ -228,6 +280,10 @@
             assertion = !cfg.privateSite || cfg.sitePasswordFile != null || withToken != {} || cfg.registration;
             message = "services.ankiquest.privateSite needs sitePasswordFile, a user tokenFile, or registration.";
           }
+          {
+            assertion = withOAuth == {} || cfg.domain != null;
+            message = "services.ankiquest.oauth needs domain for its callback addresses.";
+          }
         ];
         # systemd holds the port and passes it in. Connections nginx makes to
         # it belong to the socket unit, so the service's own address rules can
@@ -251,11 +307,12 @@
             BindReadOnlyPaths = lib.optional (cfg.syncBase != null) "${cfg.syncBase}:${syncMount}";
             LoadCredential =
               lib.mapAttrsToList (name: u: "token-${name}:${toString u.tokenFile}") withToken
-              ++ lib.optional (cfg.sitePasswordFile != null) "site-password:${toString cfg.sitePasswordFile}";
+              ++ lib.optional (cfg.sitePasswordFile != null) "site-password:${toString cfg.sitePasswordFile}"
+              ++ lib.mapAttrsToList (name: c: "oauth-${name}:${toString c.clientSecretFile}") withOAuth;
             Restart = "always";
             RestartSec = 5;
 
-            # It only ever connects out to the ntfy server, over the internet.
+            # It only ever connects out to the ntfy server and sign-in providers, over the internet.
             IPAddressDeny = [
               "localhost"
               "link-local"

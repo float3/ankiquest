@@ -41,6 +41,7 @@ struct Attempts {
 pub(crate) struct Access {
     password: Option<String>,
     sessions: Mutex<Sessions>,
+    pub(crate) oauth: crate::oauth::Flows,
 }
 
 impl Access {
@@ -75,6 +76,7 @@ impl Access {
         Ok(Self {
             password,
             sessions: Mutex::new(Sessions::default()),
+            oauth: Default::default(),
         })
     }
 
@@ -299,9 +301,10 @@ fn public_path(path: &str) -> bool {
                 | "/privacy"
         )
         || path.starts_with("/api/invites/")
+        || path.starts_with("/auth/oauth/")
 }
 
-fn encoded_next(path: &str) -> String {
+pub(crate) fn encoded_next(path: &str) -> String {
     path.bytes()
         .map(|byte| {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
@@ -334,7 +337,8 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
     } else if !matches!(
         *request.method(),
         Method::GET | Method::HEAD | Method::OPTIONS
-    ) && app.access.authenticated(request.headers(), now_ms())
+    ) && path != crate::oauth::SIGNUP_PATH
+        && app.access.authenticated(request.headers(), now_ms())
         && !bearer(request.headers()).is_some_and(|given| member_token(&app, given))
         && (!csrf(request.headers()) || !same_origin(&app, request.headers()))
     {
@@ -372,7 +376,7 @@ fn origin(value: &str) -> Option<String> {
     Some(format!("{scheme}://{authority}"))
 }
 
-fn same_origin(app: &App, headers: &HeaderMap) -> bool {
+pub(crate) fn same_origin(app: &App, headers: &HeaderMap) -> bool {
     let Some(given) = headers.get(header::ORIGIN) else {
         return true;
     };
@@ -411,6 +415,18 @@ fn cookie(app: &App, value: &str, max_age: i64) -> HeaderValue {
     .unwrap()
 }
 
+/// A new browser session for `user`, the one a password sign-in sets, as its cookie.
+pub(crate) fn member_session(
+    app: &App,
+    headers: &HeaderMap,
+    user: &str,
+) -> Result<HeaderValue, Error> {
+    let token = app
+        .access
+        .create_session(headers, Some(user.to_string()), now_ms())?;
+    Ok(cookie(app, &token, SESSION_SECONDS))
+}
+
 pub(crate) async fn status(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -420,6 +436,10 @@ pub(crate) async fn status(
         "member": member.as_ref().map(|user| serde_json::json!({"display":app.display(user),"user":user}))});
     if member.is_some_and(|user| app.config.devs.contains(&user)) {
         status["dev"] = true.into();
+    }
+    let providers = app.config.oauth.providers();
+    if !providers.is_empty() {
+        status["oauth"] = providers.iter().map(|p| p.key()).collect();
     }
     Json(status)
 }

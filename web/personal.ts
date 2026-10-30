@@ -19,6 +19,7 @@
     subscriptions?: {enabled: boolean; senders: Person[]; unsubscribed_senders: string[]; sharing_senders: string[]} | null;
     decks?: {decks: {id: string; name: string; enabled: boolean; recipients: string[]}[]; recipients: Person[]; celebrations: boolean} | null;
   }
+  interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
   interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean }
   interface Invite { name: string; members: number }
@@ -26,7 +27,7 @@
   interface State {
     session: OwnerSession | null; epoch: number; profile: Profile | null; study: StudyHistory | null; challenges: Challenges | null; activity: Activity | null;
     settings: Settings; errors: Record<string, string>; year: number | null; selected: string | null; native: boolean;
-    social: Social | null; invite: Invite | null; account: {created_at: number} | null;
+    social: Social | null; invite: Invite | null; account: {created_at: number; password?: boolean} | null; signIn: SignIn | null;
   }
 
   const {t:tr, html} = AnkiQuestI18n;
@@ -40,7 +41,7 @@
   const page = path === "/history" ? "history" : path === "/settings" ? "settings" : path === "/friends" ? "friends" : path.startsWith("/join/") ? "join" : "today";
   const inviteCode = page === "join" ? decodeURIComponent(path.slice("/join/".length)) : "";
   let reminders: [ReminderKey, string][] = [];
-  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null};
+  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null};
   document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = page === "settings" ? "settings" : "today";
   // Text waits for translations; restore() does too, so reminders are set before any render.
   void AnkiQuestI18n.ready.then(() => {
@@ -159,9 +160,10 @@
       } else if (page === "settings") {
         const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks"];
         const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session)];
-        const [results, account] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number}>("/api/accounts",undefined,session).catch(() => null)]);
+        const [results, account, signIn] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number; password?: boolean}>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null)]);
         if (state.session !== session || state.epoch !== epoch) return;
         state.account = account;
+        state.signIn = signIn;
         state.errors = {};
         results.forEach((result,index) => {
           const settings = state.settings as Record<SettingName, unknown>;
@@ -329,7 +331,7 @@
     const subscribed = new Set(subscriptions?.unsubscribed_senders || []), shared = new Set([...(subscriptions?.sharing_senders||[]),...subscribed]);
     const subscriptionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Deck completion alerts I receive")}</h2><p>${tr("Choose the people whose completed decks reach you.")}</p></div></div>${subscriptions?html`<form id="subscriptions-form">${check("enabled",tr("Receive deck completion alerts"),subscriptions.enabled)}<fieldset><legend>${tr("Unsubscribe from specific people")}</legend>${subscriptions.senders.filter(person=>shared.has(person.user)).map(person=>check("",person.display,subscribed.has(person.user),"",`data-unsubscribe="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No one is sharing decks with you yet.")}</p>`}</fieldset><div class="setting-actions"><button class="primary" type="submit">${tr("Save alert preferences")}</button></div><p class="status" role="status"></p></form>`:settingError("subscriptions")}</article>`;
     const deckCard = html`<article class="card"><div class="card-head"><div><h2>${tr("What I share")}</h2><p>${tr("Choose which finished decks friends can hear about.")}</p></div></div>${decks?html`<form id="decks-form"><details><summary>${tr("Manage deck sharing")}</summary>${decks.decks.length?decks.decks.map((deck,index)=>html`<fieldset data-deck-index="${index}"><legend>${esc(deck.name)}</legend>${check("",tr("Share completion"),deck.enabled,"",'data-deck-enabled')}<div class="stack">${decks.recipients.map(person=>check("",person.display,deck.recipients.includes(person.user),"",`data-deck-recipient="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No friends are available yet.")}</p>`}</div></fieldset>`).join(""):html`<p class="settings-hint">${tr("Upload reviews from Anki to see your decks here.")}</p>`}</details>${check("",tr("Celebrate milestones"),decks.celebrations!==false,"",'id="celebrations-toggle"')}<div class="setting-actions"><button class="primary" type="submit">${tr("Save deck sharing")}</button></div><p class="status" role="status"></p></form>`:settingError("decks")}</article>`;
-    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${privacyCard()}</div>`;
+    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${privacyCard()}</div>`;
     const selector = card && {companion:"#companion-form",reminders:"#reminders-form",nudges:"#nudge-status",freezes:"#freeze-toggle",subscriptions:"#subscriptions-form",decks:"#decks-form"}[card];
     const current = selector && $("personal-content").querySelector(selector)?.closest(".card");
     if (!current) {$("personal-content").innerHTML = markup;return;}
@@ -338,8 +340,42 @@
     if (card === "decks") replacement.querySelector("details")!.open = current.querySelector("details")?.open || false;
     current.replaceWith(replacement);
   }
+  function signInCard() {
+    const methods = state.signIn;
+    if (!methods?.providers.length) return "";
+    const last = methods.account && !methods.password && methods.providers.filter(item => item.linked).length === 1;
+    const rows = methods.providers.map(item => html`<div class="sign-in-row"><strong>${esc(item.name)}</strong>${item.linked
+      ? html`<button type="button" data-unlink="${esc(item.provider)}" ${last ? "disabled" : ""}>${tr("Unlink")}</button>`
+      : html`<a class="button-link" href="/auth/oauth/${esc(item.provider)}?link=1">${tr("Link")}</a>`}</div>`).join("");
+    const token = methods.account ? html`<div class="setting-actions"><button type="button" id="new-device-token">${tr("New device token")}</button></div><p class="settings-hint">${tr("For Anki and AnkiDroid: sign in there with your username and this token.")}</p><code id="device-token" class="device-token" hidden></code>` : "";
+    return html`<article class="card"><h2>${tr("Sign-in methods")}</h2>${rows}${last ? html`<p class="settings-hint">${tr("Link another sign-in before unlinking this one.")}</p>` : ""}${token}<p id="sign-in-status" class="status" role="status"></p></article>`;
+  }
+  async function signInChange(button: HTMLButtonElement, body: {action: string; provider?: string}) {
+    const session = state.session, status = $("sign-in-status");
+    if (!session) return;
+    button.disabled = true; status.className = "status"; status.textContent = "";
+    try {
+      const result = await owner<SignIn & {token?: string}>("/api/sign-in", body, session);
+      if (state.session !== session || !result) return;
+      if (result.token) {
+        const code = $("device-token"); code.textContent = result.token; code.hidden = false;
+        status.textContent = tr("Shown once. Copy it now.");
+        button.disabled = false;
+        return;
+      }
+      state.signIn = result; renderSettings();
+      $("sign-in-status").textContent = tr("Unlinked.");
+    } catch (cause) {
+      if (state.session !== session) return;
+      button.disabled = false; status.className = "status error";
+      status.textContent = (cause as {status?: number}).status === 409 ? tr("Link another sign-in before unlinking this one.") : (cause as Error).message;
+    }
+  }
   function privacyCard() {
-    const remove = state.account ? html`<form id="delete-account-form" class="danger-zone"><h3>${tr("Delete your account")}</h3><p class="settings-hint">${tr("This removes your account, your study data, your settings and everything you shared, straight away. It cannot be undone.")}</p><label class="field"><span>${tr("Password")}</span><input name="password" type="password" required autocomplete="current-password" maxlength="256"></label><div class="setting-actions"><button type="submit" class="danger">${tr("Delete my account")}</button></div><p class="status" role="status"></p></form>` : "";
+    const confirm = state.account?.password === false
+      ? html`<label class="field"><span>${tr("Type your username to confirm")}</span><input name="confirm" required autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32"></label>`
+      : html`<label class="field"><span>${tr("Password")}</span><input name="password" type="password" required autocomplete="current-password" maxlength="256"></label>`;
+    const remove = state.account ? html`<form id="delete-account-form" class="danger-zone"><h3>${tr("Delete your account")}</h3><p class="settings-hint">${tr("This removes your account, your study data, your settings and everything you shared, straight away. It cannot be undone.")}</p>${confirm}<div class="setting-actions"><button type="submit" class="danger">${tr("Delete my account")}</button></div><p class="status" role="status"></p></form>` : "";
     return html`<article class="card"><h2>${tr("Your data")}</h2><p class="section-intro">${tr("Download everything AnkiQuest stores about you, as one file.")}</p><div class="setting-actions"><button type="button" id="personal-export">${tr("Download my data")}</button><a class="button-link" href="${esc(site.href("/privacy"))}">${tr("Privacy notice")}</a></div><p id="export-status" class="status" role="status"></p>${remove}</article>`;
   }
   async function downloadData(button: HTMLButtonElement) {
@@ -367,7 +403,8 @@
       status.className = "status error"; status.textContent = tr("This cannot be undone.");
       return;
     }
-    const password = (form.elements.namedItem("password") as HTMLInputElement).value, body = {password};
+    const field = form.elements.namedItem("password") as HTMLInputElement | null;
+    const body = field ? {password: field.value} : {confirm: (form.elements.namedItem("confirm") as HTMLInputElement).value.trim()};
     form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach(control => control.disabled = true);
     status.className = "status"; status.textContent = tr("Deleting…");
     try {
@@ -377,7 +414,7 @@
         showGate(tr("Your account and its data were deleted."));
         return;
       }
-      throw Error(response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : tr("Your account could not be deleted. Please try again."));
+      throw Error(response.status === 400 && !field ? tr("Type your username to confirm") : response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : tr("Your account could not be deleted. Please try again."));
     } catch (cause) {
       if (state.session !== session) return;
       form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach(control => control.disabled = false);
@@ -478,6 +515,9 @@
     }
     if(day && page==="history") {state.selected=day.dataset.day!;document.querySelectorAll("[data-day]").forEach(button=>button.setAttribute("aria-pressed",String(button===day)));$("day-detail").outerHTML=dayDetail();$("day-detail").focus();}
     if(target.id==="personal-export") downloadData(target as HTMLButtonElement);
+    const unlink=target.closest<HTMLButtonElement>("[data-unlink]");
+    if(unlink && page==="settings") signInChange(unlink,{action:"unlink",provider:unlink.dataset.unlink});
+    if(target.id==="new-device-token") signInChange(target as HTMLButtonElement,{action:"token"});
     if((event.target as Element).id==="personal-disconnect") {
       const button=event.target as HTMLButtonElement;button.disabled=true;
       try {await site.disconnectMember();showGate(tr("Account disconnected."));}

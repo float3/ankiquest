@@ -121,6 +121,15 @@ impl Directory {
             .retain(|_, owner| owner != user);
     }
 
+    pub(crate) fn insert(&self, user: &str, display: &str) {
+        self.accounts.write().unwrap().insert(
+            user.to_string(),
+            Account {
+                display: display.to_string(),
+            },
+        );
+    }
+
     pub fn token_owner(&self, token: &str) -> Option<String> {
         if token.is_empty() {
             return None;
@@ -128,7 +137,7 @@ impl Directory {
         self.tokens.read().unwrap().get(&token_hash(token)).cloned()
     }
 
-    fn signup_allowed(&self, client: IpAddr, now: i64) -> bool {
+    pub(crate) fn signup_allowed(&self, client: IpAddr, now: i64) -> bool {
         let mut signups = self.signups.lock().unwrap();
         signups.retain(|_, times| {
             times.retain(|at| now - at < HOUR_MS);
@@ -153,7 +162,7 @@ pub fn valid_username(user: &str) -> bool {
         && !RESERVED.contains(&user)
 }
 
-fn clean_display(display: Option<&str>, user: &str) -> Option<String> {
+pub(crate) fn clean_display(display: Option<&str>, user: &str) -> Option<String> {
     let display = display
         .map(str::trim)
         .filter(|d| !d.is_empty())
@@ -162,7 +171,7 @@ fn clean_display(display: Option<&str>, user: &str) -> Option<String> {
         .then(|| display.to_string())
 }
 
-fn clean_device(device: Option<&str>) -> String {
+pub(crate) fn clean_device(device: Option<&str>) -> String {
     let device = device
         .map(str::trim)
         .filter(|d| !d.is_empty())
@@ -209,7 +218,8 @@ fn new_token() -> Result<String, Error> {
     Ok(random.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn create(
+/// Saves a new account; an empty `hash` means it has no password and signs in another way.
+pub(crate) fn create(
     conn: &Connection,
     user: &str,
     display: &str,
@@ -232,9 +242,21 @@ fn stored_hash(conn: &Connection, user: &str) -> Result<Option<String>, Error> {
         .optional()?)
 }
 
+/// Whether the account can sign in with a password.
+pub(crate) fn has_password(conn: &Connection, user: &str) -> Result<bool, Error> {
+    Ok(stored_hash(conn, user)?.is_some_and(|hash| !hash.is_empty()))
+}
+
 impl App {
+    /// Whether a new account may not take this name.
+    pub(crate) fn name_taken(&self, user: &str) -> bool {
+        self.config.users.contains_key(user)
+            || self.config.devs.iter().any(|dev| dev == user)
+            || self.accounts.contains(user)
+    }
+
     /// A new device token for an existing account, saved before it is handed out.
-    fn issue_token(&self, user: &str, device: &str) -> Result<String, Error> {
+    pub(crate) fn issue_token(&self, user: &str, device: &str) -> Result<String, Error> {
         let token = new_token()?;
         let hash = token_hash(&token);
         self.store.lock().unwrap().conn.execute(
@@ -308,10 +330,7 @@ pub async fn signup(
             "Display names are at most 40 characters.",
         );
     };
-    if app.config.users.contains_key(&user)
-        || app.config.devs.contains(&user)
-        || app.accounts.contains(&user)
-    {
+    if app.name_taken(&user) {
         return refuse(StatusCode::CONFLICT, "That username is taken.");
     }
     let client = crate::access::client_ip(&app.config, &headers, peer);
@@ -336,12 +355,7 @@ pub async fn signup(
         Ok(false) => return refuse(StatusCode::CONFLICT, "That username is taken."),
         Err(error) => return internal(error),
     }
-    app.accounts.accounts.write().unwrap().insert(
-        user.clone(),
-        Account {
-            display: display.clone(),
-        },
-    );
+    app.accounts.insert(&user, &display);
     match app.issue_token(&user, &clean_device(request.device.as_deref())) {
         Ok(token) => reply(
             StatusCode::CREATED,
@@ -367,7 +381,8 @@ pub async fn password_matches(app: &App, user: &str, password: &str) -> bool {
     }
     let stored = stored_hash(&app.store.lock().unwrap().conn, user)
         .ok()
-        .flatten();
+        .flatten()
+        .filter(|hash| !hash.is_empty());
     let password = password.to_string();
     tokio::task::spawn_blocking(move || match stored {
         Some(hash) => verify_password(&hash, &password),
