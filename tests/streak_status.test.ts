@@ -46,6 +46,14 @@ const scaffold = html.match(/<body\b[^>]*>([\s\S]*?)<script>/)![1];
       assert.equal(await page.locator('.streak[data-streak-state="pending"]').count(),1);
       assert.equal(await page.locator('.streak[data-streak-state="unknown"]').count(),1);
       assert.equal(await page.locator('.streak').count(),2);
+      await page.evaluate(() => {
+        const rows = [{user:'short',display:'Short',streak:5,today_reviews:12,today_minutes:6,streak_minutes:10,streak_state:'pending'},{user:'long',display:'Long',streak:5,today_reviews:30,today_minutes:12,streak_minutes:10,streak_state:'studied'}].map(row=>({...row,xp:100,level:1,day_ends_at:Date.now()+3600000}));
+        app.innerHTML=board(rows,'me');
+      });
+      const short = page.locator('.streak[data-streak-state="pending"]');
+      assert.equal(await short.count(),1);
+      assert((await short.getAttribute('aria-label'))!.includes(locale==='es-ES'?'6 de 10 minutos hoy':'6 of 10 minutes today'));
+      assert.equal(await page.locator('.streak[data-streak-state="studied"]').count(),1);
       checks++;
       await page.close();
     }

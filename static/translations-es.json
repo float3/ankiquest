@@ -1200,5 +1200,17 @@
   "The word or phrase friends will see": "La palabra o frase que verán tus amigos",
   "Anyone who can open this page will see it, and so will friends you tell. You can take it back later.": "Lo verá cualquiera que pueda abrir esta página, y también los amigos a los que avises. Puedes quitarlo más tarde.",
   "Show it on the card": "Mostrarlo en la tarjeta",
-  "Its owner chose to show what the card was.": "Su dueño eligió mostrar qué tarjeta era."
+  "Its owner chose to show what the card was.": "Su dueño eligió mostrar qué tarjeta era.",
+  "🔥 Your {0} day streak ends in {1}h · {2} of {3} minutes today": "🔥 Tu racha de {0} días termina en {1}h · {2} de {3} minutos hoy",
+  "Your {0} day streak ends tonight with {1} of {2} minutes done. {3}": "Tu racha de {0} días termina esta noche con {1} de {2} minutos hechos. {3}",
+  "Your {0}-day streak ends in {1} hour at your {2}:00 Anki cutoff, with {3} of {4} minutes done. No freezes available.": "Tu racha de {0} días termina en {1} hora, a las {2}:00 según el cierre de tu día de Anki, con {3} de {4} minutos hechos. No hay protectores disponibles.",
+  "Your {0}-day streak ends in {1} hour at your {2}:00 Anki cutoff, with {3} of {4} minutes done. Streak protection is off.": "Tu racha de {0} días termina en {1} hora, a las {2}:00 según el cierre de tu día de Anki, con {3} de {4} minutos hechos. La protección de racha está desactivada.",
+  "Your {0}-day streak ends in {1} hours at your {2}:00 Anki cutoff, with {3} of {4} minutes done. No freezes available.": "Tu racha de {0} días termina en {1} horas, a las {2}:00 según el cierre de tu día de Anki, con {3} de {4} minutos hechos. No hay protectores disponibles.",
+  "Your {0}-day streak ends in {1} hours at your {2}:00 Anki cutoff, with {3} of {4} minutes done. Streak protection is off.": "Tu racha de {0} días termina en {1} horas, a las {2}:00 según el cierre de tu día de Anki, con {3} de {4} minutos hechos. La protección de racha está desactivada.",
+  "Study 1 minute today to reach {0} days in your streak.": "Estudia 1 minuto hoy para alcanzar {0} días de racha.",
+  "Study {0} minutes today to reach {1} days in your streak.": "Estudia {0} minutos hoy para alcanzar {1} días de racha.",
+  "{0} of {1} minutes today. A little more can start your next streak.": "{0} de {1} minutos hoy. Un poco más puede iniciar tu próxima racha.",
+  "{0} of {1} minutes today. Your {2}-day streak is still waiting.": "{0} de {1} minutos hoy. Tu racha de {2} días te espera.",
+  "{0} of {1} minutes today": "{0} de {1} minutos hoy",
+  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Tu racha de {0} días te espera: {1} de {2} minutos hoy."
 }

@@ -23,6 +23,10 @@ interface Standing extends Person {
   streak_state: string;
   day_ends_at: number;
   today_reviews: number;
+  /** Missing from older servers. */
+  today_minutes?: number;
+  /** Review minutes today needs for the streak; 0 or missing when any review counts. */
+  streak_minutes?: number;
 }
 
 interface RecordHolder extends Person { value: number; detail: number; at: number; until: number; }
@@ -52,7 +56,7 @@ interface Profile extends Person {
   at_risk: boolean;
   day_ends_at: number;
   local_hour: number;
-  today: {reviews: number; minutes: number; xp: number; max_combo: number; current_combo: number; new_cards: number};
+  today: {reviews: number; minutes: number; streak_minutes?: number; xp: number; max_combo: number; current_combo: number; new_cards: number};
   lifetime: {reviews: number; hours: number; days_active: number; best_streak: number; best_streak_at: number; first_day_at: number; best_day: number; best_combo: number; quests: number; conquered?: number};
   quests: Quest[];
   achievements: Achievement[];
@@ -447,8 +451,11 @@ function streakBadge(row: Standing) {
   // A cached result from an ended Anki day cannot describe today's activity.
   const expired = row.day_ends_at && row.day_ends_at <= Date.now();
   const known = typeof row.today_reviews === "number";
-  const state = expired || !known ? "unknown" : row.today_reviews > 0 ? "studied" : row.streak_state === "protected" ? "protected" : "pending";
-  const status = state === "studied" ? aqText("Studied today") : state === "protected" ? aqText("Streak protected · Not studied yet") : state === "pending" ? aqText("Not studied yet") : aqText("Refresh to see today's study status");
+  const needed = row.streak_minutes ?? 0;
+  const counted = needed > 0 ? row.streak_state === "studied" : row.today_reviews > 0;
+  const state = expired || !known ? "unknown" : counted ? "studied" : row.streak_state === "protected" ? "protected" : "pending";
+  const progress = aqText`${num(Math.min(row.today_minutes ?? 0, needed))} of ${num(needed)} minutes today`;
+  const status = state === "studied" ? aqText("Studied today") : needed > 0 && state !== "unknown" ? progress : state === "protected" ? aqText("Streak protected · Not studied yet") : state === "pending" ? aqText("Not studied yet") : aqText("Refresh to see today's study status");
   const label = aqText`${num(row.streak)} day streak · ${status}`;
   return aqHtml`<span class="streak" data-streak-state="${state}" role="img" tabindex="0" aria-label="${esc(label)}" title="${esc(label)}">${streakIcon(state)}${num(row.streak)}</span>`;
 }
@@ -624,9 +631,9 @@ ${AnkiQuestAki.profile(p)}
     <div class="sub">${num(p.xp_into_level)} / ${num(p.xp_for_next)} XP to level ${p.level + 1} · ${num(p.xp_total)} total</div>
   </div>
 </section>
-${p.at_risk ? aqHtml`<section class="notice risk wide">Your ${p.streak} day streak is waiting for today's reviews.</section>` : ""}
+${p.at_risk ? (p.today.streak_minutes ?? 0) > 0 ? aqHtml`<section class="notice risk wide">Your ${p.streak} day streak is waiting: ${Math.min(p.today.minutes, p.today.streak_minutes!)} of ${p.today.streak_minutes!} minutes today.</section>` : aqHtml`<section class="notice risk wide">Your ${p.streak} day streak is waiting for today's reviews.</section>` : ""}
 <div class="kpis wide">
-  ${AnkiQuestSite.kpi(aqText("Day streak"), num(p.streak), aqText("Keep showing up"), "gold")}
+  ${AnkiQuestSite.kpi(aqText("Day streak"), num(p.streak), (p.today.streak_minutes ?? 0) > 0 ? aqText`${num(Math.min(p.today.minutes, p.today.streak_minutes!))} of ${num(p.today.streak_minutes!)} minutes today` : aqText("Keep showing up"), "gold")}
   ${AnkiQuestSite.kpi(aqText("Streak freezes"), freezeCount(p.stored_freezes ?? p.freezes) + "/3", p.freezes_enabled ? aqText("Ready to protect your progress") : aqText("Protection paused"), "blue")}
   ${AnkiQuestSite.kpi(aqText("Reviews today"), num(p.today.reviews), aqText("One card at a time"))}
   ${AnkiQuestSite.kpi(aqText("XP today"), num(p.today.xp), aqText("Today’s progress"), "green")}
