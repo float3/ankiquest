@@ -112,6 +112,9 @@ pub struct FreezePolicy {
     /// An unrestricted default policy enables protection throughout its history.
     pub default_enabled_from: Option<i64>,
     pub preferences: Vec<FreezePreference>,
+    /// Days an admin protected by hand, as `YYYY-MM-DD` on the player's clock.
+    /// They keep the streak like a spent freeze but leave the bank alone.
+    pub granted: BTreeSet<String>,
 }
 
 impl FreezePolicy {
@@ -1442,10 +1445,10 @@ pub fn compute_with_rules(
                 freezes += 1;
             }
         } else if day != today {
-            if skipped.contains(&day) {
-                // Moving the clock east stepped over this day. There were no
-                // hours in it to study, so it costs neither the streak nor a
-                // freeze, and it reads as protected rather than missed.
+            if skipped.contains(&day) || freeze_policy.granted.contains(&date_string(day)) {
+                // Moving the clock east stepped over this day, or an admin
+                // granted it. It costs neither the streak nor a freeze, and it
+                // reads as protected rather than missed.
                 frozen.insert(day);
             } else if streak > 0
                 && freezes > 0
@@ -2284,6 +2287,47 @@ mod tests {
     }
 
     #[test]
+    fn granted_days_keep_the_streak_without_spending_the_bank() {
+        let reviews = history(&[10, 14]);
+        let policy = FreezePolicy {
+            granted: [11, 12, 13].map(date_string).into(),
+            ..FreezePolicy::default()
+        };
+        let p = compute_with_freezes(
+            "a",
+            "a",
+            &reviews,
+            &utc(),
+            &Week::default(),
+            at(14),
+            &policy,
+        );
+        assert_eq!(p.streak, 2);
+        assert_eq!(p.stored_freezes, 0);
+        let frozen: Vec<_> = p
+            .heatmap
+            .iter()
+            .filter(|c| c.frozen)
+            .map(|c| c.date.clone())
+            .collect();
+        assert_eq!(frozen, [11, 12, 13].map(date_string));
+        let partial = FreezePolicy {
+            granted: [11, 12].map(date_string).into(),
+            ..FreezePolicy::default()
+        };
+        let broken = compute_with_freezes(
+            "a",
+            "a",
+            &reviews,
+            &utc(),
+            &Week::default(),
+            at(14),
+            &partial,
+        );
+        assert_eq!(broken.streak, 1);
+    }
+
+    #[test]
     fn missed_day_without_freeze_resets() {
         let p = compute(
             "a",
@@ -2399,6 +2443,7 @@ mod tests {
             legacy_until: Some(at(10)),
             preferences: vec![],
             default_enabled_from: Some(at(10)),
+            ..FreezePolicy::default()
         };
         let p = compute_with_freezes(
             "a",
@@ -2433,6 +2478,7 @@ mod tests {
                 legacy_until: Some(at(10)),
                 preferences: vec![],
                 default_enabled_from: Some(at(10)),
+                ..FreezePolicy::default()
             },
         );
         assert_eq!(p.xp_total, before_cutover.xp_total);

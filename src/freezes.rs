@@ -1,6 +1,51 @@
 use crate::game::{FreezePolicy, FreezePreference};
 use crate::store::{Error, Store};
 use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::BTreeSet;
+
+/// Protects `dates` (`YYYY-MM-DD`) for `user`, or lifts that protection again.
+/// The running service picks the change up on its next tick.
+pub fn grant(
+    conn: &Connection,
+    user: &str,
+    dates: &[String],
+    granted: bool,
+    at: i64,
+) -> Result<usize, Error> {
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0;
+    for date in dates {
+        changed += if granted {
+            tx.execute(
+                "insert or ignore into freeze_grants (user, date, at) values (?1, ?2, ?3)",
+                params![user, date, at],
+            )?
+        } else {
+            tx.execute(
+                "delete from freeze_grants where user = ?1 and date = ?2",
+                params![user, date],
+            )?
+        };
+    }
+    tx.execute(
+        "insert or ignore into freeze_grant_reloads (user) values (?1)",
+        [user],
+    )?;
+    tx.commit()?;
+    Ok(changed)
+}
+
+/// Players whose granted days changed since the last call.
+pub fn take_grant_reloads(conn: &Connection) -> Result<Vec<String>, Error> {
+    let tx = conn.unchecked_transaction()?;
+    let users = tx
+        .prepare("select user from freeze_grant_reloads")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    tx.execute("delete from freeze_grant_reloads", [])?;
+    tx.commit()?;
+    Ok(users)
+}
 
 pub fn initialize(conn: &Connection) -> Result<(), Error> {
     let tx = conn.unchecked_transaction()?;
@@ -23,6 +68,15 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
          create table if not exists freeze_defaults (
              id integer primary key check (id = 1),
              enabled_from integer not null
+         );
+         create table if not exists freeze_grants (
+             user text not null,
+             date text not null,
+             at integer not null,
+             primary key (user, date)
+         );
+         create table if not exists freeze_grant_reloads (
+             user text primary key
          );",
     )?;
     // No preference now means enabled. Keep a fixed boundary so upgrading an
@@ -63,7 +117,16 @@ impl Store {
                 |r| r.get(0),
             )?),
             preferences: self.freeze_preferences(user)?,
+            granted: self.granted_freezes(user)?,
         })
+    }
+
+    pub fn granted_freezes(&self, user: &str) -> Result<BTreeSet<String>, Error> {
+        Ok(self
+            .conn
+            .prepare("select date from freeze_grants where user = ?1")?
+            .query_map([user], |r| r.get(0))?
+            .collect::<Result<_, _>>()?)
     }
 
     pub fn freeze_preferences(&self, user: &str) -> Result<Vec<FreezePreference>, Error> {
