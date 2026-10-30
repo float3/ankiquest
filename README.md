@@ -7,7 +7,7 @@ XP, streaks, daily quests, friends and leaderboards for Anki. only the timing of
 1. create an account on an AnkiQuest server, such as [ankiquest.rationality-munich.com](https://ankiquest.rationality-munich.com).
 2. Connect Anki:
    - **desktop:** download `ankiquest.ankiaddon` from the [latest release](https://github.com/float3/ankiquest/releases/latest), open it with Anki, then choose **Tools → ankiquest: sign in or create account…**
-   - **Android:** install `AnkiDroid-Quest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). it installs next to AnkiDroid; sync your collection through AnkiWeb as usual. then open **Settings → ankiquest → Account & connection → Sign in or create account**.
+   - **Android:** install `AnkiQuest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). it installs next to AnkiDroid as **AnkiQuest**; sync your collection through AnkiWeb as usual. then open **Settings → ankiquest → Account & connection → Sign in or create account**.
 3. study as usual. add friends, or start a group and share its invite link, on the website's **Friends** page.
 
 ## run your own server
