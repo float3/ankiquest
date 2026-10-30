@@ -383,4 +383,28 @@ mod tests {
         let store = Store::open(&path).unwrap();
         assert_eq!(store.language("hill").unwrap(), "es");
     }
+
+    #[test]
+    fn streak_minimum_texts_are_translated() {
+        let mut warning = crate::feedback::streak_warning(12, 0, 4 * 3_600_000, 0, Some((6, 10)));
+        notice(&mut warning, "es");
+        assert_eq!(
+            warning.title,
+            "🔥 Tu racha de 12 días termina en 4h · 6 de 10 minutos hoy"
+        );
+        assert_eq!(
+            text(
+                "Your 5-day streak ends in 2 hours at your 04:00 Anki cutoff, with 6 of 10 minutes done. No freezes available.",
+                "es"
+            ),
+            "Tu racha de 5 días termina en 2 horas, a las 04:00 según el cierre de tu día de Anki, con 6 de 10 minutos hechos. No hay protectores disponibles."
+        );
+        assert_eq!(
+            text(
+                "6 of 10 minutes today. Your 5-day streak is still waiting.",
+                "de"
+            ),
+            "6 von 10 Minuten heute. Deine Lernserie von 5 Tagen wartet noch."
+        );
+    }
 }

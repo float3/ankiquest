@@ -253,7 +253,7 @@ fn deadline_window(prefs: &Settings, clock: &Clock, now: i64, cutoff: i64) -> bo
 }
 
 fn unprotected(profile: &Profile) -> bool {
-    profile.at_risk && profile.today.reviews == 0 && profile.streak > 0 && profile.freezes == 0
+    profile.at_risk && !profile.today.counts() && profile.streak > 0 && profile.freezes == 0
 }
 
 fn refill_due(profile: &Profile) -> bool {
@@ -265,7 +265,7 @@ fn refill_due(profile: &Profile) -> bool {
 
 fn next_milestone(profile: &Profile) -> Option<u64> {
     let next = profile.streak + 1;
-    (profile.today.reviews == 0
+    (!profile.today.counts()
         && ([3, 7, 14, 30, 50, 100, 200, 365, 500, 730, 1000].contains(&next)
             || (next > 1000 && next.is_multiple_of(100))))
     .then_some(next)
@@ -337,7 +337,7 @@ pub fn delivery_guard(
         return Ok(DeliveryGuard::Cancel);
     }
     let valid = match notice.kind.as_str() {
-        "reminder_daily" => notice.day == profile.day && profile.today.reviews == 0,
+        "reminder_daily" => notice.day == profile.day && !profile.today.counts(),
         "reminder_urgent" => notice.day == profile.day && unprotected(profile),
         "reminder_milestone" => notice.day == profile.day && next_milestone(profile).is_some(),
         "reminder_freeze_refill" => notice.day == profile.day && refill_due(profile),
@@ -394,10 +394,17 @@ pub fn current_body(
 fn urgent_body(profile: &Profile, clock: &Clock, now: i64) -> String {
     let hours = (deadline(clock, now) - now + HOUR - 1) / HOUR;
     format!(
-        "Your {}-day streak ends in {hours} {} at your {:02}:00 Anki cutoff. {}",
+        "Your {}-day streak ends in {hours} {} at your {:02}:00 Anki cutoff{}. {}",
         profile.streak,
         if hours == 1 { "hour" } else { "hours" },
         clock.rollover_hour,
+        match profile.today.streak_minutes {
+            0 => String::new(),
+            needed => format!(
+                ", with {} of {needed} minutes done",
+                profile.today.minutes.min(needed)
+            ),
+        },
         if profile.freezes_enabled {
             "No freezes available."
         } else {
@@ -527,12 +534,18 @@ pub fn tick(
                 kind: "reminder_milestone",
                 key: format!("reminder:milestone:{day}"),
                 title: "A streak milestone is one study day away",
-                body: format!("Study today to reach {next} days in your streak."),
+                body: match profile.today.streak_minutes {
+                    0 => format!("Study today to reach {next} days in your streak."),
+                    1 => format!("Study 1 minute today to reach {next} days in your streak."),
+                    needed => {
+                        format!("Study {needed} minutes today to reach {next} days in your streak.")
+                    }
+                },
                 day,
             });
         }
         if prefs.gentle_daily
-            && profile.today.reviews == 0
+            && !profile.today.counts()
             && !candidates
                 .iter()
                 .any(|candidate| candidate.kind == "reminder_milestone")
@@ -541,13 +554,19 @@ pub fn tick(
                 kind: "reminder_daily",
                 key: format!("reminder:daily:{day}"),
                 title: "Time for a few reviews?",
-                body: if profile.streak > 0 {
-                    format!(
-                        "You haven't studied today. Your {}-day streak is still waiting.",
-                        profile.streak
-                    )
-                } else {
-                    "A few reviews today can start your next streak.".into()
+                body: match (profile.today.streak_minutes, profile.streak) {
+                    (0, 0) => "A few reviews today can start your next streak.".into(),
+                    (0, streak) => format!(
+                        "You haven't studied today. Your {streak}-day streak is still waiting."
+                    ),
+                    (needed, 0) => format!(
+                        "{} of {needed} minutes today. A little more can start your next streak.",
+                        profile.today.minutes.min(needed)
+                    ),
+                    (needed, streak) => format!(
+                        "{} of {needed} minutes today. Your {streak}-day streak is still waiting.",
+                        profile.today.minutes.min(needed)
+                    ),
                 },
                 day,
             });
@@ -1419,6 +1438,52 @@ mod tests {
             .unwrap();
         assert!(recap.body.contains("5 study days, 500 XP, 2 daily wins"));
         assert!(recap.body.contains("100 more XP"));
+        cleanup(store, path);
+    }
+
+    #[test]
+    fn a_daily_minimum_keeps_reminders_going_until_it_is_met_and_says_so() {
+        let (mut store, path) = store();
+        let clock = Clock::default();
+        save_settings(
+            &mut store,
+            "hill",
+            &Settings {
+                urgent_streak: true,
+                gentle_daily: true,
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        let mut p = profile(&clock, at(21));
+        p.freezes = 0;
+        p.freezes_enabled = true;
+        p.today.reviews = 12;
+        p.today.minutes = 6;
+        p.today.streak_minutes = 10;
+        assert!(unprotected(&p));
+        run(&mut store, &p, &clock, at(21));
+        let notices = store.notifications("hill", at(21)).unwrap();
+        let urgent = notices
+            .iter()
+            .find(|notice| notice.kind == "reminder_urgent")
+            .unwrap();
+        assert!(
+            urgent
+                .body
+                .contains("Anki cutoff, with 6 of 10 minutes done. No freezes available."),
+            "{}",
+            urgent.body
+        );
+        let guard = |p: &Profile| {
+            delivery_guard(&store, "hill", urgent, p, &clock, &Week::default(), at(21)).unwrap()
+        };
+        assert_eq!(guard(&p), DeliveryGuard::Deliver);
+        let mut done = p.clone();
+        done.today.minutes = 10;
+        assert!(!unprotected(&done));
+        assert_eq!(guard(&done), DeliveryGuard::Cancel);
+        assert_eq!(next_milestone(&done), None);
         cleanup(store, path);
     }
 }

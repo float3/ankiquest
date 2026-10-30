@@ -2,7 +2,7 @@
 (() => {
   "use strict";
   interface Quest { title: string; progress: number; target: number; done: boolean; reward: number }
-  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number}; quests: Quest[] }
+  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[] }
   interface StudyDay { date: string; reviews: number; time_ms: number; xp: number; new_cards: number; streak: number; frozen: boolean }
   interface StudySession { started_at: number; ended_at: number; reviews: number; time_ms: number; new_cards: number }
   interface StudyHistory { year: number; years: number[]; days: StudyDay[]; last_review_at: number | null; last_received_at: number | null; latest_session: StudySession | null }
@@ -225,9 +225,10 @@
   }
   function renderToday() {
     const profile = state.profile, today: Partial<Profile["today"]> = profile?.today || {}, quests = profile?.quests || [];
-    const reviewed = Number(today.reviews || 0);
+    const reviewed = Number(today.reviews || 0), needed = Number(today.streak_minutes || 0);
+    const streakNote = needed > 0 ? tr`${number(Math.min(Number(today.minutes || 0), needed))} of ${number(needed)} minutes today` : tr("Anki study days");
     const lead = reviewed ? tr("Every review moved you forward today.") : tr("A small start still counts. Your cards are waiting in Anki.");
-    $("personal-content").innerHTML = html`<section class="personal-lead"><div class="eyebrow">${tr("Your Anki day")}</div><h2>${profile ? tr`Hello, ${esc(profile.display)}.` : tr("A fresh page for today.")}</h2><p>${lead}</p><div class="personal-actions">${link("/community#challenges",tr("See friend goals"),true)}${link("/history",tr("View study history"))}<a class="button-link" href="https://ankiweb.net/decks" target="_blank" rel="noopener noreferrer">${tr("Study in AnkiWeb ↗")}</a></div>${freshness()}</section><div class="kpis">${site.kpi(tr("Reviews today"),number(today.reviews),tr("Synced from Anki"),"blue")}${site.kpi(tr("Today's XP"),number(today.xp),tr("Every card counts"),"gold")}${site.kpi(tr("Current streak"),number(profile?.streak || 0),tr("Anki study days"),"green")}${site.kpi(tr("Level"),number(profile?.level || 1),tr("Keep moving forward"))}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>${tr("Today's quests")}</h2><p>${tr("Three small wins to aim for.")}</p></div></div>${quests.length ? html`<div class="stack">${quests.map(quest).join("")}</div>` : html`<p class="personal-empty">${tr("Upload some reviews to see your quests.")}</p>`}</article>${activeGoals()}</div>${recap()}`;
+    $("personal-content").innerHTML = html`<section class="personal-lead"><div class="eyebrow">${tr("Your Anki day")}</div><h2>${profile ? tr`Hello, ${esc(profile.display)}.` : tr("A fresh page for today.")}</h2><p>${lead}</p><div class="personal-actions">${link("/community#challenges",tr("See friend goals"),true)}${link("/history",tr("View study history"))}<a class="button-link" href="https://ankiweb.net/decks" target="_blank" rel="noopener noreferrer">${tr("Study in AnkiWeb ↗")}</a></div>${freshness()}</section><div class="kpis">${site.kpi(tr("Reviews today"),number(today.reviews),tr("Synced from Anki"),"blue")}${site.kpi(tr("Today's XP"),number(today.xp),tr("Every card counts"),"gold")}${site.kpi(tr("Current streak"),number(profile?.streak || 0),streakNote,"green")}${site.kpi(tr("Level"),number(profile?.level || 1),tr("Keep moving forward"))}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>${tr("Today's quests")}</h2><p>${tr("Three small wins to aim for.")}</p></div></div>${quests.length ? html`<div class="stack">${quests.map(quest).join("")}</div>` : html`<p class="personal-empty">${tr("Upload some reviews to see your quests.")}</p>`}</article>${activeGoals()}</div>${recap()}`;
   }
   function calendarMonth(year: number, month: number, map: Map<string, StudyDay>, max: number) {
     const first = new Date(Date.UTC(year,month,1)), count = new Date(Date.UTC(year,month+1,0)).getUTCDate();

@@ -6,12 +6,14 @@ XP never depends on which answer button was pressed, so there is no incentive to
 
 `review_weighting` (Nix: `reviewWeighting`) chooses how reviews are weighted. the default, `"flat"`, pays every answer its full rate. `"diminishing"` makes each further answer of the same card on the same day worth half as much, so a card you keep failing cannot out-earn one you learn, and pays learning steps 9 XP instead of 6. XP is recalculated from review history, so changing it applies to past reviews too.
 
+`streak_minutes` (Nix: `streakMinutes`, default 0) is the review time an Anki day needs to count toward the streak. 0 lets a single review count. review time is the revlog's time per answer, which Anki caps (60 s by default). the server records each change of the effective value with the time it saw it, in the `streak_minutes` table, and a day follows the value in force when it began: days before the first change keep the any-review rule, and a change made during a day applies from each player's next Anki day, so existing streaks are never rewritten. a day under the minimum counts as missed, so a freeze can cover it. profiles carry `today.minutes` and `today.streak_minutes`, standings `today_minutes` and `streak_minutes`, and the streak warning and reminders say how many minutes are done, e.g. "6 of 10 minutes today".
+
 ## administer
 
 `ankiquest [config.json] admin <command>` (on NixOS: `sudo ankiquest-admin <command>`) works on the state of a running server:
 
 - `settings` shows the settings in effect and where each comes from.
-- `set review_weighting diminishing` or `set log_retention_days 365` overrides a setting; `reset <setting>` returns to the configured value. the service applies changes within a minute, without a restart.
+- `set review_weighting diminishing`, `set log_retention_days 365` or `set streak_minutes 10` overrides a setting; `reset <setting>` returns to the configured value. the service applies changes within a minute, without a restart.
 - `logs [--since 30m|12h|7d|all] [--level info|error] [--user <player>] [--limit <n>]` prints the server log. errors and setting changes are kept in the state database for `log_retention_days` (default 90; 0 keeps them forever), and still go to stderr for the journal.
 - `sql "<query>"` runs a read-only query against the state database.
 - `remove-account <user>` deletes a self-service account and everything about it, as if they had deleted it themselves; the service carries it out within a minute. players from the configuration are removed there instead.
@@ -81,6 +83,7 @@ cargo run -- ankiquest.json
   "week_rollover_hour": 4,
   "review_weighting": "flat",
   "log_retention_days": 90,
+  "streak_minutes": 0,
   "users": {
     "hill": { "display": "hill", "ntfy_topic": "some-secret-topic", "token_file": "hill.token" }
   }

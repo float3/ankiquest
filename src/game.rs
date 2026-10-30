@@ -2,7 +2,8 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub(crate) const SESSION_GAP_MS: i64 = 300_000;
 const MATURE_IVL: i64 = 21;
@@ -46,6 +47,60 @@ pub struct Review {
 pub struct FreezePreference {
     pub at: i64,
     pub enabled: bool,
+}
+
+/// From `at` on, a day needs `minutes` of review to count toward the streak.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StreakChange {
+    pub at: i64,
+    pub minutes: u32,
+}
+
+/// The review minutes a day needs to keep the streak, as the server's
+/// `streak_minutes` setting changed over time, oldest first. A day follows the
+/// value in force when it began, so a change never rewrites a day that already
+/// started. Before the first change any review counts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StreakRule {
+    pub changes: Vec<StreakChange>,
+}
+
+impl StreakRule {
+    pub fn minutes_at(&self, at: i64) -> u32 {
+        let end = self.changes.partition_point(|change| change.at <= at);
+        if end > 0 {
+            self.changes[end - 1].minutes
+        } else {
+            0
+        }
+    }
+}
+
+static STREAK_RULE: RwLock<StreakRule> = RwLock::new(StreakRule {
+    changes: Vec::new(),
+});
+static STREAK_RULE_VERSION: AtomicU64 = AtomicU64::new(0);
+
+/// Sets the server's streak rule. Profiles are computed on demand, so they all
+/// follow it from the next request on.
+pub fn set_streak_rule(rule: StreakRule) {
+    let mut current = STREAK_RULE.write().unwrap_or_else(|e| e.into_inner());
+    if *current != rule {
+        *current = rule;
+        STREAK_RULE_VERSION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn streak_rule() -> StreakRule {
+    STREAK_RULE
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Changes whenever [`set_streak_rule`] changes the rule, so cached profiles know they are stale.
+pub fn streak_rule_version() -> u64 {
+    STREAK_RULE_VERSION.load(Ordering::Relaxed)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -874,10 +929,19 @@ impl Periods {
 pub struct Today {
     pub reviews: u64,
     pub minutes: u64,
+    /// Review minutes today needs to count toward the streak; 0 when any review counts.
+    pub streak_minutes: u64,
     pub xp: u64,
     pub max_combo: u64,
     pub current_combo: u64,
     pub new_cards: u64,
+}
+
+impl Today {
+    /// Whether today already counts toward the streak.
+    pub fn counts(&self) -> bool {
+        self.reviews > 0 && self.minutes >= self.streak_minutes
+    }
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -1284,6 +1348,30 @@ pub fn compute_with_history(
     now_ms: i64,
     freeze_policy: &FreezePolicy,
 ) -> Profile {
+    compute_with_rules(
+        user,
+        display,
+        reviews,
+        clock,
+        week,
+        now_ms,
+        freeze_policy,
+        &streak_rule(),
+    )
+}
+
+/// [`compute_with_history`] with an explicit streak rule instead of the server's.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_with_rules(
+    user: &str,
+    display: &str,
+    reviews: &[Review],
+    clock: &ClockHistory,
+    week: &Week,
+    now_ms: i64,
+    freeze_policy: &FreezePolicy,
+    streak_rule: &StreakRule,
+) -> Profile {
     let (days, last_combo, earned) = collect_days_with_quests(reviews, clock, seed_of(user));
     let today = clock.day(now_ms);
     let legacy_until = freeze_policy.legacy_until.map(|at| clock.day(at));
@@ -1318,6 +1406,8 @@ pub fn compute_with_history(
             freezes = 0;
         }
         let stats = days.get(&day);
+        let needed_ms = i64::from(streak_rule.minutes_at(clock.day_start_ms(day))) * 60_000;
+        let counts = stats.is_some_and(|s| s.time_ms >= needed_ms);
         let (year, month_of_year, date) = civil(day);
         if (year, month_of_year) != month {
             month = (year, month_of_year);
@@ -1342,7 +1432,7 @@ pub fn compute_with_history(
             }
             last_active = Some(day);
         }
-        if stats.is_some() {
+        if counts {
             streak += 1;
             if streak > totals.best_streak {
                 totals.best_streak = streak;
@@ -1531,6 +1621,10 @@ pub fn compute_with_history(
     };
     let today_start = clock.day_start_ms(today);
     let studied_today = days.contains_key(&today);
+    let streak_minutes = u64::from(streak_rule.minutes_at(today_start));
+    let today_counts = days
+        .get(&today)
+        .is_some_and(|s| s.time_ms >= streak_minutes as i64 * 60_000);
     for window in 0..Records::NAMES.len() {
         let entries = if window == 0 { &reviewed } else { &everything };
         let history_long_enough = entries
@@ -1557,7 +1651,7 @@ pub fn compute_with_history(
             });
         }
     }
-    if studied_today
+    if today_counts
         && streak_milestone(streak)
         && !ACHIEVEMENTS
             .iter()
@@ -1585,14 +1679,14 @@ pub fn compute_with_history(
         .collect();
 
     let now = days.get(&today).unwrap_or(&empty);
-    let at_risk = streak > 0 && !days.contains_key(&today);
+    let at_risk = streak > 0 && !today_counts;
     let day_ends_at = clock.day_start_ms(today + 1);
     let effective_freezes = if freeze_policy.enabled_at(now_ms) {
         freezes
     } else {
         0
     };
-    let streak_state = if now.reviews > 0 {
+    let streak_state = if today_counts {
         StreakState::Studied
     } else if frozen.contains(&(today - 1)) {
         // Freezes cover ended days. Today's unstudied day is still open.
@@ -1619,12 +1713,19 @@ pub fn compute_with_history(
         at_risk,
         day_ends_at,
         streak_warning: at_risk.then(|| {
-            crate::feedback::streak_warning(streak, effective_freezes, day_ends_at, now_ms)
+            crate::feedback::streak_warning(
+                streak,
+                effective_freezes,
+                day_ends_at,
+                now_ms,
+                (streak_minutes > 0).then_some(((now.time_ms / 60_000) as u64, streak_minutes)),
+            )
         }),
         local_hour: clock.hour(now_ms),
         today: Today {
             reviews: now.reviews,
             minutes: (now.time_ms / 60_000) as u64,
+            streak_minutes,
             xp: day_xp.get(&today).copied().unwrap_or(0),
             max_combo: now.max_combo,
             current_combo: if reviews.last().is_some_and(|r| clock.day(r.id) == today) {
@@ -3329,5 +3430,179 @@ mod tests {
                 .any(|day| day.date == date_string(missing) && day.frozen),
             "it reads as protected rather than missed"
         );
+    }
+
+    /// One answer per minute, each taking the full minute.
+    fn minutes_on(day: i64, minutes: i64) -> Vec<Review> {
+        (0..minutes)
+            .map(|i| {
+                let id = day * DAY_MS + NOON + i * 60_000;
+                Review {
+                    id,
+                    cid: id,
+                    last_ivl: 0,
+                    ivl: None,
+                    time_ms: 60_000,
+                    kind: 1,
+                }
+            })
+            .collect()
+    }
+
+    fn study(days: &[(i64, i64)]) -> Vec<Review> {
+        days.iter()
+            .flat_map(|(day, minutes)| minutes_on(*day, *minutes))
+            .collect()
+    }
+
+    fn ruled(reviews: &[Review], now: i64, rule: &[(i64, u32)]) -> Profile {
+        compute_with_rules(
+            "a",
+            "a",
+            reviews,
+            &ClockHistory::single(utc()),
+            &Week::default(),
+            now,
+            &FreezePolicy::default(),
+            &StreakRule {
+                changes: rule
+                    .iter()
+                    .map(|(at, minutes)| StreakChange {
+                        at: *at,
+                        minutes: *minutes,
+                    })
+                    .collect(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_zero_minimum_keeps_the_any_review_rule() {
+        let reviews = study(&[(9, 1), (10, 12), (12, 1), (13, 3)]);
+        for now in [at(12), at(13), at(14)] {
+            let old = protected(&reviews, now, &[]);
+            for rule in [
+                vec![],
+                vec![(0, 0)],
+                vec![(0, 10), (utc().day_start_ms(5), 0)],
+            ] {
+                let new = ruled(&reviews, now, &rule);
+                assert_eq!(
+                    serde_json::to_value(&new).unwrap(),
+                    serde_json::to_value(&old).unwrap(),
+                    "{rule:?}"
+                );
+                assert_eq!(new.today.streak_minutes, 0);
+            }
+        }
+        assert_eq!(StreakRule::default().minutes_at(i64::MAX), 0);
+    }
+
+    #[test]
+    fn a_day_under_the_minimum_does_not_count() {
+        let rule = [(0, 10)];
+        let reviews = study(&[(10, 12), (11, 3), (12, 10)]);
+        let p = ruled(&reviews, at(12), &rule);
+        assert_eq!(p.streak, 1);
+        assert_eq!(p.lifetime.best_streak, 1);
+        assert_eq!(p.lifetime.days_active, 3, "short days are still study days");
+
+        let reviews = study(&[(10, 12), (11, 12), (12, 6)]);
+        let p = ruled(&reviews, at(12), &rule);
+        assert_eq!(p.streak, 2, "today is open, not broken");
+        assert!(p.at_risk);
+        assert!(!p.today.counts());
+        assert_eq!(serde_json::to_value(&p).unwrap()["streak_state"], "pending");
+        assert_eq!((p.today.minutes, p.today.streak_minutes), (6, 10));
+        assert_eq!(
+            p.streak_warning.unwrap().title,
+            "🔥 Your 2 day streak ends in 15h · 6 of 10 minutes today"
+        );
+
+        let done = ruled(&study(&[(10, 12), (11, 12), (12, 10)]), at(12), &rule);
+        assert_eq!(done.streak, 3);
+        assert!(!done.at_risk);
+        assert!(done.today.counts());
+        assert_eq!(
+            serde_json::to_value(&done).unwrap()["streak_state"],
+            "studied"
+        );
+    }
+
+    #[test]
+    fn days_before_the_minimum_keep_the_old_rule() {
+        let start = utc().day_start_ms(11);
+        let rule = [(start, 10)];
+        let kept = ruled(
+            &study(&[(9, 1), (10, 1), (11, 10), (12, 10)]),
+            at(12),
+            &rule,
+        );
+        assert_eq!(kept.streak, 4);
+        let short = ruled(&study(&[(9, 1), (10, 1), (11, 1), (12, 10)]), at(12), &rule);
+        assert_eq!(short.streak, 1);
+        assert_eq!(short.lifetime.best_streak, 2);
+        let midday = ruled(
+            &study(&[(9, 1), (10, 1), (11, 1), (12, 10)]),
+            at(12),
+            &[(start + 1, 10)],
+        );
+        assert_eq!(
+            midday.streak, 4,
+            "a change during a day applies from the next one"
+        );
+    }
+
+    #[test]
+    fn a_later_change_only_affects_later_days() {
+        let reviews = study(&[(9, 12), (10, 3), (11, 12), (12, 3), (13, 3)]);
+        let ten = ruled(&reviews, at(13), &[(0, 10)]);
+        assert_eq!(ten.streak, 0);
+        let lowered = ruled(&reviews, at(13), &[(0, 10), (utc().day_start_ms(12), 2)]);
+        assert_eq!(
+            lowered.streak, 3,
+            "day 10 stays missed, days 12 and 13 count"
+        );
+        assert_eq!(lowered.lifetime.best_streak, 3);
+        assert_eq!(
+            lowered
+                .history
+                .iter()
+                .map(|day| day.streak)
+                .collect::<Vec<_>>(),
+            [1, 0, 1, 2, 3]
+        );
+        assert_eq!(lowered.today.streak_minutes, 2);
+    }
+
+    #[test]
+    fn a_freeze_covers_a_day_under_the_minimum() {
+        let mut reviews = perfect_history(&[1]);
+        assert!(
+            reviews.len() >= 3,
+            "a perfect day takes at least three minutes"
+        );
+        reviews.extend(reviews_on(2, 1, 99_000));
+        reviews.extend(minutes_on(3, 3));
+        let p = ruled(&reviews, at(3), &[(0, 2)]);
+        assert_eq!(p.streak, 2);
+        assert!(p.history.iter().any(|day| day.frozen && day.reviews == 1));
+    }
+
+    #[test]
+    fn streak_achievements_wait_for_the_minimum() {
+        let days: Vec<(i64, i64)> = (1..=7).map(|day| (day, 10)).collect();
+        let mut reviews = study(&days[..6]);
+        reviews.extend(minutes_on(7, 4));
+        let week = |p: &Profile| {
+            p.achievements
+                .iter()
+                .find(|a| a.title == "Full Week")
+                .unwrap()
+                .unlocked
+                .is_some()
+        };
+        assert!(!week(&ruled(&reviews, at(7), &[(0, 10)])));
+        assert!(week(&ruled(&study(&days), at(7), &[(0, 10)])));
     }
 }

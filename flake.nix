@@ -63,6 +63,7 @@
         competition_start_date = cfg.competitionStartDate;
         review_weighting = cfg.reviewWeighting;
         log_retention_days = cfg.logRetentionDays;
+        streak_minutes = cfg.streakMinutes;
         private_site = cfg.privateSite;
         registration = cfg.registration;
         devs = cfg.devs;
@@ -260,6 +261,11 @@
           type = lib.types.ints.unsigned;
           default = 90;
           description = "Days to keep the server log in the state database. 0 keeps it forever. `ankiquest-admin set log_retention_days` overrides it at runtime.";
+        };
+        streakMinutes = lib.mkOption {
+          type = lib.types.ints.between 0 1440;
+          default = 0;
+          description = "Review minutes an Anki day needs to count toward the streak. 0 lets any review count. A change applies from each player's next Anki day; earlier days keep the rule they had. `ankiquest-admin set streak_minutes` overrides it at runtime.";
         };
         users = lib.mkOption {
           type = lib.types.attrsOf user;

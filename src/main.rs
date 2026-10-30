@@ -86,6 +86,9 @@ struct Config {
     review_weighting: game::ReviewWeighting,
     #[serde(default = "default_log_retention_days")]
     log_retention_days: u32,
+    /// Review minutes a day needs to count toward the streak; 0 lets any review count.
+    #[serde(default)]
+    streak_minutes: u32,
     #[serde(default)]
     users: HashMap<String, UserConfig>,
     /// Lets anyone create an account with a username and password.
@@ -143,7 +146,7 @@ fn next_revision() -> u64 {
 struct StandingCache(Mutex<HashMap<String, CachedStanding>>);
 
 struct CachedStanding {
-    key: (u64, game::ReviewWeighting, i64, i64),
+    key: (u64, game::ReviewWeighting, u64, i64, i64),
     computed_at: i64,
     recent: bool,
     profile: Arc<Profile>,
@@ -170,6 +173,7 @@ impl Config {
         admin::Settings {
             review_weighting: self.review_weighting,
             log_retention_days: self.log_retention_days,
+            streak_minutes: self.streak_minutes,
         }
     }
 }
@@ -238,6 +242,7 @@ impl App {
         let key = (
             player.revision,
             game::review_weighting(),
+            game::streak_rule_version(),
             player.clock_history.day(now),
             now.div_euclid(3_600_000),
         );
@@ -360,6 +365,9 @@ struct Standing {
     streak_state: game::StreakState,
     day_ends_at: i64,
     today_reviews: u64,
+    today_minutes: u64,
+    /// Review minutes today needs for the streak; 0 when any review counts.
+    streak_minutes: u64,
 }
 
 #[derive(Deserialize, Default)]
@@ -410,6 +418,8 @@ fn standings(app: &App, users: &BTreeSet<String>, period: Option<String>) -> Vec
             streak_state: p.streak_state,
             day_ends_at: p.day_ends_at,
             today_reviews: p.today.reviews,
+            today_minutes: p.today.minutes,
+            streak_minutes: p.today.streak_minutes,
         })
         .collect();
     standings.sort_by_key(|s| std::cmp::Reverse((s.xp, s.xp_total)));
@@ -1858,8 +1868,15 @@ fn import(app: &App, store: &mut Store, base: &Path) -> Result<(), Error> {
 }
 
 fn streak_warning_body(profile: &Profile) -> String {
+    let minutes = match profile.today.streak_minutes {
+        0 => String::new(),
+        needed => format!(
+            " with {} of {needed} minutes done",
+            profile.today.minutes.min(needed)
+        ),
+    };
     format!(
-        "Your {} day streak ends tonight. {}",
+        "Your {} day streak ends tonight{minutes}. {}",
         profile.streak,
         if !profile.freezes_enabled {
             "Streak freezes are turned off."
@@ -1881,6 +1898,11 @@ fn tick(app: &App) -> Result<(), Error> {
                 game::set_review_weighting(settings.review_weighting);
                 log_info!("review weighting is now {:?}", settings.review_weighting);
             }
+            game::set_streak_rule(admin::streak_rule(
+                &store.conn,
+                settings.streak_minutes,
+                now,
+            )?);
             admin::flush(&store.conn, now, settings.log_retention_days)?;
             privacy::carry_out_removals(app, &store.conn)?;
             let import_complete = app.config.sync_base.as_ref().is_none_or(|base| {
@@ -2306,6 +2328,11 @@ async fn main() -> Result<(), Error> {
     config.oauth.load_secrets(config.public_url.as_deref())?;
     let access = access::Access::from_config(&config)?;
     let store = Store::open(&config.state_dir)?;
+    game::set_streak_rule(admin::streak_rule(
+        &store.conn,
+        config.settings().effective(&store.conn)?.streak_minutes,
+        now_ms(),
+    )?);
     let accounts = accounts::Directory::load(&store.conn)?;
     let mut players = HashMap::new();
     for user in store.users()? {
