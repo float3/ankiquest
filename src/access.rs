@@ -415,10 +415,13 @@ pub(crate) async fn status(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
 ) -> Json<serde_json::Value> {
-    Json(
-        serde_json::json!({"private_site": app.config.private_site, "registration": app.config.registration, "authenticated": authenticated(&app, &headers),
-            "member": member(&app, &headers).map(|user| serde_json::json!({"display":app.display(&user),"user":user}))}),
-    )
+    let member = member(&app, &headers);
+    let mut status = serde_json::json!({"private_site": app.config.private_site, "registration": app.config.registration, "authenticated": authenticated(&app, &headers),
+        "member": member.as_ref().map(|user| serde_json::json!({"display":app.display(user),"user":user}))});
+    if member.is_some_and(|user| app.config.devs.contains(&user)) {
+        status["dev"] = true.into();
+    }
+    Json(status)
 }
 
 #[derive(Deserialize)]

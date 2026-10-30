@@ -64,6 +64,7 @@
         log_retention_days = cfg.logRetentionDays;
         private_site = cfg.privateSite;
         registration = cfg.registration;
+        devs = cfg.devs;
         privacy = lib.filterAttrs (_: value: value != null) cfg.privacy;
         site_trust_proxy = cfg.domain != null;
         site_password_file =
@@ -120,6 +121,12 @@
           description = "Serve through nginx with ACME on this domain.";
         };
         registration = lib.mkEnableOption "self-service accounts: anyone can sign up with a username and password, and sign in from the website, the add-on and the app";
+        devs = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          example = ["hill"];
+          description = "Players who can open the dev console at /dev: announcements to everyone or to groups, statistics and recent errors. Names listed here cannot be taken by a new sign-up, so create a self-service account before listing it.";
+        };
         privacy = lib.mkOption {
           description = "Who runs this server, shown on the /privacy notice.";
           default = {};
