@@ -1204,5 +1204,17 @@
   "The word or phrase friends will see": "Le mot ou la phrase que tes amis verront",
   "Anyone who can open this page will see it, and so will friends you tell. You can take it back later.": "Toute personne pouvant ouvrir cette page le verra, ainsi que les amis que tu préviens. Tu pourras le retirer plus tard.",
   "Show it on the card": "L'afficher sur la carte",
-  "Its owner chose to show what the card was.": "Son propriétaire a choisi de montrer quelle était la carte."
+  "Its owner chose to show what the card was.": "Son propriétaire a choisi de montrer quelle était la carte.",
+  "🔥 Your {0} day streak ends in {1}h · {2} of {3} minutes today": "🔥 Ta série de {0} jours se termine dans {1}h · {2} sur {3} minutes aujourd’hui",
+  "Your {0} day streak ends tonight with {1} of {2} minutes done. {3}": "Ta série de {0} jours se termine ce soir avec {1} minutes sur {2}. {3}",
+  "Your {0}-day streak ends in {1} hour at your {2}:00 Anki cutoff, with {3} of {4} minutes done. No freezes available.": "Ta série de {0} jours se termine dans {1} heure à {2} h (fin de journée Anki), avec {3} minutes sur {4}. Aucun gel de série disponible.",
+  "Your {0}-day streak ends in {1} hour at your {2}:00 Anki cutoff, with {3} of {4} minutes done. Streak protection is off.": "Ta série de {0} jours se termine dans {1} heure à {2} h (fin de journée Anki), avec {3} minutes sur {4}. La protection de série est désactivée.",
+  "Your {0}-day streak ends in {1} hours at your {2}:00 Anki cutoff, with {3} of {4} minutes done. No freezes available.": "Ta série de {0} jours se termine dans {1} heures à {2} h (fin de journée Anki), avec {3} minutes sur {4}. Aucun gel de série disponible.",
+  "Your {0}-day streak ends in {1} hours at your {2}:00 Anki cutoff, with {3} of {4} minutes done. Streak protection is off.": "Ta série de {0} jours se termine dans {1} heures à {2} h (fin de journée Anki), avec {3} minutes sur {4}. La protection de série est désactivée.",
+  "Study 1 minute today to reach {0} days in your streak.": "Étudie 1 minute aujourd’hui pour atteindre {0} jours de série.",
+  "Study {0} minutes today to reach {1} days in your streak.": "Étudie {0} minutes aujourd’hui pour atteindre {1} jours de série.",
+  "{0} of {1} minutes today. A little more can start your next streak.": "{0} minutes sur {1} aujourd’hui. Encore un peu et ta prochaine série commence.",
+  "{0} of {1} minutes today. Your {2}-day streak is still waiting.": "{0} minutes sur {1} aujourd’hui. Ta série de {2} jours t’attend.",
+  "{0} of {1} minutes today": "{0} minutes sur {1} aujourd’hui",
+  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Ta série de {0} jours t’attend : {1} minutes sur {2} aujourd’hui."
 }

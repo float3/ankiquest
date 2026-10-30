@@ -33,10 +33,23 @@ fn grouped(value: u64) -> String {
     out
 }
 
-pub fn streak_warning(streak: u64, freezes: u32, day_ends_at: i64, now_ms: i64) -> Notice {
+/// `minutes` is today's review minutes and the minimum, when the server sets one.
+pub fn streak_warning(
+    streak: u64,
+    freezes: u32,
+    day_ends_at: i64,
+    now_ms: i64,
+    minutes: Option<(u64, u64)>,
+) -> Notice {
     let hours = ((day_ends_at - now_ms).max(1) + HOUR_MS - 1) / HOUR_MS;
     Notice {
-        title: format!("🔥 Your {streak} day streak ends in {hours}h"),
+        title: match minutes {
+            Some((done, needed)) => format!(
+                "🔥 Your {streak} day streak ends in {hours}h · {} of {needed} minutes today",
+                done.min(needed)
+            ),
+            None => format!("🔥 Your {streak} day streak ends in {hours}h"),
+        },
         body: if freezes > 0 {
             "A freeze is available if you need a break."
         } else {
@@ -287,12 +300,23 @@ mod tests {
 
     #[test]
     fn streak_warning_rounds_hours_up_and_mentions_freezes() {
-        let warning = streak_warning(12, 1, 10 * HOUR_MS, 7 * HOUR_MS + 1);
+        let warning = streak_warning(12, 1, 10 * HOUR_MS, 7 * HOUR_MS + 1, None);
         assert_eq!(warning.title, "🔥 Your 12 day streak ends in 3h");
         assert_eq!(warning.body, "A freeze is available if you need a break.");
-        let warning = streak_warning(3, 0, HOUR_MS, HOUR_MS);
+        let warning = streak_warning(3, 0, HOUR_MS, HOUR_MS, None);
         assert_eq!(warning.title, "🔥 Your 3 day streak ends in 1h");
         assert!(warning.body.starts_with("A little study"));
+    }
+
+    #[test]
+    fn streak_warning_counts_minutes_toward_a_minimum() {
+        let warning = streak_warning(12, 0, 10 * HOUR_MS, 7 * HOUR_MS, Some((6, 10)));
+        assert_eq!(
+            warning.title,
+            "🔥 Your 12 day streak ends in 3h · 6 of 10 minutes today"
+        );
+        let warning = streak_warning(12, 0, 10 * HOUR_MS, 7 * HOUR_MS, Some((14, 10)));
+        assert!(warning.title.ends_with("10 of 10 minutes today"));
     }
 
     #[test]

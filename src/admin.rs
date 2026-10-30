@@ -2,7 +2,7 @@
 //! and the `ankiquest admin` command that reads and changes them while the
 //! service runs. The service picks up overrides on its next poll.
 
-use crate::game::ReviewWeighting;
+use crate::game::{ReviewWeighting, StreakChange, StreakRule};
 use crate::store::{Error, Store};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags, params, types::ValueRef};
@@ -49,7 +49,11 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              user text,
              message text not null
          );
-         create index if not exists server_log_at on server_log (at);",
+         create index if not exists server_log_at on server_log (at);
+         create table if not exists streak_minutes (
+             at integer primary key,
+             minutes integer not null
+         );",
     )?;
     Ok(())
 }
@@ -107,15 +111,24 @@ fn insert(conn: &Connection, entry: &Entry) -> Result<(), Error> {
 pub struct Settings {
     pub review_weighting: ReviewWeighting,
     pub log_retention_days: u32,
+    pub streak_minutes: u32,
 }
 
-const KEYS: [(&str, &str); 2] = [
+const KEYS: [(&str, &str); 3] = [
     ("review_weighting", "flat or diminishing"),
     (
         "log_retention_days",
         "days to keep the server log; 0 keeps it forever",
     ),
+    (
+        "streak_minutes",
+        "review minutes a day needs for the streak; 0 lets any review count. A change applies from each player's next Anki day",
+    ),
 ];
+
+/// Most review minutes a day can be asked for: Anki caps each answer's time, so
+/// more than a day's worth could never be reached.
+const MAX_STREAK_MINUTES: u32 = 1_440;
 
 impl Settings {
     fn set(&mut self, key: &str, value: &str) -> Result<(), Error> {
@@ -128,6 +141,13 @@ impl Settings {
                 self.log_retention_days = value
                     .parse()
                     .map_err(|_| "log_retention_days must be a whole number of days")?;
+            }
+            "streak_minutes" => {
+                self.streak_minutes = value
+                    .parse()
+                    .ok()
+                    .filter(|minutes| *minutes <= MAX_STREAK_MINUTES)
+                    .ok_or("streak_minutes must be a whole number of minutes, at most 1440")?;
             }
             _ => return Err(unknown(key)),
         }
@@ -142,6 +162,7 @@ impl Settings {
                 .unwrap()
                 .to_string(),
             "log_retention_days" => self.log_retention_days.to_string(),
+            "streak_minutes" => self.streak_minutes.to_string(),
             _ => unreachable!(),
         }
     }
@@ -157,6 +178,34 @@ impl Settings {
         }
         Ok(settings)
     }
+}
+
+/// Records `minutes` as the streak minimum from `now_ms` on if it differs from the
+/// last recorded value, and returns every change so far. Nothing is recorded while
+/// the minimum stays 0, so a server that never sets one keeps the old rule.
+pub fn streak_rule(conn: &Connection, minutes: u32, now_ms: i64) -> Result<StreakRule, Error> {
+    let tx = conn.unchecked_transaction()?;
+    let changes: Vec<StreakChange> = tx
+        .prepare("select at, minutes from streak_minutes order by at")?
+        .query_map([], |r| {
+            Ok(StreakChange {
+                at: r.get(0)?,
+                minutes: r.get(1)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    let mut rule = StreakRule { changes };
+    let last = rule.changes.last().copied();
+    if last.map_or(0, |change| change.minutes) != minutes {
+        let at = now_ms.max(last.map_or(now_ms, |change| change.at + 1));
+        tx.execute(
+            "insert into streak_minutes (at, minutes) values (?1, ?2)",
+            params![at, minutes],
+        )?;
+        rule.changes.push(StreakChange { at, minutes });
+    }
+    tx.commit()?;
+    Ok(rule)
 }
 
 fn unknown(key: &str) -> Error {
@@ -443,6 +492,7 @@ mod tests {
         Settings {
             review_weighting: ReviewWeighting::Flat,
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
+            streak_minutes: 0,
         }
     }
 
@@ -492,6 +542,8 @@ mod tests {
         assert!(run(&["set", "review_weighting", "sideways"]).is_err());
         assert!(run(&["set", "log_retention_days", "-1"]).is_err());
         assert!(run(&["set", "colour", "blue"]).is_err());
+        assert!(run(&["set", "streak_minutes", "ten"]).is_err());
+        assert!(run(&["set", "streak_minutes", "1441"]).is_err());
 
         run(&["set", "review-weighting", "diminishing"]).unwrap();
         run(&["set", "log_retention_days", "365"]).unwrap();
@@ -501,6 +553,7 @@ mod tests {
             Settings {
                 review_weighting: ReviewWeighting::Diminishing,
                 log_retention_days: 365,
+                streak_minutes: 0,
             }
         );
         assert_eq!(
@@ -639,6 +692,54 @@ mod tests {
         let out = sql(&dir, "select 1 as one, 'a\tb' as text, null as empty").unwrap();
         assert_eq!(out, "one\ttext\tempty\n1\ta b\tNULL\n");
         assert!(sql(&dir, "delete from server_log").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn streak_minimum_changes_are_recorded_once_with_their_time() {
+        let dir = state("streak");
+        let store = Store::open(&dir).unwrap();
+        let conn = &store.conn;
+        assert_eq!(streak_rule(conn, 0, NOW).unwrap(), StreakRule::default());
+        let change = |at, minutes| StreakChange { at, minutes };
+        assert_eq!(
+            streak_rule(conn, 10, NOW + 1).unwrap().changes,
+            [change(NOW + 1, 10)]
+        );
+        assert_eq!(
+            streak_rule(conn, 10, NOW + 2).unwrap().changes,
+            [change(NOW + 1, 10)],
+            "an unchanged value keeps its start"
+        );
+        assert_eq!(
+            streak_rule(conn, 5, NOW + 3).unwrap().changes,
+            [change(NOW + 1, 10), change(NOW + 3, 5)]
+        );
+        assert_eq!(
+            streak_rule(conn, 0, NOW + 3).unwrap().changes,
+            [change(NOW + 1, 10), change(NOW + 3, 5), change(NOW + 4, 0)],
+            "changes keep their order even within one millisecond"
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn streak_minutes_can_be_overridden() {
+        let dir = state("streak-override");
+        run(
+            &dir,
+            configured(),
+            parse(&words(&["set", "streak-minutes", "10"])).unwrap(),
+            NOW,
+        )
+        .unwrap();
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(
+            configured().effective(&store.conn).unwrap().streak_minutes,
+            10
+        );
+        drop(store);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

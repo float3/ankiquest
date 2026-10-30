@@ -118,6 +118,7 @@ const OWNED: &[(&str, &str)] = &[
 #[cfg(test)]
 const SHARED: &[&str] = &[
     "server_settings",
+    "streak_minutes",
     "competition_meta",
     "competition_periods",
     "community_refresh",
