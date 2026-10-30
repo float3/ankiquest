@@ -300,6 +300,7 @@ struct Candidate {
     title: &'static str,
     body: String,
     day: i64,
+    topic: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -481,6 +482,7 @@ pub fn tick(
             title: "Your streak needs a review",
             body: urgent_body(profile, clock, now_ms),
             day,
+            topic: None,
         });
     }
     if prefs.freeze_used
@@ -511,6 +513,7 @@ pub fn tick(
                 }
             ),
             day: clock.day(frozen.at),
+            topic: None,
         });
     }
     let week_end = week.end_after(now_ms);
@@ -524,6 +527,7 @@ pub fn tick(
             title: "The weekly competition closes soon",
             body: closing_body(profile, week, now_ms),
             day,
+            topic: None,
         });
     }
     if due && !urgent_seen {
@@ -542,6 +546,7 @@ pub fn tick(
                     }
                 },
                 day,
+                topic: None,
             });
         }
         if prefs.gentle_daily
@@ -569,6 +574,7 @@ pub fn tick(
                     ),
                 },
                 day,
+                topic: None,
             });
         }
     }
@@ -578,6 +584,7 @@ pub fn tick(
             kind: "reminder_freeze_refill", key: format!("reminder:freeze_refill:{day}"), title: "Earn another streak freeze",
             body: format!("Finish your {remaining} remaining daily {} to earn another freeze. You have {} of {MAX_FREEZES} stored.",
                 if remaining == 1 { "quest" } else { "quests" }, profile.stored_freezes), day,
+            topic: None,
         });
     }
     if prefs.weekly_recap
@@ -608,6 +615,7 @@ pub fn tick(
                 recap.days_studied, recap.xp, recap.daily_wins
             ),
             day,
+            topic: recap.rank.map(|rank| format!("place:{rank}")),
         });
     }
     for candidate in candidates {
@@ -627,7 +635,7 @@ pub fn tick(
         if used >= allowance {
             continue;
         }
-        store.send_once(
+        store.send_once_about(
             &Outgoing {
                 to: user,
                 from: "",
@@ -635,6 +643,7 @@ pub fn tick(
                 body: &candidate.body,
                 kind: candidate.kind,
             },
+            candidate.topic.as_deref(),
             &candidate.key,
             candidate.day,
             now_ms,
@@ -1437,6 +1446,7 @@ mod tests {
             .find(|notice| notice.kind == "reminder_weekly_recap")
             .unwrap();
         assert!(recap.body.contains("5 study days, 500 XP, 2 daily wins"));
+        assert_eq!(recap.topic.as_deref(), Some("place:2"));
         assert!(recap.body.contains("100 more XP"));
         cleanup(store, path);
     }

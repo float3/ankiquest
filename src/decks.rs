@@ -135,6 +135,10 @@ pub struct Notification {
     /// The exact alert this response answered, retained even if the older row expires.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<ReplyContext>,
+    /// What a celebration is about ("achievement", "level", "streak", "record" or
+    /// "conquered"), or "place:N" for a weekly recap, so clients can pick matching art.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -189,6 +193,7 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
         reply_to: reply_title
             .zip(reply_body)
             .map(|(title, body)| ReplyContext { title, body }),
+        topic: row.get(13)?,
     })
 }
 
@@ -198,7 +203,7 @@ const NOTICE_COLUMNS: &str =
  n.read_at / 1000,n.challenge_id,exists(select 1 from community_members m
  join community_challenges c on c.id=m.challenge where c.id=n.challenge_id
  and n.kind='challenge_invite' and m.user=n.recipient and m.status='invited'
- and c.cancelled=0 and c.end_at>?2),n.reply_to_title,n.reply_to_body";
+ and c.cancelled=0 and c.end_at>?2),n.reply_to_title,n.reply_to_body,n.topic";
 
 /// A completion that was just announced, echoed back so the client can say so locally.
 #[derive(Debug, Serialize)]
@@ -344,6 +349,7 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
         ("challenge_id", "integer"),
         ("reply_to_title", "text"),
         ("reply_to_body", "text"),
+        ("topic", "text"),
     ] {
         let present = conn
             .prepare("select 1 from pragma_table_info('notifications') where name = ?1")?
@@ -431,6 +437,21 @@ pub(crate) fn insert_notification(
         params![message.to, message.from, message.title, message.body, day, now_ms, message.kind, push_only, cancelled],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+/// The part of an event key before its first colon, e.g. "streak" for "streak:30".
+fn topic_of(key: &str) -> &str {
+    key.split_once(':').map_or(key, |(topic, _)| topic)
+}
+
+fn set_topic(conn: &Connection, id: i64, topic: Option<&str>) -> Result<(), Error> {
+    if topic.is_some() {
+        conn.execute(
+            "update notifications set topic = ?1 where id = ?2",
+            params![topic, id],
+        )?;
+    }
+    Ok(())
 }
 
 impl Store {
@@ -925,7 +946,7 @@ impl Store {
                 |row| {
                     Ok(Sent {
                         notice: notification(row)?,
-                        recipient: row.get(13)?,
+                        recipient: row.get(14)?,
                     })
                 },
             )?
@@ -1075,13 +1096,27 @@ impl Store {
         now_ms: i64,
         push_only: bool,
     ) -> Result<(), Error> {
+        self.send_once_about(message, None, key, day, now_ms, push_only)
+    }
+
+    /// [`Store::send_once`] with a [`Notification::topic`].
+    pub fn send_once_about(
+        &mut self,
+        message: &Outgoing<'_>,
+        topic: Option<&str>,
+        key: &str,
+        day: i64,
+        now_ms: i64,
+        push_only: bool,
+    ) -> Result<(), Error> {
         let tx = self.conn.transaction()?;
         if tx.execute(
             "insert or ignore into seen (user, key) values (?1, ?2)",
             [message.to, key],
         )? > 0
         {
-            insert_notification(&tx, message, day, now_ms, push_only)?;
+            let id = insert_notification(&tx, message, day, now_ms, push_only)?;
+            set_topic(&tx, id, topic)?;
         }
         tx.commit()?;
         Ok(())
@@ -1122,7 +1157,9 @@ impl Store {
         let announce = |events: Vec<&Event>, kind: &str, push_only: bool| -> Result<(), Error> {
             if events.len() > MAX_SEPARATE_PUSHES {
                 let titles: Vec<_> = events.iter().map(|event| event.title.as_str()).collect();
-                insert_notification(
+                let topic = topic_of(&events[0].key);
+                let shared = events.iter().all(|event| topic_of(&event.key) == topic);
+                let id = insert_notification(
                     &tx,
                     &Outgoing {
                         to: user,
@@ -1135,9 +1172,10 @@ impl Store {
                     now_ms,
                     push_only,
                 )?;
+                set_topic(&tx, id, shared.then_some(topic))?;
             } else {
                 for event in events {
-                    insert_notification(
+                    let id = insert_notification(
                         &tx,
                         &Outgoing {
                             to: user,
@@ -1150,6 +1188,7 @@ impl Store {
                         now_ms,
                         push_only,
                     )?;
+                    set_topic(&tx, id, Some(topic_of(&event.key)))?;
                 }
             }
             Ok(())
@@ -1232,7 +1271,7 @@ impl Store {
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select ready.recipient, id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, reply_to_title, reply_to_body
+                 select ready.recipient, id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, reply_to_title, reply_to_body, topic
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
             )?;
@@ -1258,6 +1297,7 @@ impl Store {
                             .get::<_, Option<String>>(11)?
                             .zip(r.get::<_, Option<String>>(12)?)
                             .map(|(title, body)| ReplyContext { title, body }),
+                        topic: r.get(13)?,
                     },
                 })
             })?
@@ -2554,26 +2594,49 @@ pub(crate) mod tests {
             (inbox[0].kind.as_str(), inbox[0].title.as_str()),
             ("celebration", "Title record:day:1")
         );
+        assert_eq!(inbox[0].topic.as_deref(), Some("record"));
 
         let many: Vec<Event> = (0..5).map(|i| event(&format!("level:{i}"))).collect();
         store.queue_events("hill", &many, DAY, NOW, false).unwrap();
         let inbox = store.notifications("hill", NOW).unwrap();
         assert_eq!(inbox.len(), 2);
         assert_eq!(inbox[1].title, "5 new unlocks");
+        assert_eq!(
+            inbox[1].topic.as_deref(),
+            Some("level"),
+            "a group of one kind keeps its topic"
+        );
+        store
+            .queue_events(
+                "hill",
+                &[
+                    event("level:9"),
+                    event("streak:1:7"),
+                    event("achievement:a"),
+                    event("achievement:b"),
+                    event("achievement:c"),
+                ],
+                DAY,
+                NOW,
+                false,
+            )
+            .unwrap();
+        let inbox = store.notifications("hill", NOW).unwrap();
+        assert_eq!(inbox[2].topic, None, "a mixed group has no single topic");
 
         store.set_celebrations("hill", false).unwrap();
         assert!(!store.celebrations_enabled("hill").unwrap());
         store
             .queue_events("hill", &[event("streak:1:50")], DAY, NOW, false)
             .unwrap();
-        assert_eq!(store.notifications("hill", NOW).unwrap().len(), 2);
+        assert_eq!(store.notifications("hill", NOW).unwrap().len(), 3);
         store.set_celebrations("hill", true).unwrap();
         store
             .queue_events("hill", &[event("streak:1:50")], DAY, NOW, false)
             .unwrap();
         assert_eq!(
             store.notifications("hill", NOW).unwrap().len(),
-            2,
+            3,
             "turning them back on does not replay what was skipped"
         );
     }
