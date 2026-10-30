@@ -23,6 +23,7 @@ mod freezes;
 mod friend_nudges;
 mod game;
 mod i18n;
+mod oauth;
 mod privacy;
 mod reminders;
 mod social;
@@ -96,6 +97,9 @@ struct Config {
     /// Who runs this server, for the privacy notice.
     #[serde(default)]
     privacy: privacy::Notice,
+    /// Sign-in with Google, GitHub and GitLab, each off until configured.
+    #[serde(default)]
+    oauth: oauth::Settings,
 }
 
 fn default_log_retention_days() -> u32 {
@@ -2299,6 +2303,7 @@ async fn main() -> Result<(), Error> {
         }
     }
 
+    config.oauth.load_secrets(config.public_url.as_deref())?;
     let access = access::Access::from_config(&config)?;
     let store = Store::open(&config.state_dir)?;
     let accounts = accounts::Directory::load(&store.conn)?;
@@ -2363,6 +2368,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(social::routes())
         .merge(privacy::routes())
         .merge(dev::routes())
+        .merge(oauth::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))

@@ -17,7 +17,7 @@ const ENTRIES: [&str; 8] = [
     "pages/conquered",
     "pages/dev",
 ];
-const PAGES: [&str; 7] = [
+const PAGES: [&str; 8] = [
     "index",
     "community",
     "login",
@@ -25,6 +25,7 @@ const PAGES: [&str; 7] = [
     "privacy",
     "conquered",
     "dev",
+    "oauth",
 ];
 
 type Error = Box<dyn std::error::Error>;

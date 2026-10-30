@@ -1,7 +1,7 @@
 //! What a player can do about their data: download all of it, or delete their account and everything with it.
 //! Every table is listed in `OWNED` or `SHARED`, and a test fails when a new one is not, so nothing new escapes deletion or export.
 
-use crate::accounts::{password_matches, refuse, reply};
+use crate::accounts::{has_password, password_matches, refuse, reply};
 use crate::{App, access, now_ms};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
@@ -28,6 +28,7 @@ pub struct Notice {
 const EXPORT: &[(&str, &str)] = &[
     ("account", "select user, display, created_at from accounts where user = ?1"),
     ("devices", "select device, created_at from account_tokens where user = ?1"),
+    ("sign_in_links", "select provider, subject, created_at from sign_in_links where user = ?1"),
     ("visibility", "select public from visibility where user = ?1"),
     ("reviews", "select id, cid, last_ivl, ivl, time_ms, kind from reviews where user = ?1 order by id"),
     ("anki_day", "select offset_west_min, rollover_hour from clocks where user = ?1"),
@@ -111,6 +112,7 @@ const OWNED: &[(&str, &str)] = &[
     ("server_log", "user = ?1"),
     ("announcements", "sender = ?1"),
     ("account_removals", "user = ?1"),
+    ("sign_in_links", "user = ?1"),
     ("accounts", "user = ?1"),
 ];
 
@@ -240,7 +242,11 @@ pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Deletion {
-    password: String,
+    #[serde(default)]
+    password: Option<String>,
+    /// The username, typed again, for accounts without a password.
+    #[serde(default)]
+    confirm: Option<String>,
 }
 
 async fn download(
@@ -282,15 +288,15 @@ async fn account(
     if !access::authorized(&app, &user, &headers) {
         return refuse(StatusCode::UNAUTHORIZED, "Sign in first.");
     }
-    let created: rusqlite::Result<i64> = app.store.lock().unwrap().conn.query_row(
-        "select created_at from accounts where user = ?1",
+    let created: rusqlite::Result<(i64, bool)> = app.store.lock().unwrap().conn.query_row(
+        "select created_at, password_hash != '' from accounts where user = ?1",
         [&user],
-        |r| r.get(0),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     );
     match created {
-        Ok(created_at) => reply(
+        Ok((created_at, password)) => reply(
             StatusCode::OK,
-            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at}),
+            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at, "password": password}),
         ),
         Err(_) => refuse(
             StatusCode::NOT_FOUND,
@@ -330,9 +336,24 @@ async fn delete(
             "Too many attempts. Try again in one minute.",
         );
     }
-    if !password_matches(&app, &user, &request.password).await {
-        app.access.failure(client, now);
-        return refuse(StatusCode::FORBIDDEN, "That password is not right.");
+    let has_password = has_password(&app.store.lock().unwrap().conn, &user).unwrap_or(true);
+    if !has_password {
+        if request.confirm.as_deref().map(str::trim) != Some(user.as_str()) {
+            return refuse(
+                StatusCode::BAD_REQUEST,
+                "Type your username to delete your account.",
+            );
+        }
+    } else if let Some(password) = &request.password {
+        if !password_matches(&app, &user, password).await {
+            app.access.failure(client, now);
+            return refuse(StatusCode::FORBIDDEN, "That password is not right.");
+        }
+    } else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "Enter your password to delete your account.",
+        );
     }
     if let Err(error) = forget(&app.store.lock().unwrap().conn, &user) {
         log_error!("account deletion failed: {error}");
@@ -348,7 +369,7 @@ async fn delete(
     StatusCode::NO_CONTENT.into_response()
 }
 
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -356,7 +377,12 @@ fn escape(text: &str) -> String {
 }
 
 /// The privacy notice, filled in with who runs this server.
-pub fn notice_page(notice: &Notice, push: bool, log_days: u32) -> String {
+pub fn notice_page(
+    notice: &Notice,
+    push: bool,
+    log_days: u32,
+    sign_in: &[crate::oauth::Provider],
+) -> String {
     let operator = notice.operator.as_deref().map_or_else(
         || "the person who runs this AnkiQuest server".to_string(),
         escape,
@@ -385,7 +411,22 @@ pub fn notice_page(notice: &Notice, push: bool, log_days: u32) -> String {
     } else {
         format!("for {log_days} days")
     };
+    let sign_in = match sign_in {
+        [] => String::new(),
+        providers => {
+            let names: Vec<&str> = providers.iter().map(|p| p.name()).collect();
+            let names = match names.as_slice() {
+                [one] => (*one).to_string(),
+                [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+                [] => unreachable!(),
+            };
+            format!(
+                "<li><strong>Signing in with {names}</strong>: if you use it, we receive your account ID there, your name, and for GitHub and GitLab your username. They only prefill the username and display name you choose when you sign up. We store the account ID and when you linked it, nothing else from the provider. The provider learns that you signed in to AnkiQuest. You can unlink it in Settings.</li>"
+            )
+        }
+    };
     web!("privacy.html")
+        .replace("{{sign_in}}", &sign_in)
         .replace("{{operator}}", &operator)
         .replace("{{contact}}", &contact)
         .replace("{{imprint}}", &imprint)
@@ -402,6 +443,7 @@ async fn privacy_page(State(app): State<Arc<App>>) -> Html<String> {
             .as_deref()
             .is_some_and(|ntfy| !ntfy.trim().is_empty()),
         app.config.log_retention_days,
+        &app.config.oauth.providers(),
     ))
 }
 
@@ -738,7 +780,7 @@ mod tests {
         assert!(page.contains("Ada &lt;Operator&gt;"));
         assert!(page.contains("mailto:privacy@example.org"));
         assert!(!page.contains("{{"), "every placeholder is filled");
-        let anonymous = notice_page(&Notice::default(), false, 0);
+        let anonymous = notice_page(&Notice::default(), false, 0, &[]);
         assert!(
             anonymous.contains("the person who runs this AnkiQuest server")
                 && !anonymous.contains("{{")

@@ -20,6 +20,49 @@ XP never depends on which answer button was pressed, so there is no incentive to
 
 `"devs": ["hill"]` (Nix: `devs`) lets those players open `/dev` on the website, which is linked in the header only for them. it shows player, activity, review, sign-up, group and retention totals, the last week's server errors, and sends announcements to everyone or to chosen groups. announcements arrive as ordinary inbox messages, are pushed like any other, and are recorded in the server log. names in `devs` cannot be taken by a new sign-up, so create a self-service account before listing it. the endpoints are `GET /api/dev/<user>/stats`, `/groups`, `/errors` and `GET`/`POST /api/dev/<user>/announcements` with `{"title", "body", "groups"?: [id, ...]}`; other players get 403.
 
+## sign in with Google, GitHub or GitLab
+
+each provider is off until it has a client id and a client secret file. once it has, the sign-in page shows a button for it and players can link or unlink it under Settings. a first sign-in creates an account after the person confirms a username, so it needs `registration`; signing into a player who linked the provider always works. the server keeps the provider's user id for each link, nothing else from the provider. an account made this way has no password: it connects Anki and AnkiDroid with a **New device token** from Settings, and is deleted by typing its username. the last way to sign in cannot be unlinked.
+
+```json
+{
+  "public_url": "https://anki.example.com",
+  "registration": true,
+  "oauth": {
+    "google": { "client_id": "…", "client_secret_file": "google.secret" },
+    "github": { "client_id": "…", "client_secret_file": "github.secret" },
+    "gitlab": { "client_id": "…", "client_secret_file": "gitlab.secret" }
+  }
+}
+```
+
+`public_url` is required: the callback addresses are built from it. `"base_url": "https://gitlab.example.com"` points `gitlab` at a self-hosted GitLab (on NixOS it must be reachable on a public address).
+
+register one app per provider:
+
+| provider | where | callback URL | scopes |
+| --- | --- | --- | --- |
+| Google | [Google Cloud console](https://console.cloud.google.com/apis/credentials) → Create credentials → OAuth client ID → Web application, under Authorized redirect URIs. Set up the OAuth consent screen first and publish it, or only its test users can sign in. | `https://<domain>/auth/oauth/google/callback` | `openid profile` |
+| GitHub | [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers) → New OAuth App, as Authorization callback URL | `https://<domain>/auth/oauth/github/callback` | none |
+| GitLab | [User settings → Applications](https://gitlab.com/-/user_settings/applications), confidential, as Redirect URI | `https://<domain>/auth/oauth/gitlab/callback` | `openid profile` |
+
+for `https://ankiquest.rationality-munich.com` the callbacks are `https://ankiquest.rationality-munich.com/auth/oauth/google/callback`, `…/github/callback` and `…/gitlab/callback`. the server requests the scopes itself; on GitLab also tick `openid` and `profile` on the application. put each client secret in its own file.
+
+on NixOS, `domain` sets `public_url` and the secrets are loaded as systemd credentials:
+
+```nix
+services.ankiquest = {
+  registration = true;
+  oauth = {
+    google = { clientId = "…"; clientSecretFile = "/run/secrets/ankiquest-google"; };
+    github = { clientId = "…"; clientSecretFile = "/run/secrets/ankiquest-github"; };
+    gitlab = { clientId = "…"; clientSecretFile = "/run/secrets/ankiquest-gitlab"; };
+  };
+};
+```
+
+`/auth/status` lists the configured providers in `oauth`. `GET /auth/oauth/<provider>?next=/today` starts a sign-in, `?link=1` links the provider to the signed-in player, and the provider returns to `/auth/oauth/<provider>/callback`. `GET /api/sign-in/<user>` lists the player's sign-ins; `POST` with `{"action": "unlink", "provider": "github"}` unlinks one and `{"action": "token"}` returns a new device token.
+
 ## run
 
 requires rust 1.88 or later with the `wasm32-unknown-unknown` target, and esbuild (`npm ci` installs it; build.rs also finds it on `PATH` or in `ESBUILD`).

@@ -23,7 +23,22 @@ function showTab(signup:boolean){
 }
 signinTab.addEventListener('click',function(){showTab(false);});
 signupTab.addEventListener('click',function(){showTab(true);});
-fetch('/auth/status',{credentials:'same-origin'}).then(function(response){return response.json();}).then(function(state:{registration?:boolean}){
+var providers:Record<string,string>={google:'Google',github:'GitHub',gitlab:'GitLab'};
+async function showProviders(keys:string[]){
+  var known=keys.filter(function(key){return key in providers;});
+  if(!known.length)return;
+  await AnkiQuestI18n.ready;
+  var box=document.getElementById('oauth')!;
+  box.replaceChildren(...known.map(function(key){
+    var link=document.createElement('a');
+    link.href='/auth/oauth/'+key+'?next='+encodeURIComponent(destination());
+    link.textContent=aqText`Sign in with ${providers[key]}`;
+    return link;
+  }));
+  box.hidden=false;
+}
+fetch('/auth/status',{credentials:'same-origin'}).then(function(response){return response.json();}).then(function(state:{registration?:boolean;oauth?:string[]}){
+  if(Array.isArray(state.oauth))showProviders(state.oauth);
   if(!state.registration)return;
   accounts.hidden=false;community.open=false;
   var note=document.querySelector<HTMLElement>('.login-note');if(note)note.hidden=true;

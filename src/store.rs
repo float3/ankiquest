@@ -104,6 +104,7 @@ impl Store {
             [],
         )?;
         crate::accounts::initialize(&conn)?;
+        crate::oauth::initialize(&conn)?;
         crate::social::initialize(&conn)?;
         crate::avatars::initialize(&conn)?;
         crate::conquests::initialize(&conn)?;
