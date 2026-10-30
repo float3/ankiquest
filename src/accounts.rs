@@ -308,7 +308,10 @@ pub async fn signup(
             "Display names are at most 40 characters.",
         );
     };
-    if app.config.users.contains_key(&user) || app.accounts.contains(&user) {
+    if app.config.users.contains_key(&user)
+        || app.config.devs.contains(&user)
+        || app.accounts.contains(&user)
+    {
         return refuse(StatusCode::CONFLICT, "That username is taken.");
     }
     let client = crate::access::client_ip(&app.config, &headers, peer);

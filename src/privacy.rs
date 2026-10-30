@@ -62,6 +62,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("avatar", "select revision, image from avatars where user = ?1"),
     ("conquest_labels", "select at, label from conquest_labels where user = ?1 order by at"),
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
+    ("announcements_sent", "select id, title, body, groups, recipients, created_at from announcements where sender = ?1 order by id"),
 ];
 
 /// Rows that belong to the player alone: (table, condition on ?1).
@@ -108,6 +109,7 @@ const OWNED: &[(&str, &str)] = &[
     ("avatars", "user = ?1"),
     ("conquest_labels", "user = ?1"),
     ("server_log", "user = ?1"),
+    ("announcements", "sender = ?1"),
     ("account_removals", "user = ?1"),
     ("accounts", "user = ?1"),
 ];

@@ -407,7 +407,7 @@ fn is_celebration(key: &str) -> bool {
         .any(|prefix| key.starts_with(prefix))
 }
 
-fn insert_notification(
+pub(crate) fn insert_notification(
     conn: &Connection,
     message: &Outgoing<'_>,
     day: i64,

@@ -21,6 +21,8 @@ declare global {
     registration?: boolean;
     authenticated?: boolean;
     member?: {user?: unknown} | null;
+    /** Present and true when the signed-in member is listed in `devs`. */
+    dev?: boolean;
     [key: string]: unknown;
   }
 

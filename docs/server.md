@@ -16,6 +16,10 @@ XP never depends on which answer button was pressed, so there is no incentive to
 - `sql "<query>"` runs a read-only query against the state database.
 - `remove-account <user>` deletes a self-service account and everything about it, as if they had deleted it themselves; the service carries it out within a minute. players from the configuration are removed there instead.
 
+## dev console
+
+`"devs": ["hill"]` (Nix: `devs`) lets those players open `/dev` on the website, which is linked in the header only for them. it shows player, activity, review, sign-up, group and retention totals, the last week's server errors, and sends announcements to everyone or to chosen groups. announcements arrive as ordinary inbox messages, are pushed like any other, and are recorded in the server log. names in `devs` cannot be taken by a new sign-up, so create a self-service account before listing it. the endpoints are `GET /api/dev/<user>/stats`, `/groups`, `/errors` and `GET`/`POST /api/dev/<user>/announcements` with `{"title", "body", "groups"?: [id, ...]}`; other players get 403.
+
 ## run
 
 requires rust 1.88 or later with the `wasm32-unknown-unknown` target, and esbuild (`npm ci` installs it; build.rs also finds it on `PATH` or in `ESBUILD`).

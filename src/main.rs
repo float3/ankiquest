@@ -17,6 +17,7 @@ mod competition;
 mod conquests;
 mod deck_copies;
 mod decks;
+mod dev;
 mod feedback;
 mod freezes;
 mod friend_nudges;
@@ -89,6 +90,9 @@ struct Config {
     /// Lets anyone create an account with a username and password.
     #[serde(default)]
     registration: bool,
+    /// Players who can open the dev console: announcements, statistics and recent errors.
+    #[serde(default)]
+    devs: Vec<String>,
     /// Who runs this server, for the privacy notice.
     #[serde(default)]
     privacy: privacy::Notice,
@@ -2358,6 +2362,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(conquests::routes())
         .merge(social::routes())
         .merge(privacy::routes())
+        .merge(dev::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))
