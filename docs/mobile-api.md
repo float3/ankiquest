@@ -67,3 +67,9 @@ new event kinds are `challenge_invite`, `challenge_accepted`, and `challenge_com
 `POST /api/community/challenges/{user}` accepts optional `request_id`, an 8–128 character string of ASCII letters, numbers, hyphens, and underscores. new clients generate a fresh UUID for each deliberate creation and reuse it only when retrying that creation. a repeated key with the same normalized title, kind, cooperative flag, target, duration, and recipient set returns the existing challenge list without another challenge or event. reusing it with different data returns `400`. keys are scoped to the creator. older clients may omit the key and retain their original create behavior.
 
 repeated successful accept, decline, leave, and creator cancel operations are idempotent. accept retries never reset `joined_at`. accepting or declining an invitation also marks that invitation read. acting as a nonmember is forbidden; all challenge endpoints still require the URL owner's credential. clients should reload challenge details before presenting available actions, since Activity can outlive an invitation, membership, or the challenge deadline.
+
+## sharing a win
+
+`POST /api/share/{user}` passes a win on to everyone in the player's circle. The body is either `{ "notification": 42 }`, one of the player's own `celebration`, `challenge_complete` or `reminder_weekly_recap` rows, or `{ "place": 2 }`, the player's current place (1 to 3) on this week's board. It answers `{ "recipients": n }`, the friends who got it now.
+
+friends receive a `share` row from the player, with the original title and body quoted and the same `topic` (`place:N` for a place), so it shows the same art and can be replied to. Each win reaches each friend once; friends who muted the player are skipped. Unknown or unshareable notifications are `404`, a place the player doesn't hold is `409`, and anything else is `400`.
