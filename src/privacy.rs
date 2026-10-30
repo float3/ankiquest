@@ -112,6 +112,8 @@ const OWNED: &[(&str, &str)] = &[
     ("server_log", "user = ?1"),
     ("announcements", "sender = ?1"),
     ("account_removals", "user = ?1"),
+    ("freeze_grants", "user = ?1"),
+    ("freeze_grant_reloads", "user = ?1"),
     ("sign_in_links", "user = ?1"),
     ("accounts", "user = ?1"),
 ];

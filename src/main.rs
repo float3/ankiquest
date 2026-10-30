@@ -1905,6 +1905,12 @@ fn tick(app: &App) -> Result<(), Error> {
             )?);
             admin::flush(&store.conn, now, settings.log_retention_days)?;
             privacy::carry_out_removals(app, &store.conn)?;
+            for user in freezes::take_grant_reloads(&store.conn)? {
+                if app.players.read().unwrap().contains_key(&user) {
+                    let player = load_player(&store, &user)?;
+                    app.players.write().unwrap().insert(user, player);
+                }
+            }
             let import_complete = app.config.sync_base.as_ref().is_none_or(|base| {
                 match import(app, &mut store, base) {
                     Ok(()) => true,

@@ -229,7 +229,9 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
   logs [--since <n>m|h|d|all] [--level info|error] [--user <player>] [--limit <n>]
                                   print the server log (default: last 7 days, 200 lines)
   sql <query>                     run a read-only SQL query against the state
-  remove-account <user>           delete a self-service account and everything about it";
+  remove-account <user>           delete a self-service account and everything about it
+  grant-freeze <user> <date>...   protect a player's streak on these days (YYYY-MM-DD)
+  revoke-freeze <user> <date>...  take that protection away again";
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -239,6 +241,7 @@ pub enum Command {
     Logs(LogFilter),
     Sql(String),
     RemoveAccount(String),
+    GrantFreeze(String, Vec<String>, bool),
 }
 
 #[derive(Debug, PartialEq)]
@@ -261,6 +264,17 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["reset", key] => Command::Reset(key_of(key)),
         ["sql", query] => Command::Sql(query.to_string()),
         ["remove-account", user] => Command::RemoveAccount(user.to_string()),
+        [verb @ ("grant-freeze" | "revoke-freeze"), user, dates @ ..] if !dates.is_empty() => {
+            let dates = dates
+                .iter()
+                .map(|date| {
+                    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .map_err(|_| format!("{date} is not a YYYY-MM-DD date"))
+                })
+                .collect::<Result<_, _>>()?;
+            Command::GrantFreeze(user.to_string(), dates, *verb == "grant-freeze")
+        }
         ["logs", options @ ..] => {
             let mut filter = LogFilter {
                 since_ms: Some(7 * DAY_MS),
@@ -382,6 +396,22 @@ pub fn run(
             )?;
             admin_log(conn, now_ms, "admin asked to remove an account".into())?;
             format!("{user} and everything about them will be removed within a minute.\n")
+        }
+        Command::GrantFreeze(user, dates, granted) => {
+            let changed = crate::freezes::grant(conn, &user, &dates, granted, now_ms)?;
+            let verb = if granted { "granted" } else { "revoked" };
+            admin_log(
+                conn,
+                now_ms,
+                format!(
+                    "admin {verb} streak protection for {user} on {}",
+                    dates.join(", ")
+                ),
+            )?;
+            format!(
+                "{verb} {changed} day(s) for {user}; the service applies it within a minute.
+"
+            )
         }
         Command::Sql(_) => unreachable!(),
     })
@@ -529,9 +559,56 @@ mod tests {
             vec!["logs", "--since", "3w"],
             vec!["logs", "--level", "debug"],
             vec!["frobnicate"],
+            vec!["grant-freeze", "hill"],
+            vec!["grant-freeze", "hill", "2026-09-31"],
+            vec!["revoke-freeze", "hill", "12.09.2026"],
         ] {
             assert!(parse(&words(&bad)).is_err(), "{bad:?} should not parse");
         }
+    }
+
+    #[test]
+    fn granted_freezes_are_stored_and_queue_a_reload() {
+        let dir = state("grant-freeze");
+        let run = |args: &[&str]| run(&dir, configured(), parse(&words(args)).unwrap(), NOW);
+        assert!(
+            run(&[
+                "grant-freeze",
+                "hill",
+                "2026-09-12",
+                "2026-09-13",
+                "2026-09-14"
+            ])
+            .unwrap()
+            .starts_with("granted 3 day(s)")
+        );
+        assert!(
+            run(&["grant-freeze", "hill", "2026-09-12"])
+                .unwrap()
+                .starts_with("granted 0 day(s)")
+        );
+        run(&["revoke-freeze", "hill", "2026-09-13"]).unwrap();
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(
+            store
+                .granted_freezes("hill")
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["2026-09-12", "2026-09-14"]
+        );
+        assert!(store.granted_freezes("cerro").unwrap().is_empty());
+        assert_eq!(
+            crate::freezes::take_grant_reloads(&store.conn).unwrap(),
+            ["hill"]
+        );
+        assert!(
+            crate::freezes::take_grant_reloads(&store.conn)
+                .unwrap()
+                .is_empty()
+        );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
