@@ -301,29 +301,33 @@ impl Store {
             for id in deleted {
                 delete.execute(params![user, id])?;
             }
-            tx.execute(
-                "insert into clocks (user, offset_west_min, rollover_hour) values (?1, ?2, ?3)
-                 on conflict (user) do update set
-                     offset_west_min = excluded.offset_west_min,
-                     rollover_hour = excluded.rollover_hour",
-                params![user, clock.offset_west_min, clock.rollover_hour],
-            )?;
             // A clock that differs from the last one we saw starts a new entry,
             // dated from this upload: the reviews already here were kept under
             // the old one. The first entry a player gets reaches back forever,
             // since there is nothing before it to date the change against.
+            // A clock read before the newest change is stale and leaves both alone.
             let latest = tx
                 .query_row(
-                    "select offset_west_min, rollover_hour from clock_history
+                    "select effective_from_ms, offset_west_min, rollover_hour from clock_history
                      where user = ?1 order by effective_from_ms desc limit 1",
                     params![user],
-                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
                 )
                 .optional()?;
-            let moved = latest.is_none_or(|(offset_west_min, rollover_hour)| {
+            let stale = latest.is_some_and(|(from, _, _)| received_at < from);
+            if !stale {
+                tx.execute(
+                    "insert into clocks (user, offset_west_min, rollover_hour) values (?1, ?2, ?3)
+                     on conflict (user) do update set
+                         offset_west_min = excluded.offset_west_min,
+                         rollover_hour = excluded.rollover_hour",
+                    params![user, clock.offset_west_min, clock.rollover_hour],
+                )?;
+            }
+            let moved = latest.is_none_or(|(_, offset_west_min, rollover_hour)| {
                 offset_west_min != clock.offset_west_min || rollover_hour != clock.rollover_hour
             });
-            if moved {
+            if moved && !stale {
                 let effective_from_ms = if latest.is_none() { 0 } else { received_at };
                 tx.execute(
                     "insert into clock_history

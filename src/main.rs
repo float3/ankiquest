@@ -423,7 +423,11 @@ fn standings(app: &App, users: &BTreeSet<String>, period: Option<String>) -> Vec
             streak_minutes: p.today.streak_minutes,
         })
         .collect();
-    standings.sort_by_key(|s| std::cmp::Reverse((s.xp, s.xp_total)));
+    standings.sort_by(|a, b| {
+        (b.xp, b.xp_total)
+            .cmp(&(a.xp, a.xp_total))
+            .then_with(|| a.user.cmp(&b.user))
+    });
     standings
 }
 
@@ -653,6 +657,17 @@ async fn preview(
     if pending.reviews.len() > MAX_PENDING {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
+    if !authorized(&app, &user, &headers)
+        && !app
+            .visible(
+                &app.store.lock().unwrap().conn,
+                &access::viewer(&app, &headers),
+                &user,
+            )
+            .map_err(store_error)?
+    {
+        return Err(StatusCode::NOT_FOUND);
+    }
     let mut profile = app
         .preview(&user, &pending.reviews)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -697,7 +712,7 @@ async fn rank(
     Json(query): Json<RankQuery>,
 ) -> Result<Json<RankResponse>, StatusCode> {
     let language =
-        i18n::selected(&headers, &app.store.lock().unwrap(), &user).unwrap_or_else(|_| "en".into());
+        i18n::selected(&headers, &app.store.lock().unwrap(), &user).map_err(store_error)?;
     let users = if authorized(&app, &user, &headers) {
         app.circle(&app.store.lock().unwrap().conn, &user)
             .map_err(store_error)?
@@ -1025,7 +1040,7 @@ async fn set_decks(
 }
 
 fn store_error(error: impl std::fmt::Display) -> StatusCode {
-    log_error!("community storage failed: {error}");
+    log_error!("storage failed: {error}");
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
@@ -1209,10 +1224,8 @@ async fn activity(
     let now = now_ms();
     challenges::refresh(&mut store, &app.participants(), now).map_err(store_error)?;
     let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
-    let mut activity = if query.category.is_none() && query.unread_only != Some(true) {
-        store.activity(&user, now, days, query.before, limit)
-    } else {
-        store.activity_filtered(
+    let mut activity = store
+        .activity_filtered(
             &user,
             now,
             decks::ActivityOptions {
@@ -1223,8 +1236,7 @@ async fn activity(
                 unread_only: query.unread_only.unwrap_or(false),
             },
         )
-    }
-    .map_err(store_error)?;
+        .map_err(store_error)?;
     for notice in &mut activity.items {
         i18n::notification(notice, &language, &app.display(&notice.sender));
     }
@@ -2019,6 +2031,7 @@ fn just_ahead<'a>(
 }
 
 fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
+    app.store.lock().unwrap().prune_notifications(now_ms())?;
     let deliveries = app.store.lock().unwrap().take_deck_deliveries(now_ms())?;
     let started = std::time::Instant::now();
     for mut delivery in deliveries {
@@ -2027,9 +2040,12 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
             break;
         }
         let id = delivery.notification.id;
+        if push_destination(&app.config, &delivery.user).is_none() {
+            app.store.lock().unwrap().cancel_push(id)?;
+            continue;
+        }
         let mut reminder_body = None;
         if delivery.notification.kind.starts_with("reminder_") {
-            let mut store = app.store.lock().unwrap();
             let now = now_ms();
             let profile = app.profile(&delivery.user);
             let clock = app
@@ -2038,6 +2054,7 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
                 .unwrap()
                 .get(&delivery.user)
                 .map(|p| p.clock);
+            let mut store = app.store.lock().unwrap();
             let guard = match (profile, clock) {
                 (Some(profile), Some(clock)) => {
                     reminder_body = Some(reminders::current_body(
@@ -2084,10 +2101,6 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
         } else {
             reminder_body
         };
-        if push_destination(&app.config, &delivery.user).is_none() {
-            app.store.lock().unwrap().defer_push(id, now_ms())?;
-            continue;
-        }
         if !app.store.lock().unwrap().begin_push(id, now_ms())? {
             continue;
         }
