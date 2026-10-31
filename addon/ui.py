@@ -1,5 +1,6 @@
 """The dialogs behind the Tools menu: settings and deck sharing."""
 
+import html
 from pathlib import Path
 
 from aqt.qt import (
@@ -108,6 +109,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     hint.setWordWrap(True)
     layout.addWidget(hint)
     status = QLabel()
+    status.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
     status.setWordWrap(True)
     layout.addWidget(status)
 
@@ -160,8 +162,9 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     return result
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None):
-    """Everything the phone keeps in its ankiquest preference screen."""
+def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None):
+    """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
+    a section and return what to run once the dialog is saved."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("ankiquest")
     layout = QVBoxLayout(dialog)
@@ -209,10 +212,13 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
     upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
+    finish = extra(dialog, layout) if extra else None
     layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
 
     if not dialog.exec():
         return None
+    if finish:
+        finish()
     return _values(url, user, token, rank, hours, channel)
 
 
@@ -246,7 +252,7 @@ def deck_dialog(parent, settings, companion="aki"):
     for index, deck in enumerate(decks):
         item = QTreeWidgetItem([label(deck)])
         item.setCheckState(0, _enum(Qt, "CheckState", "Checked" if deck.get("enabled") else "Unchecked"))
-        item.setToolTip(0, deck["name"])
+        item.setToolTip(0, "<p>%s</p>" % html.escape(deck["name"]))
         items.append(item)
         parts = deck["name"].split("::")
         owner = None

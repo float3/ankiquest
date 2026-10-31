@@ -1,3 +1,4 @@
+import html
 import platform
 import tempfile
 import time
@@ -6,7 +7,7 @@ from pathlib import Path
 import anki.lang
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction
+from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
 from . import board, notify, ui, updates, web
@@ -15,7 +16,7 @@ from .client import (
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
-    AccountError,
+    ServerError,
     Client,
     offset_west_min,
     reconcile,
@@ -24,6 +25,7 @@ from .client import (
     sign_up,
 )
 from .deck_completion import deck_snapshots, study_day
+from . import copies_ui, preferences, preview
 
 MARK_KEY = "ankiquestUploadedThrough"
 RECENT_KEY = "ankiquestRecentUploads"
@@ -36,6 +38,7 @@ UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
 ADDON_DIR = Path(__file__).resolve().parent
 RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
+WEBSITE_SHORTCUT = "Ctrl+Shift+K"
 
 state = {
     "busy": False,
@@ -77,6 +80,7 @@ def refresh(show_feedback, resync=False):
         return
     api = client()
     if not api.configured:
+        preview.refresh(mw, api, show_feedback, tooltip)
         return
     state["busy"] = True
     rollover = int(mw.col.get_config("rollover", 4))
@@ -126,6 +130,7 @@ def refresh(show_feedback, resync=False):
         try:
             mw.pm.profile[MARK_KEY], mw.pm.profile[RECENT_KEY], profile = future.result()
             mw.pm.profile[BASELINE_KEY] = account
+            mw.pm.profile[preferences.LAST_UPLOAD_KEY] = int(time.time() * 1000)
         except Exception as e:
             print("ankiquest:", e)
             return
@@ -160,6 +165,7 @@ def refresh_shared_decks():
 
 def poll(quiet=False):
     """Keeps the deck list board, the inbox and the streak warning up to date."""
+    copies_ui.poll(quiet)
     api = client()
     if not api.configured or state["polling"]:
         return
@@ -214,10 +220,15 @@ def announce(rank, profile, inbox, quiet):
     if warning:
         tooltip(warning[0], period=5000)
     for entry in fresh:
-        text = notify.summarize(entry).replace("\n", "<br>")
+        text = notify.notice(entry)
         if notify.answerable(entry):
             text += "<br><i>Tools → ankiquest inbox to reply</i>"
         tooltip(text, period=6000)
+
+
+def failed(template, error):
+    """Errors can quote the server, so they are escaped before the rich-text tooltip."""
+    tooltip(template % html.escape(str(error)))
 
 
 def redraw():
@@ -289,7 +300,7 @@ def open_inbox():
 
 
 def account_error(error):
-    if isinstance(error, AccountError):
+    if isinstance(error, ServerError):
         if error.status == 401:
             return tr("Username or password not recognized.")
         if error.status == 403:
@@ -338,11 +349,14 @@ def open_account():
     refresh_shared_decks()
     refresh(False, resync=True)
     poll(quiet=True)
-    tooltip(tr("Signed in as %s.") % answer["user"])
+    tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
 
 
 def open_settings():
-    values = ui.settings_dialog(mw, config(), test_connection, upload_everything, state["companion"], ask_account)
+    values = ui.settings_dialog(
+        mw, config(), test_connection, upload_everything, state["companion"], ask_account,
+        extra=lambda dialog, layout: preferences.section(dialog, layout, mw, client()),
+    )
     if values is None:
         return
     if values.get("update_channel") != config().get("update_channel", "stable"):
@@ -366,7 +380,7 @@ def test_connection(values):
         try:
             profile = future.result()
         except Exception as e:
-            tooltip("ankiquest: %s" % e)
+            failed("ankiquest: %s", e)
             return
         tooltip(tr("Connected as %s, level %d.") % (values["user"], profile.get("level", 1)))
 
@@ -390,7 +404,7 @@ def open_companion():
         try:
             current = future.result()
         except Exception as error:
-            tooltip("ankiquest: %s" % error)
+            failed("ankiquest: %s", error)
             return
         if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
             return
@@ -402,7 +416,7 @@ def open_companion():
             try:
                 companion = future.result()
             except Exception as error:
-                tooltip("ankiquest: %s" % error)
+                failed("ankiquest: %s", error)
                 return
             if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
                 return
@@ -432,7 +446,7 @@ def open_deck_notifications():
         try:
             settings = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not load your decks (%s)") % e)
+            failed(tr("ankiquest: could not load your decks (%s)"), e)
             return
         choice = ui.deck_dialog(mw, settings, state["companion"])
         if choice is None:
@@ -455,7 +469,7 @@ def save_deck_choice(api, shared, unshared, recipients, nudges, celebrations=Non
         try:
             mw.pm.profile[SHARED_KEY] = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not save your decks (%s)") % e)
+            failed(tr("ankiquest: could not save your decks (%s)"), e)
             return
         tooltip(tr("%d deck shared." if len(shared) == 1 else "%d decks shared.") % len(shared))
 
@@ -498,7 +512,7 @@ def check_updates(quiet=True):
             candidate = future.result()
         except Exception as e:
             if not quiet:
-                tooltip(tr("ankiquest: could not check for updates (%s)") % e)
+                failed(tr("ankiquest: could not check for updates (%s)"), e)
             return
         if updates.newer(candidate, current):
             offer_update(candidate)
@@ -527,7 +541,7 @@ def offer_update(candidate):
         try:
             path = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not download the update (%s)") % e)
+            failed(tr("ankiquest: could not download the update (%s)"), e)
             return
         install_update(path)
 
@@ -551,9 +565,11 @@ def on_sync():
     poll()
 
 
-def add_action(title, handler):
+def add_action(title, handler, shortcut=None):
     action = QAction(title, mw)
     action.triggered.connect(handler)
+    if shortcut:
+        action.setShortcut(QKeySequence(shortcut))
     mw.form.menuTools.addAction(action)
 
 
@@ -562,8 +578,9 @@ add_action(tr("ankiquest settings…"), open_settings)
 add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
 add_action(tr("ankiquest inbox…"), open_inbox)
-add_action(tr("ankiquest on the web…"), open_website)
+add_action(tr("ankiquest on the web…"), open_website, WEBSITE_SHORTCUT)
 add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
+copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
 
 
 gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))

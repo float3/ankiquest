@@ -1,10 +1,16 @@
 """What the desktop says out loud. The server writes the words; this decides when."""
 
+import html
 import re
 import urllib.parse
 
 FRESH_SECONDS = 86_400
 HOUR_MS = 3_600_000
+
+
+def rich(text):
+    """Server words for a rich-text tooltip: never markup, line breaks kept."""
+    return html.escape(str(text)).replace("\n", "<br>")
 
 
 def feedback(response, show_feedback):
@@ -13,9 +19,9 @@ def feedback(response, show_feedback):
     headlines = list(told.get("headlines") or [])
     status = told.get("status")
     if headlines:
-        return "<br>".join(headlines + ([status] if status else [])), True
+        return "<br>".join(rich(line) for line in headlines + ([status] if status else [])), True
     if status and show_feedback:
-        return status, False
+        return rich(status), False
     return None
 
 
@@ -34,9 +40,7 @@ MAX_LABEL = 120
 def suggested_label(field):
     """A card's first field as one line of plain text, short enough to be a label."""
     text = re.sub(r"\[sound:[^\]]*\]", " ", field or "")
-    text = re.sub(r"<[^>]*>", " ", text)
-    for entity, char in (("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'"), ("&amp;", "&")):
-        text = text.replace(entity, char)
+    text = html.unescape(re.sub(r"<[^>]*>", " ", text))
     return " ".join(text.split())[:MAX_LABEL]
 
 
@@ -47,7 +51,8 @@ def with_suggestion(path, label):
 
 
 def notice(entry):
-    title, body = entry.get("title", ""), entry.get("body", "")
+    """A server notification as tooltip text, with its title and body escaped."""
+    title, body = rich(entry.get("title", "")), rich(entry.get("body", ""))
     return "%s<br>%s" % (title, body) if body else title
 
 
@@ -76,7 +81,3 @@ def fresh_messages(inbox, cursor, now_s):
 
 def answerable(entry):
     return bool(entry.get("sender")) and not entry.get("replied")
-
-
-def summarize(entry):
-    return "%s\n%s" % (entry.get("title", ""), entry.get("body", ""))

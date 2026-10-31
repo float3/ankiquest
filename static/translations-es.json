@@ -1241,5 +1241,11 @@
   "{0} day streak": "Racha de {0} días",
   "{0} cards": "{0} tarjetas",
   "Study with {0} on AnkiQuest": "Estudia con {0} en AnkiQuest",
-  "Join AnkiQuest": "Únete a AnkiQuest"
+  "Join AnkiQuest": "Únete a AnkiQuest",
+  "Ends {0}": "Termina el {0}",
+  "{0} new updates": "{0} novedades",
+  "Achievement: {0}": "Logro: {0}",
+  "Quest complete: {0}": "Misión completada: {0}",
+  "{0} — told {1} friend": "{0} — se avisó a {1} amigo",
+  "{0} — told {1} friends": "{0} — se avisó a {1} amigos"
 }

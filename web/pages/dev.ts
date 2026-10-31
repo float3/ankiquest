@@ -1,4 +1,4 @@
-export {};
+import {send} from "../http";
 
 /** `/api/dev/<user>/stats` (`Stats` in src/dev.rs). */
 interface Stats {
@@ -40,7 +40,7 @@ let user = "";
 const api = (path: string) => `/api/dev/${encodeURIComponent(user)}/${path}`;
 
 async function load<T>(path: string): Promise<T> {
-  const response = await fetch(api(path), {cache: "no-store", credentials: "same-origin"});
+  const response = await send(api(path));
   if (!response.ok) throw new Error(String(response.status));
   return response.json();
 }
@@ -122,12 +122,7 @@ function wire(form: HTMLFormElement) {
     status.className = "status";
     status.textContent = "Sending…";
     try {
-      const response = await fetch(api("announcements"), {
-        method: "POST",
-        credentials: "same-origin",
-        headers: AnkiQuestSite.ownerHeaders({user}, request),
-        body: JSON.stringify(request),
-      });
+      const response = await send(api("announcements"), {json: request});
       if (!response.ok) throw new Error(response.status === 409 ? "Nobody is in those groups." : `Not sent (${response.status}).`);
       const sent = await response.json() as {recipients: number};
       status.textContent = `Sent to ${num(sent.recipients)} players.`;

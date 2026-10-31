@@ -408,11 +408,11 @@
   "Notify selected people once per deck each Anki day, after you finish all scheduled cards, including learning cards due later today.": "Notifique pessoas selecionadas uma vez por deck cada dia Anki, depois de terminar todas as cartas agendadas, incluindo cartões de aprendizagem devidos mais tarde hoje.",
   "Notify these people:": "Notifique estas pessoas:",
   "Nudge": "Lembrete",
-  "Nudge friends": "Amigos do Nudge",
-  "Nudge me when a place, a personal best or a level is within reach": "Quando um lugar, um recorde pessoal ou um nível está ao alcance",
-  "Nudge sent!": "O Nudge enviou!",
+  "Nudge friends": "Enviar lembretes a amigos",
+  "Nudge me when a place, a personal best or a level is within reach": "Lembra-me quando um lugar, um recorde pessoal ou um nível estiver ao alcance",
+  "Nudge sent!": "Lembrete enviado!",
   "Nudge your friends": "Cutuque seus amigos",
-  "Nudged today": "Nudged hoje",
+  "Nudged today": "Lembrete enviado hoje",
   "Nudges": "Lembretes",
   "Off": "Desligado",
   "Old Friends": "Velhos Amigos",
@@ -1245,5 +1245,7 @@
   "{0} day streak": "Sequência de {0} dias",
   "{0} cards": "{0} cartões",
   "Study with {0} on AnkiQuest": "Estude com {0} no AnkiQuest",
-  "Join AnkiQuest": "Entre no AnkiQuest"
+  "Join AnkiQuest": "Entre no AnkiQuest",
+  "Ends {0}": "Termina a {0}",
+  "{0} new updates": "{0} novidades"
 }
