@@ -1,12 +1,19 @@
 /* Private Today, study history, session recap and account settings. */
 import {alertSenders, type AlertSettings} from "./deck-alerts";
 import {escape as esc, nativeAccount} from "./common";
-import {refused, request as call, send} from "./http";
+import {failure, refused, request as call, send} from "./http";
 
 (() => {
   "use strict";
   interface Quest { title: string; progress: number; target: number; done: boolean; reward: number }
-  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[] }
+  type Policy = "private" | "ask" | "auto";
+  type GoalMode = "off" | "cards" | "minutes" | "backlog";
+  type Measured = Exclude<GoalMode, "off">;
+  interface Goal { mode: GoalMode; value?: number | null }
+  interface GoalProgress extends Goal { progress?: number | null; reached?: boolean }
+  interface Sharing { policies: Record<string, Policy>; daily_cap: number }
+  interface Win { id: number; kind: string; created_at: number; title: string; body: string; policy: Policy; shared_with_friends: boolean; link: {url: string; image: string} | null }
+  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[]; goal?: GoalProgress | null }
   interface StudyDay { date: string; reviews: number; time_ms: number; xp: number; new_cards: number; streak: number; frozen: boolean }
   interface StudySession { started_at: number; ended_at: number; reviews: number; time_ms: number; new_cards: number }
   interface StudyHistory { year: number; years: number[]; days: StudyDay[]; last_review_at: number | null; last_received_at: number | null; latest_session: StudySession | null }
@@ -22,6 +29,8 @@ import {refused, request as call, send} from "./http";
     nudges?: {receiving: boolean; automatic_receiving: boolean; friends: (Person & {muted_by_me: boolean})[]} | null;
     subscriptions?: (AlertSettings & {enabled: boolean}) | null;
     decks?: {decks: {id: string; name: string; enabled: boolean; recipients: string[]}[]; recipients: Person[]; celebrations: boolean} | null;
+    sharing?: Sharing | null;
+    goal?: Goal | null;
   }
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
@@ -32,6 +41,7 @@ import {refused, request as call, send} from "./http";
     session: OwnerSession | null; epoch: number; profile: Profile | null; study: StudyHistory | null; challenges: Challenges | null; activity: Activity | null;
     settings: Settings; errors: Record<string, string>; year: number | null; selected: string | null; native: boolean;
     social: Social | null; invite: Invite | null; account: {created_at: number; password?: boolean} | null; signIn: SignIn | null;
+    wins: Win[] | null; winsError: string; winsMore: boolean; winsLoading: boolean; winStatus: Record<number, {text: string; error: boolean}>;
   }
 
   const {t:tr, html} = AnkiQuestI18n;
@@ -44,7 +54,12 @@ import {refused, request as call, send} from "./http";
   const page = path === "/history" ? "history" : path === "/settings" ? "settings" : path === "/friends" ? "friends" : path.startsWith("/join/") ? "join" : "today";
   const inviteCode = page === "join" ? decodeURIComponent(path.slice("/join/".length)) : "";
   let reminders: [ReminderKey, string][] = [];
-  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null};
+  let moments: [string, string][] = [], policies: [Policy, string][] = [], goalModes: [GoalMode, string][] = [];
+  const momentDefaults: Record<string, Policy> = {daily_goal:"ask", streak_secured:"private", streak:"ask", level:"ask", achievement:"ask", record:"ask", quest:"private", conquered:"ask", place:"ask", challenge:"ask"};
+  const goalLimits: Record<Measured, {min: number; max: number; fallback: number}> = {cards:{min:1,max:5000,fallback:100}, minutes:{min:1,max:600,fallback:20}, backlog:{min:1,max:100,fallback:100}};
+  const winPage = 10;
+  const cards = new Map<number, Promise<string>>();
+  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null, wins:null, winsError:"", winsMore:false, winsLoading:false, winStatus:{}};
   document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = page === "settings" ? "settings" : "today";
   // Text waits for translations; restore() does too, so reminders are set before any render.
   void AnkiQuestI18n.ready.then(() => {
@@ -62,6 +77,14 @@ import {refused, request as call, send} from "./http";
       ["milestone",tr("Streak milestones")], ["weekly_closing",tr("Weekly competition closing")],
       ["weekly_recap",tr("Weekly recap")],
     ];
+    moments = [
+      ["daily_goal",tr("Daily goal")], ["streak_secured",tr("Streak secured")], ["streak",tr("Streak milestones")],
+      ["level",tr("Level ups")], ["achievement",tr("Achievements")], ["record",tr("Personal bests")],
+      ["quest",tr("Daily quests")], ["conquered",tr("Conquered cards")], ["place",tr("Top 3 on the weekly board")],
+      ["challenge",tr("Challenges completed")],
+    ];
+    policies = [["private",tr("Only me")], ["ask",tr("Ask me")], ["auto",tr("Tell friends automatically")]];
+    goalModes = [["off",tr("No goal")], ["cards",tr("Cards reviewed")], ["minutes",tr("Minutes studied")], ["backlog",tr("Backlog cleared (%)")]];
     $("personal-title").textContent = titles[page];
     $("personal-intro").textContent = intros[page];
     document.title = titles[page] + " · AnkiQuest";
@@ -79,6 +102,7 @@ import {refused, request as call, send} from "./http";
     state.profile = state.study = state.challenges = state.activity = null;
     state.settings = {};
     state.social = state.invite = null;
+    forgetWins();
     $("personal-gate").hidden = false;
     void site.status().then(access => { if (access?.registration) $("personal-login").hidden = false; });
     ($<HTMLFormElement>("personal-connect").elements.namedItem("token") as HTMLInputElement).value = "";
@@ -94,6 +118,7 @@ import {refused, request as call, send} from "./http";
     if (state.session?.user === session.user && state.session?.token === session.token) return;
     state.session = session;
     state.native = native;
+    forgetWins();
     state.year = null;
     state.selected = null;
     site.setProfile(session.user, true);
@@ -111,10 +136,10 @@ import {refused, request as call, send} from "./http";
     if (member) useAccount(member);
     else showGate();
   }
-  async function request<T = unknown>(route: string, body?: unknown, session = state.session): Promise<T | null> {
+  async function request<T = unknown>(route: string, body?: unknown, session = state.session, method?: string): Promise<T | null> {
     if (!session) throw Error(tr("Connect your account first."));
     try {
-      return await call<T | null>(route, {session, json: body});
+      return await call<T | null>(route, {session, json: body, ...(method ? {method} : {})});
     } catch (cause) {
       if (!refused(cause)) throw cause;
       const rejected = cause.status === 401 || cause.status === 403;
@@ -124,7 +149,7 @@ import {refused, request as call, send} from "./http";
       throw cause;
     }
   }
-  const owner = <T = unknown>(route: string, body?: unknown, session = state.session) => request<T>(route + "/" + encodeURIComponent(session!.user), body, session);
+  const owner = <T = unknown>(route: string, body?: unknown, session = state.session, method?: string) => request<T>(route + "/" + encodeURIComponent(session!.user), body, session, method);
   function error(message: string) {
     $("personal-error").hidden = false;
     $("personal-error").textContent = message;
@@ -153,8 +178,8 @@ import {refused, request as call, send} from "./http";
         state.invite = invite.status === "fulfilled" ? invite.value : null;
         renderJoin();
       } else if (page === "settings") {
-        const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks"];
-        const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session)];
+        const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks","sharing","goal"];
+        const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session),owner("/api/sharing",undefined,session),owner("/api/goal",undefined,session)];
         const [results, account, signIn] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number; password?: boolean}>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null)]);
         if (state.session !== session || state.epoch !== epoch) return;
         state.account = account;
@@ -168,11 +193,12 @@ import {refused, request as call, send} from "./http";
         renderSettings();
       } else {
         const year = state.year == null ? "" : `?year=${state.year}`;
-        const [profile,study,challenges,activity] = await Promise.allSettled([
+        const [profile,study,challenges,activity,wins] = await Promise.allSettled([
           owner<Profile>("/api/profile",undefined,session),
           request<StudyHistory>(`/api/study/${encodeURIComponent(session.user)}${year}`,undefined,session),
           owner<Challenges>("/api/community/challenges",undefined,session),
           request<Activity>(`/api/activity/${encodeURIComponent(session.user)}?days=30&limit=20`,undefined,session),
+          page === "today" ? request<unknown>(`/api/wins/${encodeURIComponent(session.user)}?limit=${winPage}`,undefined,session) : Promise.resolve(null),
         ]);
         if (state.session !== session || state.epoch !== epoch) return;
         if (study.status === "rejected") throw study.reason;
@@ -181,7 +207,12 @@ import {refused, request as call, send} from "./http";
         state.challenges = challenges.status === "fulfilled" ? challenges.value : null;
         state.activity = activity.status === "fulfilled" ? activity.value : null;
         state.year = study.value!.year;
-        if (page === "today") renderToday(); else renderHistory();
+        if (page === "today") {
+          forgetWins();
+          if (wins.status === "fulfilled") { state.wins = winRows(wins.value); state.winsMore = state.wins.length >= winPage; }
+          else state.winsError = (wins.reason as Error).message;
+          renderToday();
+        } else renderHistory();
       }
     } catch (cause) {
       if (state.session === session && state.epoch === epoch) error((cause as Error).message);
@@ -223,7 +254,146 @@ import {refused, request as call, send} from "./http";
     const reviewed = Number(today.reviews || 0), needed = Number(today.streak_minutes || 0);
     const streakNote = needed > 0 ? tr`${number(Math.min(Number(today.minutes || 0), needed))} of ${number(needed)} minutes today` : tr("Anki study days");
     const lead = reviewed ? tr("Every review moved you forward today.") : tr("A small start still counts. Your cards are waiting in Anki.");
-    $("personal-content").innerHTML = html`<section class="personal-lead"><div class="eyebrow">${tr("Your Anki day")}</div><h2>${profile ? tr`Hello, ${esc(profile.display)}.` : tr("A fresh page for today.")}</h2><p>${lead}</p><div class="personal-actions">${link("/community#challenges",tr("See friend goals"),true)}${link("/history",tr("View study history"))}<a class="button-link" href="https://ankiweb.net/decks" target="_blank" rel="noopener noreferrer">${tr("Study in AnkiWeb ↗")}</a></div>${freshness()}</section><div class="kpis">${site.kpi(tr("Reviews today"),number(today.reviews),tr("Synced from Anki"),"blue")}${site.kpi(tr("Today's XP"),number(today.xp),tr("Every card counts"),"gold")}${site.kpi(tr("Current streak"),number(profile?.streak || 0),streakNote,"green")}${site.kpi(tr("Level"),number(profile?.level || 1),tr("Keep moving forward"))}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>${tr("Today's quests")}</h2><p>${tr("Three small wins to aim for.")}</p></div></div>${quests.length ? html`<div class="stack">${quests.map(quest).join("")}</div>` : html`<p class="personal-empty">${tr("Upload some reviews to see your quests.")}</p>`}</article>${activeGoals()}</div>${recap()}`;
+    $("personal-content").innerHTML = html`<section class="personal-lead"><div class="eyebrow">${tr("Your Anki day")}</div><h2>${profile ? tr`Hello, ${esc(profile.display)}.` : tr("A fresh page for today.")}</h2><p>${lead}</p><div class="personal-actions">${link("/community#challenges",tr("See friend goals"),true)}${link("/history",tr("View study history"))}<a class="button-link" href="https://ankiweb.net/decks" target="_blank" rel="noopener noreferrer">${tr("Study in AnkiWeb ↗")}</a></div>${freshness()}</section><div class="kpis">${site.kpi(tr("Reviews today"),number(today.reviews),tr("Synced from Anki"),"blue")}${site.kpi(tr("Today's XP"),number(today.xp),tr("Every card counts"),"gold")}${site.kpi(tr("Current streak"),number(profile?.streak || 0),streakNote,"green")}${site.kpi(tr("Level"),number(profile?.level || 1),tr("Keep moving forward"))}</div>${goalMeter()}<div class="grid"><article class="card"><div class="card-head"><div><h2>${tr("Today's quests")}</h2><p>${tr("Three small wins to aim for.")}</p></div></div>${quests.length ? html`<div class="stack">${quests.map(quest).join("")}</div>` : html`<p class="personal-empty">${tr("Upload some reviews to see your quests.")}</p>`}</article>${activeGoals()}</div><article class="card personal-wins" id="today-wins">${winsBody()}</article>${recap()}`;
+    loadCards();
+  }
+  function goalMeter() {
+    const goal = state.profile?.goal;
+    if (!goal) return "";
+    const change = link("/settings#daily-goal", goal.mode === "off" ? tr("Set a daily goal") : tr("Change goal"));
+    if (goal.mode === "off") return html`<article class="card personal-goal" id="today-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("No daily goal for now.")}</p></div></div><div class="personal-actions">${change}</div></article>`;
+    const value = Math.max(1, Number(goal.value) || 1), progress = goal.progress == null ? null : Math.max(0, Number(goal.progress) || 0);
+    const reached = !!goal.reached || (progress != null && progress >= value);
+    const target = goal.mode === "cards" ? tr`${number(value)} cards a day` : goal.mode === "minutes" ? tr`${number(value)} minutes a day` : tr`${number(value)}% of today's due cards`;
+    const detail = goal.mode === "cards" ? tr`${number(progress)} of ${number(value)} cards` : goal.mode === "minutes" ? tr`${number(progress)} of ${number(value)} minutes`
+      : reached ? tr("Your Anki app reported that you cleared it.") : tr("Your Anki app tells AnkiQuest when you clear it.");
+    const meter = progress == null ? html`<progress max="1" value="${reached ? 1 : 0}" aria-label="${tr("Daily goal")}"></progress>` : html`<progress max="${value}" value="${Math.min(progress, value)}" aria-label="${tr("Daily goal")}"></progress>`;
+    return html`<article class="card personal-goal${reached ? " reached" : ""}" id="today-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${esc(target)}</p></div><span class="chip ${reached ? "green" : ""}">${reached ? tr("Goal reached") : tr("In progress")}</span></div>${meter}<p class="personal-goal-detail">${esc(detail)}</p><div class="personal-actions">${change}</div></article>`;
+  }
+  function forgetWins() {
+    for (const card of cards.values()) card.then(url => URL.revokeObjectURL(url), () => {});
+    cards.clear();
+    state.wins = null; state.winsError = ""; state.winsMore = false; state.winsLoading = false; state.winStatus = {};
+  }
+  function winRows(payload: unknown): Win[] {
+    const value = payload as {wins?: unknown; items?: unknown} | null;
+    const rows = Array.isArray(payload) ? payload : Array.isArray(value?.wins) ? value.wins : Array.isArray(value?.items) ? value.items : [];
+    return (rows as Win[]).filter(win => Number.isSafeInteger(Number(win?.id)));
+  }
+  function winsBody() {
+    const wins = state.wins || [];
+    const head = html`<div class="card-head"><div><h2>${tr("Your wins")}</h2><p>${tr("Every celebration from your studying. Share the ones you like.")}</p></div></div>`;
+    const error = state.winsError ? html`<p class="status error" role="alert">${esc(state.winsError)}</p>` : "";
+    const list = wins.length ? html`<div class="win-list">${wins.map(winRow).join("")}</div>` : state.wins ? html`<p class="personal-empty">${tr("Your wins will appear here as you study.")}</p>` : "";
+    const more = state.winsMore && wins.length ? html`<button type="button" class="load-more" data-wins-more ${state.winsLoading ? "disabled" : ""}>${state.winsLoading ? tr("Loading…") : tr("Load earlier wins")}</button>` : "";
+    return head + list + error + more;
+  }
+  function winRow(win: Win) {
+    const id = Number(win.id), status = state.winStatus[id];
+    const chips = [
+      win.shared_with_friends ? html`<span class="chip green">${tr("Shared with friends")}</span>` : "",
+      win.link ? html`<span class="chip blue">${tr("Link active")}</span>` : "",
+      !win.shared_with_friends && !win.link && win.policy === "private" ? html`<span class="chip">${tr("Only you")}</span>` : "",
+    ].join("");
+    const linkBox = win.link ? html`<div class="win-link"><label class="field"><span>${tr("Public link")}</span><input readonly value="${esc(win.link.url)}" data-win-url></label><button type="button" data-win-action="unlink" data-win="${id}">${tr("Remove link")}</button></div>` : "";
+    return html`<article class="win-item" data-win-id="${id}"><div class="win-thumb"><img data-win-card="${id}" alt="${esc(tr`Card: ${win.title}`)}" width="96" height="96" hidden></div><div class="win-text"><strong>${esc(win.title)}</strong>${win.body ? html`<span>${esc(win.body)}</span>` : ""}<small>${esc(when(Number(win.created_at) * 1000))}</small>${chips ? html`<div class="win-chips">${chips}</div>` : ""}</div><div class="win-actions"><button type="button" class="primary" data-win-action="friends" data-win="${id}">${tr("Share with friends")}</button><button type="button" data-win-action="link" data-win="${id}">${tr("Get link")}</button><button type="button" data-win-action="download" data-win="${id}">${tr("Download image")}</button></div>${linkBox}<p class="status${status?.error ? " error" : ""}" role="status" data-win-status>${esc(status?.text || "")}</p></article>`;
+  }
+  function renderWins() {
+    const section = document.getElementById("today-wins");
+    if (!section) return;
+    section.innerHTML = winsBody();
+    loadCards();
+  }
+  function cardURL(id: number, session: OwnerSession) {
+    let card = cards.get(id);
+    if (!card) {
+      card = (async () => {
+        const response = await send(`/api/wins/${encodeURIComponent(session.user)}/${id}/card.png`, {session});
+        if (!response.ok) throw await failure(response);
+        return URL.createObjectURL(await response.blob());
+      })();
+      const pending = card;
+      pending.catch(() => { if (cards.get(id) === pending) cards.delete(id); });
+      cards.set(id, pending);
+    }
+    return card;
+  }
+  function loadCards() {
+    const session = state.session;
+    if (!session) return;
+    document.querySelectorAll<HTMLImageElement>("img[data-win-card]").forEach(image => {
+      if (image.getAttribute("src")) return;
+      cardURL(Number(image.dataset.winCard), session).then(url => {
+        if (state.session !== session || !image.isConnected) return;
+        image.src = url; image.hidden = false;
+      }, () => {});
+    });
+  }
+  async function loadWins() {
+    const session = state.session, last = state.wins?.at(-1);
+    if (!session || !last || state.winsLoading) return;
+    state.winsLoading = true; state.winsError = ""; renderWins();
+    try {
+      const rows = winRows(await request<unknown>(`/api/wins/${encodeURIComponent(session.user)}?limit=${winPage}&before=${encodeURIComponent(last.id)}`, undefined, session));
+      if (state.session !== session) return;
+      const known = new Set(state.wins!.map(win => win.id));
+      state.wins!.push(...rows.filter(win => !known.has(win.id)));
+      state.winsMore = rows.length >= winPage;
+    } catch (cause) {
+      if (state.session === session) state.winsError = (cause as Error).message;
+    } finally {
+      if (state.session === session) { state.winsLoading = false; renderWins(); }
+    }
+  }
+  function sayWin(id: number, text: string, error = false) {
+    state.winStatus[id] = {text, error};
+    const status = document.querySelector<HTMLElement>(`[data-win-id="${id}"] [data-win-status]`);
+    if (status) { status.className = error ? "status error" : "status"; status.textContent = text; }
+  }
+  async function winAction(button: HTMLButtonElement) {
+    const session = state.session, id = Number(button.dataset.win), action = button.dataset.winAction;
+    const win = state.wins?.find(item => Number(item.id) === id);
+    if (!session || !win || button.disabled) return;
+    if (action === "unlink" && !button.dataset.armed) {
+      button.dataset.armed = "1"; button.textContent = tr("Tap again to confirm");
+      sayWin(id, tr("Anyone with the link will no longer see this card."));
+      return;
+    }
+    button.disabled = true;
+    try {
+      if (action === "friends") {
+        const result = await owner<{recipients?: number}>("/api/share", {win:id, to:"friends"}, session);
+        if (state.session !== session) return;
+        const count = Math.max(0, Number(result?.recipients) || 0);
+        if (count) win.shared_with_friends = true;
+        renderWins();
+        sayWin(id, count === 0 ? tr("Nobody to tell yet") : count === 1 ? tr("Sent to 1 friend") : tr`Sent to ${number(count)} friends`);
+      } else if (action === "link") {
+        const result = await owner<{url: string; image: string}>("/api/share", {win:id, to:"link"}, session);
+        if (state.session !== session || !result) return;
+        win.link = {url:result.url, image:result.image};
+        renderWins();
+        let copied = false;
+        try { await navigator.clipboard.writeText(result.url); copied = true; } catch (_) {}
+        sayWin(id, copied ? tr("Link copied.") : tr("Copy the link below to share it."));
+      } else if (action === "unlink") {
+        await request(`/api/wins/${encodeURIComponent(session.user)}/${id}/link`, undefined, session, "DELETE");
+        if (state.session !== session) return;
+        win.link = null;
+        renderWins();
+        sayWin(id, tr("Link removed."));
+      } else if (action === "download") {
+        const url = await cardURL(id, session);
+        if (state.session !== session) return;
+        const anchor = document.createElement("a");
+        anchor.href = url; anchor.download = `ankiquest-win-${id}.png`; document.body.append(anchor); anchor.click(); anchor.remove();
+        sayWin(id, tr("Your download has started."));
+      }
+    } catch (cause) {
+      if (state.session === session) sayWin(id, (cause as Error).message, true);
+    } finally {
+      button.disabled = false;
+    }
   }
   function calendarMonth(year: number, month: number, map: Map<string, StudyDay>, max: number) {
     const first = new Date(Date.UTC(year,month,1)), count = new Date(Date.UTC(year,month+1,0)).getUTCDate();
@@ -318,22 +488,55 @@ import {refused, request as call, send} from "./http";
   const hourOptions = (selected: number) => Array.from({length:24},(_,hour)=>html`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join("");
   function settingError(name: SettingName) { return html`<p class="status error" role="alert">${esc(state.errors[name] || tr("This setting could not load. Refresh to try again."))}</p>`; }
   function renderSettings(card: SettingName | null = null) {
-    const {companion,reminders:prefs,freezes,nudges,subscriptions,decks} = state.settings;
+    const {companion,reminders:prefs,freezes,nudges,subscriptions,decks,sharing,goal} = state.settings;
     const companionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Your study companion")}</h2><p>${tr("Choose who cheers you on. This choice follows your account across devices.")}</p></div></div>${companion?html`<form id="companion-form"><div class="companion-options" role="radiogroup" aria-label="${tr("Your study companion")}"><label class="companion-option"><input type="radio" name="companion" value="aki" ${companion.companion==="aki"?"checked":""}><img src="/aki/face.png" alt=""><strong>Aki</strong></label><label class="companion-option"><input type="radio" name="companion" value="ankilope" ${companion.companion==="ankilope"?"checked":""}><img src="/ankilope/face.png" alt=""><strong>Ankilope</strong></label><label class="companion-option companion-none"><input type="radio" name="companion" value="none" ${companion.companion==="none"?"checked":""}><span aria-hidden="true">○</span><strong>${tr("No companion")}</strong></label></div><p class="settings-hint">${tr("Your companion only changes the artwork and encouragement you see.")}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save companion")}</button></div><p class="status" role="status"></p></form>`:settingError("companion")}</article>`;
     const reminderCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Reminders")}</h2><p>${tr("Choose when AnkiQuest checks in.")}</p></div></div>${prefs ? html`<form id="reminders-form"><div class="stack">${reminders.map(([key,label])=>check(key,label,prefs[key])).join("")}</div><div class="time-grid"><label class="field"><span>${tr("Daily reminder")}</span><select name="reminder_hour">${hourOptions(prefs.reminder_hour)}</select></label><label class="field"><span>${tr("Quiet from")}</span><select name="quiet_start">${hourOptions(prefs.quiet_start)}</select></label><label class="field"><span>${tr("Quiet until")}</span><select name="quiet_end">${hourOptions(prefs.quiet_end)}</select></label><label class="field"><span>${tr("Daily limit")}</span><select name="daily_limit">${[1,2,3,4,5].map(n=>html`<option value="${n}" ${n===prefs.daily_limit?"selected":""}>${n}</option>`).join("")}</select></label></div><p class="settings-hint">${tr("Reminder times use your AnkiQuest timezone. Equal quiet-hour times disable quiet hours.")}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save reminders")}</button></div><p class="status" role="status"></p></form>` : settingError("reminders")}</article>`;
     const nudgeCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Encouragement")}</h2><p>${tr("Friendly nudges and progress celebrations.")}</p></div></div>${nudges ? html`${check("",tr("Allow friends to nudge me"),nudges.receiving,"",'data-nudge-field="receiving"')}${check("",tr("Automatic progress nudges"),nudges.automatic_receiving,"",'data-nudge-field="automatic"')}<fieldset><legend>${tr("Friends who can nudge me")}</legend>${nudges.friends.length ? nudges.friends.map(friend=>check("",friend.display,!friend.muted_by_me,"",`data-nudge-sender="${esc(friend.user)}"`)).join("") : html`<p class="settings-hint">${tr("No friends to choose yet.")}</p>`}</fieldset><p id="nudge-status" class="status" role="status"></p>` : settingError("nudges")}</article>`;
     const freezeCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Streak protection")}</h2><p>${freezes?tr`${freezes.freezes} of ${freezes.capacity} freezes ready`:tr("Keep a little backup for busy days.")}</p></div></div>${freezes?html`${check("",tr("Use saved freezes automatically"),freezes.enabled,"",'id="freeze-toggle"')}<p class="settings-hint">${tr("Your saved freezes stay with you when protection is off.")}</p><p id="freeze-status" class="status" role="status"></p>`:settingError("freezes")}</article>`;
     const {senders, unsubscribed} = subscriptions ? alertSenders(subscriptions) : {senders: [], unsubscribed: new Set<string>()};
     const subscriptionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Deck completion alerts I receive")}</h2><p>${tr("Choose the people whose completed decks reach you.")}</p></div></div>${subscriptions?html`<form id="subscriptions-form">${check("enabled",tr("Receive deck completion alerts"),subscriptions.enabled)}<fieldset><legend>${tr("Unsubscribe from specific people")}</legend>${senders.map(person=>check("",person.display,unsubscribed.has(person.user),"",`data-unsubscribe="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No one is sharing decks with you yet.")}</p>`}</fieldset><div class="setting-actions"><button class="primary" type="submit">${tr("Save alert preferences")}</button></div><p class="status" role="status"></p></form>`:settingError("subscriptions")}</article>`;
-    const deckCard = html`<article class="card"><div class="card-head"><div><h2>${tr("What I share")}</h2><p>${tr("Choose which finished decks friends can hear about.")}</p></div></div>${decks?html`<form id="decks-form"><details><summary>${tr("Manage deck sharing")}</summary>${decks.decks.length?decks.decks.map((deck,index)=>html`<fieldset data-deck-index="${index}"><legend>${esc(deck.name)}</legend>${check("",tr("Share completion"),deck.enabled,"",'data-deck-enabled')}<div class="stack">${decks.recipients.map(person=>check("",person.display,deck.recipients.includes(person.user),"",`data-deck-recipient="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No friends are available yet.")}</p>`}</div></fieldset>`).join(""):html`<p class="settings-hint">${tr("Upload reviews from Anki to see your decks here.")}</p>`}</details>${check("",tr("Celebrate milestones"),decks.celebrations!==false,"",'id="celebrations-toggle"')}<div class="setting-actions"><button class="primary" type="submit">${tr("Save deck sharing")}</button></div><p class="status" role="status"></p></form>`:settingError("decks")}</article>`;
-    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${privacyCard()}</div>`;
-    const selector = card && {companion:"#companion-form",reminders:"#reminders-form",nudges:"#nudge-status",freezes:"#freeze-toggle",subscriptions:"#subscriptions-form",decks:"#decks-form"}[card];
+    const deckCard = html`<article class="card" id="deck-sharing"><div class="card-head"><div><h2>${tr("What I share")}</h2><p>${tr("Choose which finished decks friends can hear about.")}</p></div></div>${decks?html`<form id="decks-form"><details><summary>${tr("Manage deck sharing")}</summary>${decks.decks.length?decks.decks.map((deck,index)=>html`<fieldset data-deck-index="${index}"><legend>${esc(deck.name)}</legend>${check("",tr("Share completion"),deck.enabled,"",'data-deck-enabled')}<div class="stack">${decks.recipients.map(person=>check("",person.display,deck.recipients.includes(person.user),"",`data-deck-recipient="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No friends are available yet.")}</p>`}</div></fieldset>`).join(""):html`<p class="settings-hint">${tr("Upload reviews from Anki to see your decks here.")}</p>`}</details>${check("",tr("Celebrate milestones"),decks.celebrations!==false,"",'id="celebrations-toggle"')}<div class="setting-actions"><button class="primary" type="submit">${tr("Save deck sharing")}</button></div><p class="status" role="status"></p></form>`:settingError("decks")}</article>`;
+    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${goalCard(goal)}${sharingCard(sharing)}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${privacyCard()}</div>`;
+    const selector = card && {companion:"#companion-form",reminders:"#reminders-form",nudges:"#nudge-status",freezes:"#freeze-toggle",subscriptions:"#subscriptions-form",decks:"#decks-form",sharing:"#sharing-form",goal:"#goal-form"}[card];
     const current = selector && $("personal-content").querySelector(selector)?.closest(".card");
     if (!current) {$("personal-content").innerHTML = markup;return;}
     const fresh = document.createElement("div");fresh.innerHTML = markup;
     const replacement = fresh.querySelector(selector)!.closest(".card")!;
     if (card === "decks") replacement.querySelector("details")!.open = current.querySelector("details")?.open || false;
     current.replaceWith(replacement);
+  }
+  function sharingCard(sharing: Sharing | null | undefined) {
+    const choice = (kind: string, label: string) => {
+      const current = sharing!.policies?.[kind] ?? momentDefaults[kind];
+      return html`<fieldset class="sharing-moment"><legend>${esc(label)}</legend><div class="sharing-choices">${policies.map(([value, text]) => html`<label class="sharing-choice"><input type="radio" name="policy-${esc(kind)}" value="${value}" ${value === current ? "checked" : ""}><span>${esc(text)}</span></label>`).join("")}</div></fieldset>`;
+    };
+    const cap = Math.min(10, Math.max(1, Number(sharing?.daily_cap) || 3));
+    const decks = html`<p class="settings-hint">${tr("Deck completions have their own recipients for each deck.")} <a href="${esc(site.href("/settings", "#deck-sharing"))}">${tr("Choose deck sharing")}</a></p>`;
+    return html`<article class="card" id="sharing"><div class="card-head"><div><h2>${tr("Sharing")}</h2><p>${tr("Choose what friends hear about. You always see your own celebrations.")}</p></div></div>${sharing ? html`<form id="sharing-form"><p class="settings-hint">${tr("With Ask me, the win waits under Your wins on Today, ready to share.")}</p><div class="sharing-moments">${moments.map(([kind, label]) => choice(kind, label)).join("")}</div><label class="field sharing-cap"><span>${tr("Automatic shares per friend each day")}</span><select name="daily_cap">${Array.from({length:10}, (_, index) => index + 1).map(n => html`<option value="${n}" ${n === cap ? "selected" : ""}>${n}</option>`).join("")}</select></label><p class="settings-hint">${tr("Wins over this limit stay in your list, and you can still share them yourself.")}</p>${decks}<div class="setting-actions"><button class="primary" type="submit">${tr("Save sharing")}</button></div><p class="status" role="status"></p></form>` : settingError("sharing")}</article>`;
+  }
+  function goalValue(mode: Measured, goal: Goal | null | undefined) {
+    const limits = goalLimits[mode], value = Number(goal?.value);
+    return goal?.mode === mode && Number.isInteger(value) && value >= limits.min && value <= limits.max ? value : limits.fallback;
+  }
+  function goalLabel(mode: GoalMode) {
+    return mode === "minutes" ? tr("Minutes each day") : mode === "backlog" ? tr("Percent of today's due cards") : tr("Cards each day");
+  }
+  function goalHint(mode: GoalMode) {
+    if (mode === "off") return tr("No daily goal. Your streak and quests still count.");
+    if (mode === "backlog") return tr("Only the Anki app knows how many cards are due, so it measures this goal and tells AnkiQuest when you reach it.");
+    return tr("AnkiQuest checks this goal as your reviews upload.");
+  }
+  function goalCard(goal: Goal | null | undefined) {
+    const mode: GoalMode = goal && goal.mode in goalLimits ? goal.mode : goal?.mode === "off" ? "off" : "cards";
+    const measured: Measured = mode === "off" ? "cards" : mode, limits = goalLimits[measured];
+    return html`<article class="card" id="daily-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("One target for each Anki day, the same on every device.")}</p></div></div>${goal ? html`<form id="goal-form" novalidate><div class="goal-grid"><label class="field"><span>${tr("Goal")}</span><select name="mode" id="goal-mode">${goalModes.map(([value, label]) => html`<option value="${value}" ${value === mode ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><label class="field" id="goal-value-field" ${mode === "off" ? "hidden" : ""}><span id="goal-value-label">${esc(goalLabel(measured))}</span><input name="value" id="goal-value" type="number" inputmode="numeric" step="1" min="${limits.min}" max="${limits.max}" value="${goalValue(measured, goal)}"></label></div><p class="settings-hint" id="goal-hint">${esc(goalHint(mode))}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save goal")}</button></div><p class="status" role="status"></p></form>` : settingError("goal")}</article>`;
+  }
+  function goalBody(form: HTMLFormElement): Goal | string {
+    const mode = (form.elements.namedItem("mode") as HTMLSelectElement).value as GoalMode;
+    if (mode === "off") return {mode};
+    const limits = goalLimits[mode], raw = (form.elements.namedItem("value") as HTMLInputElement).value.trim(), value = Number(raw);
+    if (!/^\d+$/.test(raw) || value < limits.min || value > limits.max) return tr`Choose a whole number from ${number(limits.min)} to ${number(limits.max)}.`;
+    return {mode, value};
   }
   function signInCard() {
     const methods = state.signIn;
@@ -417,13 +620,13 @@ import {refused, request as call, send} from "./http";
       status.className = "status error"; status.textContent = (cause as Error).message;
     }
   }
-  async function submitForm<K extends SettingName>(form: HTMLFormElement, route: string, body: unknown, key: K) {
+  async function submitForm<K extends SettingName>(form: HTMLFormElement, route: string, body: unknown, key: K, method?: string) {
     const session = state.session, controls = [...form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button")], status = form.querySelector<HTMLElement>(".status")!;
     controls.forEach(control=>control.disabled=true);status.className="status";status.textContent=tr("Saving…");
     try {
-      const saved = await owner<Settings[K]>(route,body,session);
+      const saved = await owner<Settings[K]>(route,body,session,method);
       if (state.session!==session) return;
-      state.settings[key]=saved;
+      state.settings[key]=saved ?? body as Settings[K];
       if (key === "companion") AnkiQuestAki.setChoice((saved as {companion: string}).companion);
       renderSettings(key);
       const notice = $("personal-content").querySelector(`#${form.id} .status`);
@@ -462,6 +665,16 @@ import {refused, request as call, send} from "./http";
     if (form.id === "subscriptions-form") {
       event.preventDefault();submitForm(form,"/api/deck-subscriptions",{enabled:(form.elements.namedItem("enabled") as HTMLInputElement).checked,unsubscribed_senders:[...form.querySelectorAll<HTMLElement>("[data-unsubscribe]:checked")].map(item=>item.dataset.unsubscribe)},"subscriptions");
     }
+    if (form.id === "sharing-form") {
+      event.preventDefault();const data=new FormData(form);
+      const chosen=Object.fromEntries(moments.map(([kind])=>[kind,String(data.get("policy-"+kind) ?? state.settings.sharing?.policies?.[kind] ?? momentDefaults[kind])]));
+      submitForm(form,"/api/sharing",{policies:chosen,daily_cap:Number(data.get("daily_cap"))},"sharing","PUT");
+    }
+    if (form.id === "goal-form") {
+      event.preventDefault();const body=goalBody(form);
+      if (typeof body === "string") {const status=form.querySelector<HTMLElement>(".status")!;status.className="status error";status.textContent=body;form.querySelector<HTMLInputElement>("#goal-value")?.focus();return;}
+      submitForm(form,"/api/goal",body,"goal","PUT");
+    }
     if (form.id === "decks-form") {
       event.preventDefault();const current=state.settings.decks!;
       const decks=[...form.querySelectorAll<HTMLElement>("[data-deck-index]")].map(field=>({id:current.decks[Number(field.dataset.deckIndex)].id,enabled:field.querySelector<HTMLInputElement>("[data-deck-enabled]")!.checked,recipients:[...field.querySelectorAll<HTMLElement>("[data-deck-recipient]:checked")].map(input=>input.dataset.deckRecipient)}));
@@ -475,6 +688,12 @@ import {refused, request as call, send} from "./http";
     if (target.hasAttribute("data-social-public") && state.session && page==="friends") {social({action:"visibility",public:target.checked},[target]);return;}
     if (!state.session || page!=="settings") return;
     const session=state.session;
+    if (target.id==="goal-mode") {
+      const mode=target.value as GoalMode, measured: Measured=mode==="off"?"cards":mode, limits=goalLimits[measured], input=$<HTMLInputElement>("goal-value");
+      $("goal-value-field").hidden=mode==="off";$("goal-value-label").textContent=goalLabel(measured);$("goal-hint").textContent=goalHint(mode);
+      input.min=String(limits.min);input.max=String(limits.max);input.value=String(goalValue(measured,state.settings.goal));
+      return;
+    }
     if (target.id==="freeze-toggle") {
       target.disabled=true;const status=$("freeze-status");status.textContent=tr("Saving…");
       try {const saved=await owner<Settings["freezes"]>("/api/streak-freezes",{enabled:target.checked},session);if(state.session!==session)return;state.settings.freezes=saved;renderSettings("freezes");$("freeze-status").textContent=tr("Saved across your devices.");}
@@ -510,6 +729,9 @@ import {refused, request as call, send} from "./http";
     }
     if(day && page==="history") {state.selected=day.dataset.day!;document.querySelectorAll("[data-day]").forEach(button=>button.setAttribute("aria-pressed",String(button===day)));$("day-detail").outerHTML=dayDetail();$("day-detail").focus();}
     if(target.id==="personal-export") downloadData(target as HTMLButtonElement);
+    const winButton=target.closest<HTMLButtonElement>("[data-win-action]");
+    if(winButton && page==="today") winAction(winButton);
+    if(target.closest("[data-wins-more]") && page==="today") loadWins();
     const unlink=target.closest<HTMLButtonElement>("[data-unlink]");
     if(unlink && page==="settings") signInChange(unlink,{action:"unlink",provider:unlink.dataset.unlink});
     if(target.id==="new-device-token") signInChange(target as HTMLButtonElement,{action:"token"});

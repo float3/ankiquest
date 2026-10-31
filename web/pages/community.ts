@@ -26,7 +26,7 @@ interface Challenge { id:number; title:string; kind:string; cooperative:boolean;
 interface WeeklySuggestion { week_start:number; expires_at:number; friend:Recipient; target:number; duration_days:number; dismissed:boolean; challenge_id:number|null; }
 interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion?:WeeklySuggestion|null; }
 /** An activity item (src/decks.rs `Notification`); `legacy` pages come from the older /api/notifications. */
-interface Notice { id:number; title:string; body:string; created_at:number; sender:string; replied:boolean; kind:string; read_at?:number|null; challenge_id?:number|null; route?:string|null; action_required?:boolean; reply_to?:{title:string; body:string}; }
+interface Notice { id:number; title:string; body:string; created_at:number; sender:string; replied:boolean; kind:string; read_at?:number|null; challenge_id?:number|null; route?:string|null; action_required?:boolean; reply_to?:{title:string; body:string}; win?:number|null; image?:string|null; reacted?:boolean; }
 interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; legacy?:boolean; }
 interface SentNotice extends Notice { recipient:string; }
 interface SentPage { items:SentNotice[]; next_before?:number|null; }
@@ -340,12 +340,32 @@ function renderSentItem(item:SentNotice) {
   const sent = new Date(Number(item.created_at) * 1000), seen = item.read_at ? new Date(Number(item.read_at) * 1000) : null;
   return aqHtml`<article class="card activity-item sent-item" data-sent="${Number(item.id)}"><div class="card-head"><div><h3>To ${esc(name(item.recipient))}</h3><p><time datetime="${sent.toISOString()}">${esc(when(sent))}</time></p></div>${seen ? aqHtml`<span class="chip green">Seen ${esc(when(seen))}</span>` : aqHtml`<span class="chip">Not seen yet</span>`}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p></article>`;
 }
+/** The card image of a shared win and its public page, which is the image URL without ".png". */
+function shareCard(item:Notice) {
+  if (typeof item.image !== "string") return null;
+  try {
+    const image = new URL(item.image, location.href);
+    if (!["http:","https:"].includes(image.protocol) || !image.pathname.endsWith(".png")) return null;
+    const page = new URL(image.href);page.pathname = page.pathname.slice(0, -".png".length);
+    return {image:image.href, page:page.href};
+  } catch (_) { return null; }
+}
+function renderShareCard(item:Notice) {
+  const card = item.kind === "share" ? shareCard(item) : null;
+  return card ? aqHtml`<a class="share-card" href="${esc(card.page)}" target="_blank" rel="noopener noreferrer"><img src="${esc(card.image)}" alt="${esc(aqText`Card: ${item.title}`)}" width="120" height="120" loading="lazy"></a>` : "";
+}
+function renderCheer(item:Notice) {
+  if (!item.sender || (item.kind !== "share" && item.kind !== "completion")) return "";
+  const id = Number(item.id);
+  return item.reacted ? aqHtml`<button type="button" class="cheer-button" data-cheer="${id}" aria-pressed="true" disabled>🎉 ${aqText("Cheered")}</button>` : aqHtml`<button type="button" class="cheer-button" data-cheer="${id}" aria-pressed="false">🎉 ${aqText("Cheer")}</button>`;
+}
 function renderActivityItem(item:Notice) {
   const id = Number(item.id), challenge = Number(item.challenge_id), target = Number.isSafeInteger(challenge) && challenge > 0 ? challenge : /^\/community#challenge-([1-9]\d*)$/.exec(item.route || "")?.[1];
   const unread = !state.activity?.legacy && !item.read_at;
   const answerable = !!item.sender && !item.replied && !target;
-  const quickReply = item.kind === "completion" || item.kind === "conquest" ? aqText("Good job!") : item.kind === "reply" ? aqText("Thanks!") : item.kind === "nudge" ? aqText("On it!") : "";
-  return aqHtml`<article class="card activity-item${unread ? " unread" : ""}" data-notice="${id}"><div class="card-head"><div><h3>${esc(item.title)}</h3><p><time datetime="${new Date(Number(item.created_at) * 1000).toISOString()}">${esc(new Date(Number(item.created_at) * 1000).toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></p></div>${unread ? aqHtml`<span class="chip blue">Unread</span>` : ""}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p><div class="actions">${target ? aqHtml`<button type="button" class="${item.action_required ? "primary" : ""}" data-activity-challenge="${esc(target)}" data-notice-id="${id}">${item.action_required ? aqText("View invitation") : aqText("Open goal")}</button>` : ""}${unread ? aqHtml`<button type="button" data-mark-read="${id}">Mark read</button>` : ""}</div>${answerable ? aqHtml`<form class="activity-reply" data-reply-form="${id}"><label class="field"><span>Reply to ${esc(name(item.sender))}</span><input name="message" maxlength="200" required autocomplete="off" placeholder="Say something kind"></label><div class="actions"><button type="submit">Send reply</button>${quickReply ? aqHtml`<button type="button" data-quick-reply="${id}" data-message="${esc(quickReply)}">${esc(quickReply)}</button>` : ""}</div><p class="status" role="status"></p></form>` : item.replied ? aqHtml`<p class="settings-hint">Reply sent</p>` : ""}</article>`;
+  const quickReply = item.kind === "completion" || item.kind === "conquest" || item.kind === "share" ? aqText("Good job!") : item.kind === "reply" || item.kind === "reaction" ? aqText("Thanks!") : item.kind === "nudge" ? aqText("On it!") : "";
+  const reaction = item.kind === "reaction", heading = reaction && item.body ? `${item.title}: ${item.body}` : item.title;
+  return aqHtml`<article class="card activity-item${unread ? " unread" : ""}" data-notice="${id}"><div class="card-head"><div><h3>${esc(heading)}</h3><p><time datetime="${new Date(Number(item.created_at) * 1000).toISOString()}">${esc(new Date(Number(item.created_at) * 1000).toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></p></div>${unread ? aqHtml`<span class="chip blue">Unread</span>` : ""}</div>${replyContext(item)}${reaction ? "" : aqHtml`<p class="activity-body">${esc(item.body)}</p>`}${renderShareCard(item)}<div class="actions">${renderCheer(item)}${target ? aqHtml`<button type="button" class="${item.action_required ? "primary" : ""}" data-activity-challenge="${esc(target)}" data-notice-id="${id}">${item.action_required ? aqText("View invitation") : aqText("Open goal")}</button>` : ""}${unread ? aqHtml`<button type="button" data-mark-read="${id}">Mark read</button>` : ""}</div>${answerable ? aqHtml`<form class="activity-reply" data-reply-form="${id}"><label class="field"><span>Reply to ${esc(name(item.sender))}</span><input name="message" maxlength="200" required autocomplete="off" placeholder="Say something kind"></label><div class="actions"><button type="submit">Send reply</button>${quickReply ? aqHtml`<button type="button" data-quick-reply="${id}" data-message="${esc(quickReply)}">${esc(quickReply)}</button>` : ""}</div><p class="status" role="status"></p></form>` : item.replied ? aqHtml`<p class="settings-hint">Reply sent</p>` : ""}</article>`;
 }
 
 async function request<T>(url:string,options:SendOptions={},owner:OwnerSession|null=null):Promise<T> {
@@ -508,6 +528,21 @@ async function handleActivity(button:HTMLButtonElement) {
   }
   finally { button.disabled=false; }
 }
+async function cheer(button:HTMLButtonElement) {
+  const session=state.session,id=Number(button.dataset.cheer);if(!session||button.disabled)return;
+  button.disabled=true;const status=$("activity-action-status");
+  try {
+    await ownerRequest(`/api/react/${encodeURIComponent(session.user)}`,{notification:id},session);
+    if(state.session!==session)return;
+    for(const item of [...(state.activity?.items||[]),...(state.friendAchievements?.items||[])])if(Number(item.id)===id)item.reacted=true;
+    renderActivity(accountBanner());
+    $("activity-action-status").className="status";$("activity-action-status").textContent=aqText("Your cheer was sent.");
+  } catch(error) {
+    if(state.session!==session)return;
+    button.disabled=false;
+    if(status){status.className="status error";status.textContent=errorMessage(error);}
+  }
+}
 async function sendActivityReply(form:HTMLElement,message:string) {
   const session=state.session;if(!session||form.dataset.sending)return;
   const id=Number(form.dataset.replyForm),status=form.querySelector<HTMLElement>('[role="status"]')!;
@@ -573,6 +608,7 @@ document.addEventListener("click",event=>{
   if(button.dataset.activityCategory&&button.dataset.activityCategory!==state.activityCategory){state.activityCategory=button.dataset.activityCategory;state.activity=null;loadActivity();}
   if(button.hasAttribute("data-activity-unread")){state.activityUnreadOnly=!state.activityUnreadOnly;state.activity=null;loadActivity();}
   if(button.hasAttribute("data-activity-read-all"))markAllRead(button);
+  if(button.dataset.cheer)cheer(button);
   if(button.hasAttribute("data-sent-more"))loadSent(true);
   if(button.dataset.markRead||button.dataset.activityChallenge)handleActivity(button);
   if(button.dataset.quickReply)sendActivityReply(button.closest("form")!,button.dataset.message!);

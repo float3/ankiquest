@@ -72,3 +72,32 @@ button.danger{border-color:var(--fire);color:var(--fire)}
 .social-invite .setting-actions{margin-top:10px}
 @media(max-width:760px){.personal-months{grid-template-columns:repeat(2,minmax(0,1fr))}.personal-month[open]{grid-column:1/-1}.personal-connect{grid-template-columns:1fr}.social-form{grid-template-columns:1fr}.personal-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:420px){.personal-lead{padding:20px}.personal-lead h2{font-size:22px}.personal-summary{grid-template-columns:1fr 1fr}.personal-settings .time-grid{grid-template-columns:1fr 1fr}.personal-tabs a{flex:1;justify-content:center;padding:8px}.personal-month summary{padding:12px;flex-wrap:wrap;gap:0}.personal-month summary small{width:100%}}
+.personal-goal progress{width:100%;height:14px;accent-color:var(--accent)}
+.personal-goal.reached progress{accent-color:var(--ok)}
+.personal-goal .card-head{margin-bottom:12px}
+.personal-goal-detail{margin-top:8px;color:var(--dim);font-size:13px}
+.personal-goal .personal-actions{margin-top:12px}
+.win-list{display:grid;gap:12px}
+.win-item{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px 14px;align-items:start;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.win-thumb{grid-row:span 2;width:96px;height:96px;overflow:hidden;border-radius:10px;background:var(--soft)}
+.win-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.win-text{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
+.win-text span{font-size:13px;color:var(--dim)}
+.win-text small{font-size:12px;color:var(--dim)}
+.win-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.win-actions{display:flex;gap:8px;flex-wrap:wrap;grid-column:2}
+.win-actions button{font-size:12px;min-height:40px;padding:6px 11px}
+.win-link{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.win-link input{width:100%;min-width:0;font-family:ui-monospace,monospace;font-size:13px}
+.win-item>.status{grid-column:1/-1;margin:0;min-height:0}
+.personal-wins .load-more{margin-top:14px}
+.sharing-moments{display:grid;gap:4px}
+.personal-settings .sharing-moment{gap:8px;padding-top:12px}
+.sharing-choices{display:flex;flex-wrap:wrap;gap:6px}
+.sharing-choice{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:13px;cursor:pointer}
+.sharing-choice:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.sharing-choice:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.sharing-cap select{width:100%;max-width:220px}
+.goal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.goal-grid select,.goal-grid input{width:100%;min-width:0}
+@media(max-width:420px){.win-item{grid-template-columns:72px minmax(0,1fr);padding:12px}.win-thumb{grid-row:auto;width:72px;height:72px}.win-actions{grid-column:1/-1}.win-actions button{flex:1 1 auto}.win-link{grid-template-columns:1fr}.goal-grid{grid-template-columns:1fr}.sharing-choice{flex:1 1 auto}}
