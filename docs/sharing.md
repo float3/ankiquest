@@ -41,9 +41,9 @@ The goal lives on the server so every client agrees.
 | `off` | no goal | — | — |
 | `cards` | reviews today, `today.reviews >= value` | 100 | 1–5000 |
 | `minutes` | review minutes today, `today.minutes >= value` | 20 | 1–600 |
-| `backlog` | percent of today's due cards, `value` percent | 100 | 1–100 |
+| `backlog` | today's due cards plus `value` percent of the overdue backlog | 10 | 1–100 |
 
-The default mode is `cards`, value 100. `value` may be left out and then takes the mode's default;
+The default mode is `backlog`, value 10, as the apps have always used. `value` may be left out and then takes the mode's default;
 `{ "mode": "off" }` keeps the last value, which `GET` still returns. `PUT` answers 200 with the saved
 goal; a value out of range or an unknown mode is 400.
 

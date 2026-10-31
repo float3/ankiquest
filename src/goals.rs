@@ -32,7 +32,7 @@ fn limits(mode: &str) -> Option<Option<(u32, u32, u32)>> {
         "off" => Some(None),
         "cards" => Some(Some((100, 1, 5000))),
         "minutes" => Some(Some((20, 1, 600))),
-        "backlog" => Some(Some((100, 1, 100))),
+        "backlog" => Some(Some((10, 1, 100))),
         _ => None,
     }
 }
@@ -94,8 +94,8 @@ fn stored(conn: &Connection, user: &str) -> rusqlite::Result<(Setting, Option<i6
         .optional()?
         .unwrap_or((
             Setting {
-                mode: "cards".into(),
-                value: Some(100),
+                mode: "backlog".into(),
+                value: Some(10),
             },
             None,
         )))
@@ -235,7 +235,7 @@ mod tests {
         );
         assert_eq!(
             setting("backlog", None).checked(),
-            Some(setting("backlog", Some(100)))
+            Some(setting("backlog", Some(10)))
         );
         assert_eq!(
             setting("off", Some(7)).checked(),
@@ -257,14 +257,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_goal_is_private_validated_and_defaults_to_a_hundred_cards() {
+    async fn the_goal_is_private_validated_and_defaults_to_a_tenth_of_the_backlog() {
         let (app, path) = fixture();
         let get = |user: &str, token: &str| {
             get_goal(State(app.clone()), UrlPath(user.into()), headers(token))
         };
         assert_eq!(
             get("hill", "hill").await.unwrap().0,
-            setting("cards", Some(100))
+            setting("backlog", Some(10))
         );
         assert_eq!(
             get("hill", "cerro").await.err(),
@@ -298,7 +298,7 @@ mod tests {
         );
         assert_eq!(
             get("cerro", "cerro").await.unwrap().0,
-            setting("cards", Some(100))
+            setting("backlog", Some(10))
         );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
@@ -316,6 +316,14 @@ mod tests {
                 Json(Reached { day }),
             )
         };
+        let _ = set_goal(
+            State(app.clone()),
+            UrlPath("hill".into()),
+            headers("hill"),
+            Json(setting("cards", Some(100))),
+        )
+        .await
+        .unwrap();
         assert_eq!(report(today).await.err(), Some(StatusCode::CONFLICT));
         let _ = set_goal(
             State(app.clone()),
@@ -355,6 +363,7 @@ mod tests {
             now_ms(),
             &game::FreezePolicy::default(),
         );
+        save(&store.conn, "hill", &setting("cards", Some(100))).unwrap();
         let today = view(&store.conn, "hill", &profile).unwrap();
         assert_eq!(
             (today.progress, today.reached),
