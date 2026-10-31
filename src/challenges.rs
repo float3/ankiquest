@@ -1,10 +1,19 @@
 //! Private, opt-in challenges and cooperative goals. Reviews count only after joining.
+use crate::access::authorized;
+use crate::app::{App, now_ms};
 use crate::competition::Participant;
 use crate::game::DAY_MS;
 use crate::store::Store;
+use crate::web_util::store_error;
+use crate::{challenges, competition, decks, weekly_challenges};
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum Error {
@@ -624,10 +633,186 @@ pub fn list(
     Ok(challenges)
 }
 
+#[derive(Serialize)]
+struct ChallengeList {
+    challenges: Vec<challenges::Challenge>,
+    recipients: Vec<decks::Recipient>,
+    weekly_suggestion: Option<weekly_challenges::Suggestion>,
+}
+
+/// The player and everyone they can challenge, with display names.
+fn challenge_roster(
+    app: &App,
+    store: &Store,
+    user: &str,
+) -> rusqlite::Result<std::collections::BTreeMap<String, String>> {
+    let mut roster = app.reachable(store, user)?;
+    if app.members().contains(user) {
+        roster.insert(user.to_string());
+    }
+    Ok(roster
+        .into_iter()
+        .map(|name| (name.clone(), app.display(&name)))
+        .collect())
+}
+
+type ChallengeFailure = (StatusCode, Json<serde_json::Value>);
+
+fn challenge_error(error: challenges::Error) -> ChallengeFailure {
+    let (status, message) = match error {
+        challenges::Error::Invalid(message) => (StatusCode::BAD_REQUEST, message),
+        challenges::Error::Forbidden => (StatusCode::FORBIDDEN, "This challenge is private."),
+        challenges::Error::NotFound => (StatusCode::NOT_FOUND, "Challenge not found."),
+        challenges::Error::Storage(error) => {
+            log_error!("challenge storage failed: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The challenge could not be saved. Please try again.",
+            )
+        }
+    };
+    (status, Json(serde_json::json!({"error":message})))
+}
+
+fn challenge_list(
+    app: &App,
+    store: &Store,
+    user: &str,
+    players: &[competition::Participant],
+) -> Result<ChallengeList, challenges::Error> {
+    let recipients = app.sorted_recipients(app.reachable(store, user)?);
+    Ok(ChallengeList {
+        challenges: challenges::list(store, user, players, now_ms())?,
+        recipients,
+        weekly_suggestion: weekly_challenges::suggestion(
+            store,
+            user,
+            &challenge_roster(app, store, user)?,
+            &app.week,
+            now_ms(),
+        )?,
+    })
+}
+
+async fn get_challenges(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<ChallengeList>, ChallengeFailure> {
+    if !authorized(&app, &user, &headers) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"Check your player and token."})),
+        ));
+    }
+    let mut store = app.store.lock().unwrap();
+    let participants = app.participants();
+    challenges::refresh(&mut store, &participants, now_ms()).map_err(|error| {
+        (
+            store_error(error),
+            Json(serde_json::json!({"error":"Unable to refresh challenges."})),
+        )
+    })?;
+    challenge_list(&app, &store, &user, &participants)
+        .map(Json)
+        .map_err(challenge_error)
+}
+
+async fn create_challenge(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(request): Json<challenges::Create>,
+) -> Result<Json<ChallengeList>, ChallengeFailure> {
+    if !authorized(&app, &user, &headers) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"Check your player and token."})),
+        ));
+    }
+    let mut store = app.store.lock().unwrap();
+    let eligible = app
+        .reachable(&store, &user)
+        .map_err(|error| challenge_error(error.into()))?;
+    let participants = app.participants();
+    challenges::create(&mut store, &user, &request, &eligible, now_ms())
+        .map_err(challenge_error)?;
+    challenge_list(&app, &store, &user, &participants)
+        .map(Json)
+        .map_err(challenge_error)
+}
+
+async fn act_on_challenge(
+    State(app): State<Arc<App>>,
+    UrlPath((user, id)): UrlPath<(String, i64)>,
+    headers: HeaderMap,
+    Json(action): Json<challenges::Action>,
+) -> Result<Json<ChallengeList>, ChallengeFailure> {
+    if !authorized(&app, &user, &headers) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"Check your player and token."})),
+        ));
+    }
+    let mut store = app.store.lock().unwrap();
+    let participants = app.participants();
+    challenges::act(&mut store, &user, id, &action.action, now_ms()).map_err(challenge_error)?;
+    challenges::refresh(&mut store, &participants, now_ms()).map_err(|error| {
+        (
+            store_error(error),
+            Json(serde_json::json!({"error":"Unable to refresh challenges."})),
+        )
+    })?;
+    challenge_list(&app, &store, &user, &participants)
+        .map(Json)
+        .map_err(challenge_error)
+}
+
+async fn act_on_weekly_challenge(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(action): Json<weekly_challenges::Action>,
+) -> Result<Json<ChallengeList>, ChallengeFailure> {
+    if !authorized(&app, &user, &headers) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"Check your player and token."})),
+        ));
+    }
+    let mut store = app.store.lock().unwrap();
+    let participants = app.participants();
+    let roster =
+        challenge_roster(&app, &store, &user).map_err(|error| challenge_error(error.into()))?;
+    weekly_challenges::act(&mut store, &user, &action, &roster, &app.week, now_ms())
+        .map_err(challenge_error)?;
+    challenge_list(&app, &store, &user, &participants)
+        .map(Json)
+        .map_err(challenge_error)
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new()
+        .route(
+            "/api/community/challenges/{user}",
+            get(get_challenges).post(create_challenge),
+        )
+        .route(
+            "/api/community/challenges/{user}/{id}",
+            post(act_on_challenge),
+        )
+        .route(
+            "/api/community/challenges/{user}/weekly",
+            post(act_on_weekly_challenge),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game::{ClockHistory, FreezePolicy, Review};
+    use crate::test_support::*;
+    use crate::{challenges, weekly_challenges};
 
     #[test]
     fn challenge_events_are_private_transactional_and_retry_safe() {
@@ -1112,5 +1297,208 @@ mod tests {
         let invitations = list(&store, "friend", &[], 200).unwrap();
         assert_eq!(invitations.len(), 105);
         assert!(invitations.iter().all(|goal| goal.status == "active"));
+    }
+
+    #[tokio::test]
+    async fn weekly_suggestions_require_the_owner_and_cannot_choose_arbitrary_recipients() {
+        let (app, path) = fixture();
+        for auth in [headers("hill"), HeaderMap::new()] {
+            assert_eq!(
+                get_challenges(State(app.clone()), UrlPath("cerro".into()), auth.clone())
+                    .await
+                    .err()
+                    .unwrap()
+                    .0,
+                StatusCode::UNAUTHORIZED
+            );
+            assert_eq!(
+                act_on_weekly_challenge(
+                    State(app.clone()),
+                    UrlPath("cerro".into()),
+                    auth,
+                    Json(weekly_challenges::Action {
+                        week_start: 0,
+                        action: "invite".into()
+                    })
+                )
+                .await
+                .err()
+                .unwrap()
+                .0,
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        let draft = get_challenges(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0
+        .weekly_suggestion
+        .unwrap();
+        let action = || weekly_challenges::Action {
+            week_start: draft.week_start,
+            action: "invite".into(),
+        };
+        let goal = act_on_weekly_challenge(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(action()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(goal.challenges.len(), 1);
+        assert_eq!(goal.challenges[0].status, "waiting");
+        assert!(
+            goal.challenges[0]
+                .members
+                .iter()
+                .any(|m| m.user == draft.friend.user && m.status == "invited")
+        );
+        assert_eq!(
+            act_on_weekly_challenge(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(action())
+            )
+            .await
+            .unwrap()
+            .0
+            .challenges
+            .len(),
+            1
+        );
+        assert!(serde_json::from_value::<weekly_challenges::Action>(serde_json::json!({"week_start":draft.week_start,"action":"invite","recipient":"someone-else"})).is_err());
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn community_challenges_are_owner_authenticated_and_membership_is_opt_in() {
+        let (app, path) = fixture();
+        let request = || challenges::Create {
+            request_id: None,
+            title: "Five study days".into(),
+            kind: challenges::Kind::StudyDays,
+            cooperative: false,
+            target: 5,
+            duration_days: 7,
+            recipients: vec!["hill".into()],
+            start_when_ready: false,
+        };
+        assert_eq!(
+            create_challenge(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("hill"),
+                Json(request())
+            )
+            .await
+            .err()
+            .unwrap()
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let created = create_challenge(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(request()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(created.challenges.len(), 1);
+        let id = created.challenges[0].id;
+        assert_eq!(
+            created.challenges[0]
+                .members
+                .iter()
+                .find(|m| m.user == "hill")
+                .unwrap()
+                .status,
+            "invited"
+        );
+        assert!(
+            get_challenges(
+                State(app.clone()),
+                UrlPath("friend".into()),
+                headers("friend")
+            )
+            .await
+            .unwrap()
+            .0
+            .challenges
+            .is_empty()
+        );
+        assert_eq!(
+            act_on_challenge(
+                State(app.clone()),
+                UrlPath(("friend".into(), id)),
+                headers("friend"),
+                Json(challenges::Action {
+                    action: "accept".into()
+                })
+            )
+            .await
+            .err()
+            .unwrap()
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        let accepted = act_on_challenge(
+            State(app.clone()),
+            UrlPath(("hill".into(), id)),
+            headers("hill"),
+            Json(challenges::Action {
+                action: "accept".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(
+            accepted.challenges[0]
+                .members
+                .iter()
+                .find(|m| m.user == "hill")
+                .unwrap()
+                .status,
+            "accepted"
+        );
+        assert_eq!(
+            act_on_challenge(
+                State(app.clone()),
+                UrlPath(("hill".into(), id)),
+                headers("hill"),
+                Json(challenges::Action {
+                    action: "cancel".into()
+                })
+            )
+            .await
+            .err()
+            .unwrap()
+            .0,
+            StatusCode::FORBIDDEN
+        );
+        let cancelled = act_on_challenge(
+            State(app.clone()),
+            UrlPath(("cerro".into(), id)),
+            headers("cerro"),
+            Json(challenges::Action {
+                action: "cancel".into(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(cancelled.challenges[0].status, "cancelled");
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }
