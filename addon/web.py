@@ -1,13 +1,15 @@
 """The website in a window inside Anki, signed in with the add-on's token like the phone app."""
 
+import html
 import json
-import urllib.error
 import urllib.parse
-import urllib.request
 from http.cookies import SimpleCookie
 
 COOKIE = "ankiquest_session"
-ROUTES = ("", "hour", "day", "week", "month", "year", "all", "records", "community")
+ROUTES = (
+    "", "hour", "day", "week", "month", "year", "all", "records", "community",
+    "today", "history", "settings", "friends", "privacy",
+)
 
 state = {"window": None, "account": None}
 
@@ -37,10 +39,19 @@ def allowed(base, url):
         return False
     if actual.path in {expected.path + route for route in ROUTES}:
         return True
-    # A conquered card's page: /conquered/<user>/<review id>.
     rest = actual.path[len(expected.path):] if actual.path.startswith(expected.path) else ""
     parts = rest.split("/")
+    return _conquered(parts) or _invite(parts)
+
+
+def _conquered(parts):
+    """A conquered card's page: /conquered/<user>/<review id>."""
     return len(parts) == 3 and parts[0] == "conquered" and parts[1] != "" and parts[2].isdigit()
+
+
+def _invite(parts):
+    """A friend invite: /join/<code>."""
+    return len(parts) == 2 and parts[0] == "join" and parts[1] != ""
 
 
 def session_script(base, user, token, language="en"):
@@ -57,17 +68,13 @@ def session_script(base, user, token, language="en"):
 
 def session_cookie(base, token):
     """Trades the token for the site's HttpOnly session; None on servers without one."""
-    request = urllib.request.Request(
-        base.rstrip("/") + "/auth/session",
-        data=b"",
-        method="POST",
-        headers={"Authorization": "Bearer " + token},
-    )
+    from .client import ServerError, open_url
+
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with open_url(base.rstrip("/") + "/auth/session", b"", {"Authorization": "Bearer " + token}, "POST") as response:
             headers = response.headers.get_all("Set-Cookie") or []
-    except urllib.error.HTTPError as error:
-        if error.code == 404:
+    except ServerError as error:
+        if error.status == 404:
             return None
         raise
     for header in headers:
@@ -140,7 +147,7 @@ def open_page(mw, api, path, open_link, say):
             cookie = future.result()
         except Exception as error:
             from .language import tr
-            say(tr("ankiquest: could not sign in to the website (%s)", language) % error)
+            say(tr("ankiquest: could not sign in to the website (%s)", language) % html.escape(str(error)))
             return
         if state["window"] is not None:
             state["window"].close()

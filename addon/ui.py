@@ -1,5 +1,6 @@
 """The dialogs behind the Tools menu: settings and deck sharing."""
 
+import html
 from pathlib import Path
 
 from aqt.qt import (
@@ -108,6 +109,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     hint.setWordWrap(True)
     layout.addWidget(hint)
     status = QLabel()
+    status.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
     status.setWordWrap(True)
     layout.addWidget(status)
 
@@ -246,7 +248,7 @@ def deck_dialog(parent, settings, companion="aki"):
     for index, deck in enumerate(decks):
         item = QTreeWidgetItem([label(deck)])
         item.setCheckState(0, _enum(Qt, "CheckState", "Checked" if deck.get("enabled") else "Unchecked"))
-        item.setToolTip(0, deck["name"])
+        item.setToolTip(0, "<p>%s</p>" % html.escape(deck["name"]))
         items.append(item)
         parts = deck["name"].split("::")
         owner = None

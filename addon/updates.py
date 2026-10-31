@@ -2,7 +2,6 @@
 
 import json
 import re
-import urllib.request
 from pathlib import Path
 
 REPO = "float3/ankiquest"
@@ -14,8 +13,10 @@ DAY_MS = 86_400_000
 
 
 def fetch(url, timeout=20):
-    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "ankiquest-addon"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    from .client import open_url
+
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ankiquest-addon"}
+    with open_url(url, headers=headers, timeout=timeout) as response:
         return response.read()
 
 

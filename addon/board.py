@@ -1,21 +1,13 @@
 """One line under the deck list; the leaderboard itself opens from the website."""
 
+from html import escape
+
 PAGES = {
     "board": "/week",
     "profile": "/#{user}",
     "inbox": "/community#activity",
     "challenges": "/community#challenges",
 }
-
-
-def escape(text):
-    return (
-        str(text)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
 
 
 def link(page, text):
