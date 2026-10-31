@@ -1,8 +1,8 @@
 //! Hard cards learned at last: a page to share each one, and telling friends about it.
 //! Only what [`Conquest`] carries is shared, never the card itself, unless its owner
 //! chooses to add a label saying what the card was.
-use crate::decks::Outgoing;
 use crate::game::{self, Conquest};
+use crate::notifications::Outgoing;
 use crate::store::Error;
 use crate::{App, access, authorized, now_ms, store_error};
 use axum::extract::{Path, State};

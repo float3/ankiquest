@@ -1,6 +1,6 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
-use crate::decks::{Notification, Outgoing};
 use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
+use crate::notifications::{Notification, Outgoing};
 use crate::store::{Error, Store};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};

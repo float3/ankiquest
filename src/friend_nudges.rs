@@ -1,4 +1,4 @@
-use crate::decks::Outgoing;
+use crate::notifications::Outgoing;
 use crate::store::{Error, Store};
 use crate::{App, authorized, now_ms, store_error};
 use axum::extract::{Path, State};

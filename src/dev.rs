@@ -2,8 +2,9 @@
 //! chosen groups, aggregate statistics, and recent server errors. Statistics are
 //! counts across players, never anything about one player's cards.
 
-use crate::decks::{Outgoing, insert_notification, valid_message};
+use crate::decks::valid_message;
 use crate::game::{DAY_MS, Review};
+use crate::notifications::{Outgoing, insert_notification};
 use crate::store::{Error, Store};
 use crate::{App, access, now_ms, store_error};
 use axum::extract::{Path, State};

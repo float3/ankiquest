@@ -950,7 +950,7 @@ mod tests {
             let mut send = |to| {
                 store
                     .send(
-                        &crate::decks::Outgoing {
+                        &crate::notifications::Outgoing {
                             to,
                             from: "",
                             title: "Hello",
@@ -1041,7 +1041,7 @@ mod tests {
             let mut send = |to, from, kind| {
                 store
                     .send(
-                        &crate::decks::Outgoing {
+                        &crate::notifications::Outgoing {
                             to,
                             from,
                             title: "Hello",

@@ -2,7 +2,7 @@
 //! top-three place on this week's board reaches everyone in the player's circle as a
 //! notification they can reply to, with the same topic so it shows the same art.
 
-use crate::decks::Outgoing;
+use crate::notifications::Outgoing;
 use crate::store::{Error, Store};
 use crate::{App, authorized, now_ms, standings, store_error};
 use axum::extract::{Path, State};

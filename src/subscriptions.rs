@@ -168,8 +168,9 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decks::{Outgoing, Preference, Snapshot, tests::temporary_store};
+    use crate::decks::{Preference, Snapshot, tests::temporary_store};
     use crate::game::Clock;
+    use crate::notifications::Outgoing;
 
     fn settings(enabled: bool, senders: &[&str]) -> Settings {
         Settings {

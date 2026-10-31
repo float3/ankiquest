@@ -23,6 +23,7 @@ mod freezes;
 mod friend_nudges;
 mod game;
 mod i18n;
+mod notifications;
 mod oauth;
 mod privacy;
 mod reminders;
@@ -1147,7 +1148,7 @@ async fn notifications(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-) -> Result<Json<Vec<decks::Notification>>, StatusCode> {
+) -> Result<Json<Vec<notifications::Notification>>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -1188,7 +1189,7 @@ struct ActivityQuery {
     days: Option<u32>,
     before: Option<i64>,
     limit: Option<u32>,
-    category: Option<decks::ActivityCategory>,
+    category: Option<notifications::ActivityCategory>,
     unread_only: Option<bool>,
 }
 
@@ -1202,11 +1203,11 @@ async fn activity(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
     Query(query): Query<ActivityQuery>,
-) -> Result<Json<decks::Activity>, StatusCode> {
+) -> Result<Json<notifications::Activity>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let days = query.days.unwrap_or(decks::ACTIVITY_DAYS);
+    let days = query.days.unwrap_or(notifications::ACTIVITY_DAYS);
     let limit = query.limit.unwrap_or(100);
     if !matches!(days, 30 | 90) || !valid_page(limit, query.before) {
         return Err(StatusCode::BAD_REQUEST);
@@ -1219,7 +1220,7 @@ async fn activity(
         .activity_filtered(
             &user,
             now,
-            decks::ActivityOptions {
+            notifications::ActivityOptions {
                 days,
                 before: query.before,
                 limit,
@@ -1283,7 +1284,7 @@ async fn sent_activity(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
     Query(query): Query<SentQuery>,
-) -> Result<Json<decks::SentPage>, StatusCode> {
+) -> Result<Json<notifications::SentPage>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -1961,7 +1962,7 @@ fn tick(app: &App) -> Result<(), Error> {
                 .map(|other| (other.display.clone(), other.week_xp));
             for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
                 store.send_once(
-                    &decks::Outgoing {
+                    &notifications::Outgoing {
                         to: user,
                         from: "",
                         title: &nudge.title,
@@ -2221,7 +2222,7 @@ fn send_message(config: &Config, message: &Message) -> Result<(), Error> {
     let now = now_ms();
     let day = store.clock(&message.to)?.day(now);
     let id = store.send(
-        &decks::Outgoing {
+        &notifications::Outgoing {
             to: &message.to,
             from: message.from.as_deref().unwrap_or(""),
             title: &title,
@@ -2934,7 +2935,7 @@ mod tests {
             ] {
                 store
                     .send(
-                        &decks::Outgoing {
+                        &notifications::Outgoing {
                             to: "hill",
                             from: "cerro",
                             title,
@@ -3778,7 +3779,7 @@ mod tests {
             .lock()
             .unwrap()
             .send(
-                &decks::Outgoing {
+                &notifications::Outgoing {
                     to: user,
                     from: "",
                     title: "Hello",
@@ -3904,7 +3905,7 @@ mod tests {
                     .insert("hill".into(), load_player(&store, "hill").unwrap());
                 store
                     .send_once(
-                        &decks::Outgoing {
+                        &notifications::Outgoing {
                             to: "hill",
                             from: "",
                             title: "Streak at risk",
@@ -4001,7 +4002,7 @@ mod tests {
                 let mut store = app.store.lock().unwrap();
                 store
                     .send_once(
-                        &decks::Outgoing {
+                        &notifications::Outgoing {
                             to: "hill",
                             from: "",
                             title: "Streak at risk",
@@ -4081,7 +4082,7 @@ mod tests {
                 store.set_nudges("hill", true).unwrap();
                 store
                     .send_once(
-                        &decks::Outgoing {
+                        &notifications::Outgoing {
                             to: "hill",
                             from: "",
                             title: "Almost there",
@@ -4198,7 +4199,7 @@ mod tests {
             let mut store = app.store.lock().unwrap();
             let original = store
                 .send(
-                    &decks::Outgoing {
+                    &notifications::Outgoing {
                         to: "hill",
                         from: "cerro",
                         title: "Deck complete",
@@ -4298,7 +4299,7 @@ mod tests {
             store.set_language("hill", "es-AR").unwrap();
             store
                 .send(
-                    &decks::Outgoing {
+                    &notifications::Outgoing {
                         to: "hill",
                         from: "cerro",
                         title: "Deck complete",
@@ -4899,7 +4900,7 @@ mod tests {
             let mut store = app.store.lock().unwrap();
             store
                 .send(
-                    &decks::Outgoing {
+                    &notifications::Outgoing {
                         to: "hill",
                         from: "former-player",
                         title: "Deck complete",
