@@ -88,7 +88,8 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              finalized integer not null,
              payload text not null,
              primary key (kind, key)
-         ) without rowid;",
+         ) without rowid;
+         create table if not exists community_refresh (id integer primary key, refreshed_at integer not null);",
     )?;
     Ok(())
 }
