@@ -72,12 +72,21 @@ const EXPORT: &[(&str, &str)] = &[
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
     ("announcements_sent", "select id, title, body, groups, recipients, created_at from announcements where sender = ?1 order by id"),
     ("pending_removal", "select requested_at from account_removals where user = ?1"),
+    ("wins", "select id, kind, key, day, created_at, title, body, stats, art, shared_friends, link_token
+         from wins where user = ?1 order by id"),
+    ("wins_delivered", "select d.win, d.recipient, d.day, d.automatic from win_deliveries d
+         join wins w on w.id = d.win where w.user = ?1 order by d.win"),
+    ("daily_goal", "select mode, value, reached_day from goals where user = ?1"),
+    ("sharing", "select policies, daily_cap from sharing_settings where user = ?1"),
+    ("reactions", "select reactor, notification, sender, created_at from reactions
+         where reactor = ?1 or sender = ?1 order by created_at"),
 ];
 
 /// Owned tables left out of the download, with why.
 #[cfg(test)]
 const NOT_EXPORTED: &[(&str, &str)] = &[
     ("freeze_grant_reloads", "a queue the server empties within a minute"),
+    ("win_auto_queue", "a queue the server empties within a tick"),
 ];
 
 /// Rows that belong to the player alone: (table, condition on ?1).
@@ -129,6 +138,15 @@ const OWNED: &[(&str, &str)] = &[
     ("freeze_grants", "user = ?1"),
     ("freeze_grant_reloads", "user = ?1"),
     ("sign_in_links", "user = ?1"),
+    ("win_auto_queue", "win in (select id from wins where user = ?1)"),
+    (
+        "win_deliveries",
+        "recipient = ?1 or win in (select id from wins where user = ?1)",
+    ),
+    ("reactions", "reactor = ?1 or sender = ?1"),
+    ("wins", "user = ?1"),
+    ("goals", "user = ?1"),
+    ("sharing_settings", "user = ?1"),
     ("accounts", "user = ?1"),
 ];
 

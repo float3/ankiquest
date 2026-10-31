@@ -92,6 +92,17 @@ pub struct Notification {
     /// "conquered"), or "place:N" for a weekly recap, so clients can pick matching art.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topic: Option<String>,
+    /// The win this row is about, so clients can share it by id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub win: Option<i64>,
+    /// A friend's shared win as a card, while its link exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Whether the recipient cheered this row.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub reacted: bool,
+    #[serde(skip)]
+    pub link_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,6 +158,10 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
             .zip(reply_body)
             .map(|(title, body)| ReplyContext { title, body }),
         topic: row.get(13)?,
+        win: row.get(14)?,
+        image: None,
+        reacted: row.get(15)?,
+        link_token: row.get(16)?,
     })
 }
 
@@ -155,7 +170,9 @@ const NOTICE_COLUMNS: &str = concat!(
     "n.id,n.title,n.body,n.day,n.created_at / 1000,n.sender,n.replied,n.kind,
  n.read_at / 1000,n.challenge_id,",
     action_required_sql!(),
-    ",n.reply_to_title,n.reply_to_body,n.topic"
+    ",n.reply_to_title,n.reply_to_body,n.topic,n.win_id,
+ exists(select 1 from reactions r where r.reactor=n.recipient and r.notification=n.id),
+ (select w.link_token from wins w where w.id=n.win_id)"
 );
 /// A notification written by the server itself: a nudge, or a message sent by hand.
 pub struct Outgoing<'a> {
@@ -172,9 +189,17 @@ pub struct Delivery {
     pub notification: Notification,
 }
 fn is_celebration(key: &str) -> bool {
-    ["achievement:", "level:", "streak:", "record:", "conquered:"]
-        .iter()
-        .any(|prefix| key.starts_with(prefix))
+    [
+        "achievement:",
+        "level:",
+        "streak:",
+        "record:",
+        "conquered:",
+        "secured:",
+        "goal:",
+    ]
+    .iter()
+    .any(|prefix| key.starts_with(prefix))
 }
 
 pub(crate) fn insert_notification(
@@ -389,7 +414,7 @@ impl Store {
                 |row| {
                     Ok(Sent {
                         notice: notification(row)?,
-                        recipient: row.get(14)?,
+                        recipient: row.get(17)?,
                     })
                 },
             )?
@@ -448,6 +473,7 @@ impl Store {
     /// inbox items every client shows, unless the player turned them off. Other events
     /// keep the grouped ntfy-only announcements. A player's first run, with nothing
     /// seen yet, only records history instead of celebrating all of it at once.
+    #[cfg(test)]
     pub fn queue_events(
         &mut self,
         user: &str,
@@ -456,6 +482,28 @@ impl Store {
         now_ms: i64,
         push_enabled: bool,
     ) -> Result<(), Error> {
+        self.queue_moments(
+            user,
+            events,
+            day,
+            now_ms,
+            push_enabled,
+            &serde_json::json!({}),
+        )
+        .map(drop)
+    }
+
+    /// [`Store::queue_events`], also keeping every new moment as a win with `stats`.
+    /// Returns the new wins' ids. History recorded on a first run makes no wins.
+    pub fn queue_moments(
+        &mut self,
+        user: &str,
+        events: &[Event],
+        day: i64,
+        now_ms: i64,
+        push_enabled: bool,
+        stats: &serde_json::Value,
+    ) -> Result<Vec<i64>, Error> {
         let celebrate = self.celebrations_enabled(user)?;
         let tx = self.conn.transaction()?;
         let baseline = !tx.query_row(
@@ -471,6 +519,23 @@ impl Store {
             )? > 0
             {
                 fresh.push(event);
+            }
+        }
+        let mut wins = std::collections::HashMap::new();
+        if !baseline {
+            for event in &fresh {
+                if let Some(id) = crate::wins::create(
+                    &tx,
+                    user,
+                    &event.key,
+                    day,
+                    now_ms,
+                    &event.title,
+                    &event.body,
+                    stats,
+                )? {
+                    wins.insert(event.key.as_str(), id);
+                }
             }
         }
         let (celebrations, others): (Vec<_>, Vec<_>) = fresh
@@ -511,6 +576,9 @@ impl Store {
                         push_only,
                     )?;
                     set_topic(&tx, id, Some(topic_of(&event.key)))?;
+                    if let Some(win) = wins.get(event.key.as_str()) {
+                        crate::wins::attach(&tx, id, *win)?;
+                    }
                 }
             }
             Ok(())
@@ -521,8 +589,10 @@ impl Store {
         if push_enabled && !others.is_empty() {
             announce(others, "event", true)?;
         }
+        let mut created: Vec<i64> = wins.into_values().collect();
+        created.sort_unstable();
         tx.commit()?;
-        Ok(())
+        Ok(created)
     }
 
     /// Answers one notification, once, and lets the answer be answered in turn.
@@ -592,14 +662,14 @@ impl Store {
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, ready.recipient
+                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
                 completion_allowed_sql("notifications.recipient", "notifications.sender")
             ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
-                    user: r.get(14)?,
+                    user: r.get(17)?,
                     notification: notification(r)?,
                 })
             })?
@@ -1272,6 +1342,74 @@ mod tests {
         );
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn new_moments_become_wins_once_and_celebrations_point_to_them() {
+        let (mut store, _path) = temporary_store();
+        let event = |key: &str| Event {
+            key: key.into(),
+            title: format!("Title {key}"),
+            body: "Body".into(),
+        };
+        let stats = serde_json::json!({"streak": 4, "level": 2});
+        let first = store
+            .queue_moments("hill", &[event("level:2")], DAY, NOW, false, &stats)
+            .unwrap();
+        assert!(first.is_empty(), "the first run's history makes no wins");
+        let created = store
+            .queue_moments(
+                "hill",
+                &[
+                    event("level:2"),
+                    event("secured:9"),
+                    event("goal:9"),
+                    event("quest:9:0"),
+                    event("nudge:place:9"),
+                ],
+                DAY,
+                NOW,
+                false,
+                &stats,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 3, "secured, goal and quest are wins");
+        let kinds: Vec<String> = created
+            .iter()
+            .map(|id| crate::wins::win(&store.conn, "hill", *id).unwrap().kind)
+            .collect();
+        assert_eq!(kinds, ["streak_secured", "daily_goal", "quest"]);
+        let inbox = store.notifications("hill", NOW).unwrap();
+        assert_eq!(
+            inbox.len(),
+            2,
+            "secured and goal are celebrations: {inbox:?}"
+        );
+        assert_eq!(inbox[0].topic.as_deref(), Some("secured"));
+        assert_eq!(inbox[0].win, Some(created[0]));
+        assert_eq!(inbox[1].win, Some(created[1]));
+        assert_eq!(
+            crate::wins::win(&store.conn, "hill", created[0])
+                .unwrap()
+                .stats["streak"],
+            4
+        );
+        assert!(
+            store
+                .queue_moments("hill", &[event("goal:9")], DAY, NOW, false, &stats)
+                .unwrap()
+                .is_empty()
+        );
+        store.set_celebrations("hill", false).unwrap();
+        let quiet = store
+            .queue_moments("hill", &[event("level:3")], DAY, NOW, false, &stats)
+            .unwrap();
+        assert_eq!(
+            quiet.len(),
+            1,
+            "a win is kept even when celebrations are off"
+        );
+        assert_eq!(store.notifications("hill", NOW).unwrap().len(), 2);
     }
 
     #[test]
