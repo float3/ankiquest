@@ -1,12 +1,12 @@
 //! Fixtures shared by the handler tests of several modules, and what those tests use.
 
-use crate::Upload;
-use crate::UploadResponse;
 pub(crate) use crate::app::{App, Player, next_revision, now_ms};
 pub(crate) use crate::config::Config;
 pub(crate) use crate::game::{self, Clock, ClockHistory, Review, Week};
 pub(crate) use crate::store::Store;
-use crate::upload;
+use crate::study::Upload;
+use crate::study::UploadResponse;
+use crate::study::upload;
 pub(crate) use crate::{access, decks, notifications};
 pub(crate) use axum::Json;
 pub(crate) use axum::body::Bytes;

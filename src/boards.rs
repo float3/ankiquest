@@ -251,9 +251,9 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Upload;
+    use crate::study::Upload;
+    use crate::study::upload;
     use crate::test_support::*;
-    use crate::upload;
 
     #[tokio::test]
     async fn leaderboard_exposes_current_study_state_and_per_player_cutoff() {
