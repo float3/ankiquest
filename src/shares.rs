@@ -80,12 +80,7 @@ fn send(
             continue;
         }
         let key = format!("share:{sender}:{}", win.key);
-        let before = store.conn.query_row(
-            "select exists(select 1 from seen where user = ?1 and key = ?2)",
-            params![friend, key],
-            |r| r.get::<_, bool>(0),
-        )?;
-        if before {
+        if store.is_seen(friend, &key)? {
             continue;
         }
         store.send_once_about(

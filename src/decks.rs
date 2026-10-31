@@ -1,5 +1,5 @@
 use crate::game::{Clock, Event};
-use crate::store::{Error, Store};
+use crate::store::{Error, Store, has_column};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -383,29 +383,20 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
         ("reply_to_body", "text"),
         ("topic", "text"),
     ] {
-        let present = conn
-            .prepare("select 1 from pragma_table_info('notifications') where name = ?1")?
-            .exists([column])?;
-        if !present {
+        if !has_column(conn, "notifications", column)? {
             conn.execute(
                 &format!("alter table notifications add column {column} {definition}"),
                 [],
             )?;
         }
     }
-    let celebrations = conn
-        .prepare("select 1 from pragma_table_info('player_settings') where name = 'celebrations'")?
-        .exists([])?;
-    if !celebrations {
+    if !has_column(conn, "player_settings", "celebrations")? {
         conn.execute(
             "alter table player_settings add column celebrations integer not null default 1",
             [],
         )?;
     }
-    let friend_nudges = conn
-        .prepare("select 1 from pragma_table_info('player_settings') where name = 'friend_nudges'")?
-        .exists([])?;
-    if !friend_nudges {
+    if !has_column(conn, "player_settings", "friend_nudges")? {
         // Add the column and copy the prior choice together: a restart must not
         // mistake a half-migrated database for a new user's opt-out.
         conn.execute_batch(

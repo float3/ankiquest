@@ -271,18 +271,6 @@ fn next_milestone(profile: &Profile) -> Option<u64> {
     .then_some(next)
 }
 
-fn seen(store: &Store, user: &str, key: &str) -> Result<bool, Error> {
-    Ok(store
-        .conn
-        .query_row(
-            "select 1 from seen where user = ?1 and key = ?2",
-            params![user, key],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
 fn used_budget(store: &Store, user: &str, clock: &Clock, now: i64) -> Result<u8, Error> {
     let start = local_midnight(clock, now);
     let count: i64 = store.conn.query_row(
@@ -472,7 +460,7 @@ pub fn tick(
     }
     let day = profile.day;
     let urgent_key = format!("reminder:urgent:{day}");
-    let urgent_seen = seen(store, user, &urgent_key)?;
+    let urgent_seen = store.is_seen(user, &urgent_key)?;
     let due = reminder_due(&prefs, clock, now_ms);
     let mut candidates = Vec::new();
     if prefs.urgent_streak && unprotected(profile) && urgent_window(&prefs, clock, now_ms) {
@@ -619,10 +607,10 @@ pub fn tick(
         });
     }
     for candidate in candidates {
-        if seen(store, user, &candidate.key)? {
+        if store.is_seen(user, &candidate.key)? {
             continue;
         }
-        let already_urgent = seen(store, user, &urgent_key)?;
+        let already_urgent = store.is_seen(user, &urgent_key)?;
         if already_urgent && matches!(candidate.kind, "reminder_daily" | "reminder_milestone") {
             continue;
         }
@@ -763,7 +751,7 @@ mod tests {
         drop(store);
         let mut store = Store::open(&path).unwrap();
         assert!(store.take_deck_deliveries(at(20)).unwrap().is_empty());
-        assert!(seen(&store, "hill", "risk:legacy").unwrap());
+        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         assert!(store.notifications("hill", at(20)).unwrap().is_empty());
         cleanup(store, path);
     }
@@ -792,7 +780,7 @@ mod tests {
         let pending = store.take_deck_deliveries(at(20)).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].user, "friend");
-        assert!(seen(&store, "hill", "risk:legacy").unwrap());
+        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         cleanup(store, path);
     }
 
@@ -864,7 +852,11 @@ mod tests {
         assert!(store.notifications("hill", retry_at).unwrap().is_empty());
         assert!(store.take_deck_deliveries(retry_at).unwrap().is_empty());
         assert_eq!(used_budget(&store, "hill", &clock, retry_at).unwrap(), 1);
-        assert!(seen(&store, "hill", &format!("reminder:urgent:{}", p.day)).unwrap());
+        assert!(
+            store
+                .is_seen("hill", &format!("reminder:urgent:{}", p.day))
+                .unwrap()
+        );
         cleanup(store, path);
     }
 

@@ -107,14 +107,7 @@ pub(crate) async fn show(
     let label = label_of(&app.store.lock().unwrap().conn, &user, at).map_err(store_error)?;
     let (told, friends) = if authorized(&app, &user, &headers) {
         let store = app.store.lock().unwrap();
-        let told: bool = store
-            .conn
-            .query_row(
-                "select exists (select 1 from seen where user = ?1 and key = ?2)",
-                [user.as_str(), &told_key(at)],
-                |r| r.get(0),
-            )
-            .map_err(store_error)?;
+        let told = store.is_seen(&user, &told_key(at)).map_err(store_error)?;
         let friends = crate::social::friends(&store.conn, &user)
             .map_err(store_error)?
             .len();
