@@ -7,7 +7,7 @@ def study_day(now_ms, offset_west_min, rollover_hour):
     return (now_ms - offset_west_min * 60_000 - rollover_hour * 3_600_000) // DAY_MS
 
 
-def deck_snapshots(col, now_ms, offset_west_min, rollover_hour, only=None):
+def deck_snapshots(col, now_ms, offset_west_min, rollover_hour, only=None, tree=None):
     """Call on Anki's serialized collection worker, together with review reads.
 
     The scheduler supplies daily-limit-aware counts, including subdecks. Its
@@ -20,7 +20,7 @@ def deck_snapshots(col, now_ms, offset_west_min, rollover_hour, only=None):
     end = col.sched.day_cutoff * 1000
     start = end - DAY_MS
     names = col.decks.all_names_and_ids(include_filtered=False)
-    tree = col.sched.deck_due_tree()
+    tree = col.sched.deck_due_tree() if tree is None else tree
     if tree is None:
         raise ValueError("Deck progress is unavailable")
 

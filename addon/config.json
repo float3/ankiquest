@@ -4,5 +4,12 @@
     "token": "",
     "notify_rank": true,
     "streak_hours": 2,
-    "update_channel": "stable"
+    "update_channel": "stable",
+    "goal_mode": "backlog",
+    "goal_backlog_percent": 10,
+    "goal_cards": 100,
+    "goal_minutes": 20,
+    "deck_status": true,
+    "session_summary": true,
+    "goal_celebrations": true
 }
