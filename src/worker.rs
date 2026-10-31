@@ -1,12 +1,12 @@
 //! The background work: syncing collections, refreshing standings, and pushing notifications.
 
 use crate::app::{App, mark_events_seen, now_ms};
+use crate::competition::refresh_community;
 use crate::config::Config;
 use crate::game::{Clock, Profile};
 use crate::store::{Error, Store};
 use crate::{
-    admin, challenges, competition, freezes, game, i18n, notifications, privacy, refresh_community,
-    reminders, social,
+    admin, challenges, competition, freezes, game, i18n, notifications, privacy, reminders, social,
 };
 use std::collections::HashMap;
 use std::path::Path;

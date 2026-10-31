@@ -3,13 +3,23 @@
 //! keeps its existing scoring; this archive freezes each result after a late-sync
 //! grace period and never rewrites a finalized winner.
 
+use crate::app::{App, now_ms};
 use crate::game::{self, ClockHistory, DAY_MS, FreezePolicy, Week};
 use crate::store::{Error, Store};
+use crate::study::valid_year;
+use crate::web_util::store_error;
+use crate::worker::import;
+use crate::{competition, i18n};
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
 use chrono::{Datelike, Duration, NaiveDate};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 const GRACE_MS: i64 = DAY_MS;
 
@@ -930,10 +940,103 @@ pub fn dashboard(
     }))
 }
 
+#[derive(Deserialize, Default)]
+struct CommunityQuery {
+    year: Option<i32>,
+    month: Option<u32>,
+}
+
+pub(crate) fn refresh_community(
+    app: &App,
+    store: &mut Store,
+    players: &[competition::Participant],
+    now: i64,
+) -> Result<(), Error> {
+    use rusqlite::OptionalExtension;
+    let last: Option<i64> = store
+        .conn
+        .query_row(
+            "select refreshed_at from community_refresh where id=1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if last.is_some_and(|last| now >= last && now - last < 60_000) {
+        return Ok(());
+    }
+    competition::refresh(
+        store,
+        players,
+        &app.week,
+        now,
+        app.config.competition_start_date.as_deref(),
+    )?;
+    store.conn.execute(
+        "insert into community_refresh(id,refreshed_at) values (1,?1)
+         on conflict(id) do update set refreshed_at=excluded.refreshed_at",
+        [now],
+    )?;
+    Ok(())
+}
+
+async fn community_dashboard(
+    State(app): State<Arc<App>>,
+    Query(query): Query<CommunityQuery>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let now = now_ms();
+    let date = app.week.competition_date(now);
+    let year = query.year.unwrap_or(date.year());
+    let month = query.month.unwrap_or(date.month());
+    if !valid_year(year) || !(1..=12).contains(&month) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut store = app.store.lock().unwrap();
+    if let Some(base) = &app.config.sync_base {
+        import(&app, &mut store, base).map_err(|error| {
+            log_error!("community sync import incomplete: {error}");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    }
+    let participants = app.legacy_participants();
+    refresh_community(&app, &mut store, &participants, now).map_err(store_error)?;
+    let language = i18n::selected(&headers, &store, "").map_err(store_error)?;
+    let mut dashboard = competition::dashboard(&store, &participants, &app.week, now, year, month)
+        .map_err(store_error)?;
+    i18n::community(&mut dashboard, &language);
+    Ok(Json(dashboard))
+}
+
+async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let mut store = app.store.lock().unwrap();
+    if let Some(base) = &app.config.sync_base {
+        import(&app, &mut store, base).map_err(|error| {
+            log_error!("winner history sync import incomplete: {error}");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    }
+    let participants = app.legacy_participants();
+    refresh_community(&app, &mut store, &participants, now_ms()).map_err(store_error)?;
+    competition::winner_history(&store, &participants)
+        .map(Json)
+        .map_err(store_error)
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new()
+        .route("/api/winners", get(winners))
+        .route("/api/community", get(community_dashboard))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::load_player;
+    use crate::challenges;
     use crate::game::Clock;
+    use crate::test_support::*;
+    use crate::worker::{import, sync_users, tick};
+    use chrono::Duration;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1732,5 +1835,270 @@ mod tests {
         assert_eq!(improved[0]["user"], "returning");
         assert_eq!(improved[0]["previous"], 0);
         assert_eq!(improved[0]["value"], 100);
+    }
+
+    #[tokio::test]
+    async fn community_empty_history_has_no_invented_champions_and_rejects_bad_filters() {
+        let (app, path) = fixture();
+        let board = community_dashboard(
+            State(app.clone()),
+            Query(CommunityQuery::default()),
+            HeaderMap::new(),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(board["calendar"].as_array().unwrap().is_empty());
+        assert_eq!(board["players"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            community_dashboard(
+                State(app.clone()),
+                Query(CommunityQuery {
+                    year: Some(2026),
+                    month: Some(13)
+                }),
+                HeaderMap::new()
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::BAD_REQUEST
+        );
+        assert!(serde_json::from_value::<challenges::Create>(serde_json::json!({"title":"No injected creator","kind":"reviews","cooperative":true,"target":10,"duration_days":7,"recipients":["hill"],"creator":"hill"})).is_err());
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    fn community_sync_fixture() -> (Arc<App>, PathBuf, PathBuf) {
+        let (mut app, path) = fixture();
+        let base = path.join("sync");
+        std::fs::create_dir_all(&base).unwrap();
+        Arc::get_mut(&mut app).unwrap().config.sync_base = Some(base.clone());
+        (app, path, base)
+    }
+
+    fn community_history(count: i64) -> (chrono::NaiveDate, Vec<Review>) {
+        let day = Week::default().competition_date(now_ms()) - chrono::Duration::days(3);
+        let at = Week::default().boundary_ms(day) + 3_600_000;
+        let reviews = (0..count)
+            .map(|index| Review {
+                id: at + index * 1000,
+                cid: at + index,
+                last_ivl: 10,
+                ivl: None,
+                time_ms: 10_000,
+                kind: 1,
+            })
+            .collect();
+        (day, reviews)
+    }
+
+    fn community_collection(base: &Path, user: &str, reviews: &[Review]) {
+        std::fs::create_dir_all(base.join(user)).unwrap();
+        let mut conn =
+            rusqlite::Connection::open(base.join(user).join("collection.anki2")).unwrap();
+        conn.execute_batch(
+            "create table revlog (id integer primary key, cid integer, lastIvl integer,
+                 ivl integer, time integer, type integer, ease integer);",
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        for review in reviews {
+            tx.execute(
+                "insert into revlog values (?1,?2,?3,?4,?5,?6,3)",
+                rusqlite::params![
+                    review.id,
+                    review.cid,
+                    review.last_ivl,
+                    review.ivl.unwrap_or(1),
+                    review.time_ms,
+                    review.kind
+                ],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    fn community_query(day: chrono::NaiveDate) -> Query<CommunityQuery> {
+        Query(CommunityQuery {
+            year: Some(day.year()),
+            month: Some(day.month()),
+        })
+    }
+
+    #[tokio::test]
+    async fn community_first_request_imports_fresh_sync_before_finalizing_stale_history() {
+        let (app, path, base) = community_sync_fixture();
+        let (day, reviews) = community_history(100);
+        {
+            let mut store = app.store.lock().unwrap();
+            for (user, count) in [("hill", 1), ("cerro", 2)] {
+                store
+                    .upsert(user, &reviews[..count], &[], Clock::default())
+                    .unwrap();
+                app.players
+                    .write()
+                    .unwrap()
+                    .insert(user.into(), load_player(&store, user).unwrap());
+            }
+        }
+        community_collection(&base, "hill", &reviews);
+
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
+            .await
+            .unwrap()
+            .0;
+        let archived = board["calendar"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|period| period["key"] == day.to_string())
+            .unwrap();
+        assert_eq!(archived["status"], "final");
+        assert_eq!(archived["winners"], serde_json::json!(["hill"]));
+        assert_eq!(archived["standings"][0]["reviews"], 100);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn winners_imports_before_archiving_and_matches_community_history() {
+        let (app, path, base) = community_sync_fixture();
+        let (day, reviews) = community_history(30);
+        {
+            let mut store = app.store.lock().unwrap();
+            for (user, count) in [("hill", 1), ("cerro", 2)] {
+                store
+                    .upsert(user, &reviews[..count], &[], Clock::default())
+                    .unwrap();
+                app.players
+                    .write()
+                    .unwrap()
+                    .insert(user.into(), load_player(&store, user).unwrap());
+            }
+        }
+        community_collection(&base, "hill", &reviews);
+        let history = winners(State(app.clone())).await.unwrap().0;
+        assert_eq!(history["shared"]["start_date"], day.to_string());
+        assert_eq!(history["shared"]["player_count"], 2);
+        assert_eq!(history["shared"]["periods"]["day"], 1);
+        let champion = history["shared"]["players"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|player| player["user"] == "hill")
+            .unwrap();
+        assert_eq!(champion["day_wins"], 1);
+        assert_eq!(history["waiting_players"][0]["user"], "friend");
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(board["winner_history"], history);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn community_failed_import_defers_archive_until_every_collection_recovers() {
+        let (app, path, base) = community_sync_fixture();
+        let (day, reviews) = community_history(100);
+        community_collection(&base, "cerro", &reviews[..2]);
+        for user in ["hill", "friend"] {
+            std::fs::create_dir_all(base.join(user)).unwrap();
+            std::fs::write(
+                base.join(user).join("collection.anki2"),
+                b"invalid database",
+            )
+            .unwrap();
+        }
+        {
+            let mut store = app.store.lock().unwrap();
+            let error = import(&app, &mut store, &base).unwrap_err().to_string();
+            assert!(error.contains("hill"));
+            assert!(error.contains("friend"));
+            assert_eq!(store.reviews("cerro").unwrap().len(), 2);
+        }
+        assert_eq!(
+            community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
+                .await
+                .unwrap_err(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        tick(&app).unwrap();
+        {
+            let store = app.store.lock().unwrap();
+            for table in [
+                "competition_meta",
+                "competition_periods",
+                "community_refresh",
+            ] {
+                assert_eq!(
+                    store
+                        .conn
+                        .query_row(&format!("select count(*) from {table}"), [], |row| {
+                            row.get::<_, i64>(0)
+                        })
+                        .unwrap(),
+                    0
+                );
+            }
+        }
+        for (user, count) in [("hill", 100), ("friend", 1)] {
+            std::fs::remove_file(base.join(user).join("collection.anki2")).unwrap();
+            community_collection(&base, user, &reviews[..count]);
+        }
+        let board = community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
+            .await
+            .unwrap()
+            .0;
+        let archived = board["calendar"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|period| period["key"] == day.to_string())
+            .unwrap();
+        assert_eq!(archived["status"], "final");
+        assert_eq!(archived["winners"], serde_json::json!(["hill"]));
+        assert_eq!(archived["standings"][0]["reviews"], 100);
+        assert_eq!(archived["standings"].as_array().unwrap().len(), 3);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn community_unreadable_sync_directory_never_initializes_archive() {
+        let (mut app, path, base) = community_sync_fixture();
+        Arc::get_mut(&mut app).unwrap().config.sync_base = Some(base.join("missing"));
+        assert!(sync_users(&base.join("missing")).is_err());
+        assert_eq!(
+            winners(State(app.clone())).await.unwrap_err(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            community_dashboard(
+                State(app.clone()),
+                Query(CommunityQuery::default()),
+                HeaderMap::new()
+            )
+            .await
+            .unwrap_err(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        tick(&app).unwrap();
+        assert_eq!(
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row("select count(*) from competition_periods", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

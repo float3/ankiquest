@@ -7,7 +7,7 @@ pub(crate) use crate::store::Store;
 use crate::study::{Upload, UploadResponse, upload};
 pub(crate) use crate::{access, decks, notifications};
 pub(crate) use axum::Json;
-pub(crate) use axum::extract::{Path as UrlPath, Query, State};
+pub(crate) use axum::extract::{Path as UrlPath, State};
 pub(crate) use axum::http::{HeaderMap, StatusCode, header};
 pub(crate) use std::collections::HashMap;
 pub(crate) use std::path::{Path, PathBuf};
