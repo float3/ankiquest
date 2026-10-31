@@ -52,6 +52,8 @@ impl Store {
         let scratch = state_dir.join("scratch");
         fs::create_dir_all(&scratch)?;
         let conn = Connection::open(state_dir.join("ankiquest.db"))?;
+        #[cfg(test)]
+        conn.execute_batch("pragma synchronous = off;")?;
         conn.execute_batch(
             "pragma journal_mode = wal;
              create table if not exists reviews (
