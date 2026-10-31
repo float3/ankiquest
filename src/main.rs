@@ -26,6 +26,7 @@ mod i18n;
 mod oauth;
 mod privacy;
 mod reminders;
+mod shares;
 mod social;
 mod store;
 mod subscriptions;
@@ -2397,6 +2398,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(aki::routes())
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
+        .merge(shares::routes())
         .merge(conquests::routes())
         .merge(social::routes())
         .merge(privacy::routes())
