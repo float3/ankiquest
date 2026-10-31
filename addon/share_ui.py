@@ -1,23 +1,18 @@
-"""Sharing a win from Anki: with friends through the server, or anywhere as a picture."""
+"""Sharing a win from Anki: with friends through the server, or anywhere as the server's card picture."""
 
 from pathlib import Path
 
 from aqt.qt import (
     QApplication,
-    QColor,
     QDialog,
     QFileDialog,
     QFont,
-    QFontMetricsF,
     QHBoxLayout,
     QImage,
     QLabel,
     QMimeData,
-    QPainter,
     QPixmap,
     QPushButton,
-    QRectF,
-    QTextOption,
     QVBoxLayout,
     Qt,
 )
@@ -42,67 +37,44 @@ def _font(pixels, bold):
     return font
 
 
-def _draw_lines(painter, text, pixels, bold, color, layout, top, max_lines=None):
-    """Draws centred wrapped text from `top` and answers where it ended."""
-    font = _font(pixels, bold)
-    metrics = QFontMetricsF(font)
-    height = metrics.lineSpacing()
-    fit = share.lines_that_fit(top, height) if max_lines is None else max_lines
-    lines = share.wrap(text, layout["width"], metrics.horizontalAdvance, fit)
-    painter.setFont(font)
-    painter.setPen(QColor(color))
-    option = QTextOption(_enum(Qt, "AlignmentFlag", "AlignHCenter"))
-    for line in lines:
-        painter.drawText(QRectF(layout["left"], top, layout["width"], height), line, option)
-        top += height
-    return top
+def picture(png):
+    """The PNG bytes as a QImage; None when Qt cannot read them."""
+    image = QImage()
+    return image if image.loadFromData(png, "PNG") else None
 
 
-def card(win, companion):
-    """The 1080×1080 picture: mascot, title, body and the AnkiQuest footer."""
-    image = QImage(share.CARD_SIZE, share.CARD_SIZE, _enum(QImage, "Format", "Format_ARGB32"))
-    image.fill(QColor(share.COLORS["background"]))
-    asset = art_path(companion)
-    pixmap = QPixmap(asset) if asset else None
-    layout = share.card_layout(bool(pixmap and not pixmap.isNull()))
-    painter = QPainter(image)
-    painter.setRenderHint(_enum(QPainter, "RenderHint", "Antialiasing"))
-    painter.setRenderHint(_enum(QPainter, "RenderHint", "SmoothPixmapTransform"))
-    if layout["art"]:
-        left, top, side, _ = layout["art"]
-        scaled = pixmap.scaled(
-            side, side,
-            _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-            _enum(Qt, "TransformationMode", "SmoothTransformation"),
-        )
-        painter.drawPixmap(left + (side - scaled.width()) // 2, top + (side - scaled.height()) // 2, scaled)
-    top = _draw_lines(painter, win["title"], share.TITLE_PX, True, share.COLORS["text"], layout, layout["title_top"])
-    _draw_lines(painter, win["body"], share.BODY_PX, False, share.COLORS["muted"], layout, top + share.TITLE_GAP)
-    _draw_lines(painter, share.FOOTER, share.FOOTER_PX, True, share.COLORS["primary"], layout, layout["footer_top"], 1)
-    painter.end()
-    return image
-
-
-def copy_image(win, companion, server):
-    """Puts the card and the invitation on the clipboard together."""
+def copy_card(found):
+    """Puts the server's card and its invitation on the clipboard together."""
+    image = picture(found["png"])
+    if image is None:
+        return tr("Could not read the picture.")
     data = QMimeData()
-    data.setImageData(card(win, companion))
-    data.setText(share.invitation(win, server, tr))
+    data.setImageData(image)
+    data.setText(found["text"])
     QApplication.clipboard().setMimeData(data)
     return tr("The picture and an invitation are on the clipboard.")
 
 
-def save_image(parent, win, companion, server):
-    """Saves the card where the player picks, with the invitation on the clipboard; None if cancelled."""
-    path, _ = QFileDialog.getSaveFileName(parent, tr("Save image…"), "ankiquest-win.png", "PNG (*.png)")
-    if not path:
-        return None
-    if not path.lower().endswith(".png"):
-        path += ".png"
-    if not card(win, companion).save(path, "PNG"):
+def save_card(path, found):
+    """Writes the server's card to `path`, with its invitation on the clipboard."""
+    try:
+        Path(path).write_bytes(found["png"])
+    except OSError:
         return tr("Could not save the picture.")
-    QApplication.clipboard().setText(share.invitation(win, server, tr))
+    QApplication.clipboard().setText(found["text"])
     return tr("Picture saved. An invitation is on the clipboard.")
+
+
+def ask_path(parent):
+    path, _ = QFileDialog.getSaveFileName(parent, tr("Save image…"), "ankiquest-win.png", "PNG (*.png)")
+    if path and not path.lower().endswith(".png"):
+        path += ".png"
+    return path or None
+
+
+def copy_text(win, server):
+    QApplication.clipboard().setText(share.invitation(win, server, tr))
+    return tr("An invitation is on the clipboard.")
 
 
 def same_account(api, current):
@@ -118,13 +90,7 @@ def _plain(text, bold=False):
     return label
 
 
-def win_dialog(parent, api, win, companion, current_client, run):
-    """A small non-modal window offering the win to friends or as a picture.
-    `current_client()` is the signed-in account now; `run` is mw.taskman.run_in_background."""
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(tr("Share this win"))
-    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_DeleteOnClose"))
-    layout = QVBoxLayout(dialog)
+def _head(win, companion):
     head = QHBoxLayout()
     asset = art_path(companion)
     if asset:
@@ -139,55 +105,110 @@ def win_dialog(parent, api, win, companion, current_client, run):
     words.addWidget(_plain(win["title"], True))
     words.addWidget(_plain(win["body"]))
     head.addLayout(words, 1)
-    layout.addLayout(head)
-    status = _plain("")
-    layout.addWidget(status)
+    return head
 
-    friends = QPushButton(tr("Share with friends"))
-    copy = QPushButton(tr("Copy as image"))
-    save = QPushButton(tr("Save image…"))
-    close = QPushButton(tr("Close"))
-    close.clicked.connect(dialog.close)
 
-    def owned():
-        if same_account(api, current_client()):
+class Sharing:
+    """What the share window's buttons do. The card is fetched once, in the background, and kept."""
+
+    def __init__(self, dialog, api, win, current_client, run, status):
+        self.dialog, self.api, self.win = dialog, api, win
+        self.current_client, self.run, self.status = current_client, run, status
+        self.found = None
+        self.waiting = []
+
+    def owned(self):
+        if same_account(self.api, self.current_client()):
             return True
-        status.setText(tr("This win belongs to an AnkiQuest account that is no longer signed in."))
+        self.status.setText(tr("This win belongs to an AnkiQuest account that is no longer signed in."))
         return False
 
-    def sent(future):
+    def to_friends(self, button):
+        if not self.owned():
+            return
+        button.setEnabled(False)
+        self.status.setText(tr("Sharing…"))
+
+        def sent(future):
+            try:
+                recipients = future.result()
+            except Exception as error:
+                button.setEnabled(True)
+                self.status.setText(tr("Couldn't share it (%s).") % error_text(error))
+                return
+            self.status.setText(share.sent_text(recipients, tr))
+
+        self.run(lambda: share.send(self.api, self.win), sent)
+
+    def with_card(self, then):
+        """Runs `then(found)` once the card is here, fetching it first if needed."""
+        if self.found is not None:
+            then(self.found)
+            return
+        if not self.owned():
+            return
+        self.waiting.append(then)
+        if len(self.waiting) > 1:
+            return
+        self.status.setText(tr("Getting the picture…"))
+        self.run(lambda: share.card(self.api, self.win), self.fetched)
+
+    def fetched(self, future):
+        waiting, self.waiting = self.waiting, []
         try:
-            recipients = future.result()
+            self.found = future.result()
         except Exception as error:
-            friends.setEnabled(True)
-            status.setText(tr("Couldn't share it (%s).") % error_text(error))
+            self.status.setText(tr("Could not get the picture (%s).") % error_text(error))
             return
-        status.setText(share.sent_text(recipients, tr))
+        for action in waiting:
+            action(self.found)
 
-    def to_friends():
-        if not owned():
-            return
-        friends.setEnabled(False)
-        status.setText(tr("Sharing…"))
-        run(lambda: share.send(api, win), sent)
+    def to_clipboard(self):
+        self.with_card(lambda found: self.status.setText(copy_card(found)))
 
-    def to_clipboard():
-        status.setText(copy_image(win, companion, api.base))
+    def to_file(self):
+        path = ask_path(self.dialog)
+        if path:
+            self.with_card(lambda found: self.status.setText(save_card(path, found)))
 
-    def to_file():
-        said = save_image(dialog, win, companion, api.base)
-        if said:
-            status.setText(said)
+    def to_text(self):
+        self.status.setText(copy_text(self.win, self.api.base))
 
-    friends.clicked.connect(to_friends)
-    copy.clicked.connect(to_clipboard)
-    save.clicked.connect(to_file)
+
+def _buttons(sharing):
+    friends = QPushButton(tr("Share with friends"))
+    friends.clicked.connect(lambda: sharing.to_friends(friends))
+    if not share.has_card(sharing.win):
+        text = QPushButton(tr("Copy text"))
+        text.clicked.connect(sharing.to_text)
+        return [friends, text]
+    copy = QPushButton(tr("Copy as image"))
+    save = QPushButton(tr("Save image…"))
+    copy.clicked.connect(sharing.to_clipboard)
+    save.clicked.connect(sharing.to_file)
+    return [friends, copy, save]
+
+
+def win_dialog(parent, api, win, companion, current_client, run):
+    """A small non-modal window offering the win to friends or as a picture.
+    `current_client()` is the signed-in account now; `run` is mw.taskman.run_in_background."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(tr("Share this win"))
+    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_DeleteOnClose"))
+    layout = QVBoxLayout(dialog)
+    layout.addLayout(_head(win, companion))
+    status = _plain("")
+    layout.addWidget(status)
+    sharing = Sharing(dialog, api, win, current_client, run, status)
+    close = QPushButton(tr("Close"))
+    close.clicked.connect(dialog.close)
     row = QHBoxLayout()
-    for button in (friends, copy, save):
+    for button in _buttons(sharing):
         row.addWidget(button)
     row.addStretch(1)
     row.addWidget(close)
     layout.addLayout(row)
+    dialog.sharing = sharing
     dialog.resize(520, dialog.sizeHint().height())
     return dialog
 

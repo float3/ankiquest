@@ -82,9 +82,9 @@ class ReplyTextTests(unittest.TestCase):
 class ActionTests(unittest.TestCase):
     def test_a_friends_message_can_be_answered_until_it_has_been(self):
         entry = {"id": 4, "sender": "cerro", "kind": "completion"}
-        self.assertEqual(["reply", "open", "read"], inbox.actions(entry))
-        self.assertEqual(["open", "read"], inbox.actions(dict(entry, replied=True)))
-        self.assertEqual(["reply", "open"], inbox.actions(dict(entry, read_at=1790000000)))
+        self.assertEqual(["reply", "cheer", "open", "read"], inbox.actions(entry))
+        self.assertEqual(["cheer", "open", "read"], inbox.actions(dict(entry, replied=True)))
+        self.assertEqual(["reply", "cheer", "open"], inbox.actions(dict(entry, read_at=1790000000)))
 
     def test_challenge_rows_are_answered_on_the_website(self):
         invite = {"id": 5, "sender": "alice", "kind": "challenge_invite", "challenge_id": 8, "route": "/community#challenge-8"}
@@ -146,20 +146,93 @@ class ServerTests(unittest.TestCase):
         self.assertEqual("timed out", inbox.error_text(OSError("timed out")))
 
 
+class CheerTests(unittest.TestCase):
+    def test_friends_shared_wins_and_finished_decks_can_be_cheered(self):
+        self.assertTrue(inbox.cheerable({"id": 8, "kind": "share", "sender": "cerro"}))
+        self.assertTrue(inbox.cheerable({"id": 8, "kind": "completion", "sender": "cerro"}))
+        self.assertFalse(inbox.cheerable({"id": 8, "kind": "share", "sender": ""}))
+        self.assertFalse(inbox.cheerable({"id": 8, "kind": "reply", "sender": "cerro"}))
+        self.assertFalse(inbox.cheerable({"id": 0, "kind": "share", "sender": "cerro"}))
+        self.assertIn("cheer", inbox.actions({"id": 8, "kind": "share", "sender": "cerro", "reacted": True}))
+
+    def test_a_cheer_is_sent_once_and_says_whether_it_was_already(self):
+        api = FakeApi({"/api/react/hill": {"already": False}})
+        self.assertFalse(inbox.react(api, 42))
+        self.assertEqual([("/api/react/hill", {"notification": 42})], api.sent)
+        self.assertTrue(inbox.react(FakeApi({"/api/react/hill": {"already": True}}), 42))
+
+    def test_a_cheer_back_reads_as_one_line_and_can_be_answered(self):
+        row = {"id": 9, "kind": "reaction", "sender": "cerro", "title": "🎉 Cerro cheered", "body": "“Level 5!”"}
+        self.assertEqual(("🎉 Cerro cheered: “Level 5!”", ""), inbox.headline(row))
+        self.assertEqual(("Deck done", "Spanish"), inbox.headline({"title": "Deck done", "body": "Spanish"}))
+        self.assertEqual(["reply", "open", "read"], inbox.actions(row))
+        self.assertEqual(inbox.reply_choices("reply"), inbox.reply_choices("reaction"))
+
+
+class Response:
+    def __init__(self, data):
+        self.data = data
+
+    def read(self, size):
+        return self.data[:size]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"pixels"
+
+
 class ShareTests(unittest.TestCase):
-    def test_share_requests_name_a_notification_or_a_podium_place(self):
-        win = share.win_from_entry({"id": 42, "title": "Level 5!", "body": "Well done", "kind": "celebration"})
-        self.assertEqual({"notification": 42}, share.request_body(win))
+    def test_wins_are_shared_by_id_and_older_rows_by_notification_or_place(self):
+        win = share.win_from_entry({"id": 42, "title": "Level 5!", "body": "Well done", "kind": "celebration", "win": 17})
+        self.assertEqual({"win": 17, "to": "friends"}, share.request_body(win))
+        self.assertTrue(share.has_card(win))
+        old = share.win_from_entry({"id": 42, "title": "3 new unlocks", "body": "", "kind": "celebration"})
+        self.assertEqual({"notification": 42}, share.request_body(old))
+        self.assertFalse(share.has_card(old))
+        self.assertFalse(share.has_card({"win": True}))
         self.assertEqual({"place": 2}, share.request_body(share.win_from_place({"title": "#2", "body": "Up one"}, 2)))
         for place in (0, 4, None, "1"):
             with self.assertRaises(ValueError):
                 share.request_body({"notification": None, "place": place})
 
     def test_sharing_answers_how_many_friends_got_it(self):
-        api = FakeApi({"/api/share/hill": {"recipients": 3}})
-        self.assertEqual(3, share.send(api, {"notification": 7, "place": None}))
-        self.assertEqual([("/api/share/hill", {"notification": 7})], api.sent)
+        api = FakeApi({"/api/share/hill": {"recipients": 3, "link": {"url": "/w/t", "image": "/w/t.png"}}})
+        self.assertEqual(3, share.send(api, {"notification": 7, "place": None, "win": 17}))
+        self.assertEqual([("/api/share/hill", {"win": 17, "to": "friends"})], api.sent)
         self.assertEqual(0, share.send(FakeApi({"/api/share/hill": {}}), {"notification": None, "place": 1}))
+
+    def test_a_link_comes_with_the_servers_picture_and_words(self):
+        api = FakeApi({"/api/share/hill": {"url": "/w/tok", "image": "https://cdn.example/w/tok.png", "text": "Level 5! Join me"}})
+        self.assertEqual(
+            {"url": "https://quest.example/w/tok", "image": "https://cdn.example/w/tok.png", "text": "Level 5! Join me"},
+            share.link(api, {"win": 17}),
+        )
+        self.assertEqual([("/api/share/hill", {"win": 17, "to": "link"})], api.sent)
+
+    def test_the_picture_is_fetched_without_the_token_and_within_limits(self):
+        asked = []
+
+        def opener(request, timeout):
+            asked.append((request.full_url, request.headers, timeout))
+            return Response(PNG)
+
+        self.assertEqual(PNG, share.download_image("https://quest.example/w/t.png", opener=opener))
+        url, headers, timeout = asked[0]
+        self.assertNotIn("Authorization", headers)
+        self.assertEqual(share.IMAGE_TIMEOUT, timeout)
+        with self.assertRaises(ValueError):
+            share.download_image("https://quest.example/w/t.png", limit=4, opener=opener)
+        with self.assertRaises(ValueError):
+            share.download_image("https://quest.example/w/t.png", opener=lambda request, timeout: Response(b"<html>"))
+        for url in ("file:///etc/passwd", "", None):
+            with self.assertRaises(ValueError):
+                share.download_image(url, opener=opener)
+        self.assertEqual(2, len(asked))
 
     def test_what_the_player_is_told(self):
         self.assertTrue(share.sent_text(0).startswith("Nobody new got it"))
@@ -176,53 +249,18 @@ class ShareTests(unittest.TestCase):
         self.assertIsNone(share.podium(["a", "me"], ["a"], "me"))
         self.assertEqual(4, share.climbed_to(["a", "b", "c", "d", "me"], ["a", "b", "c", "me", "d"], "me"))
 
-    def test_the_invitation_names_the_server(self):
+    def test_a_win_without_a_card_travels_as_text_naming_the_server(self):
         win = {"title": "Level 5!", "body": "Well done"}
         self.assertEqual("Level 5!: Well done\nStudy with me on AnkiQuest: https://quest.example",
                          share.invitation(win, "https://quest.example"))
         self.assertEqual("Level 5!: Well done\nI study with AnkiQuest.", share.invitation(win, ""))
 
-    def test_the_card_respects_the_chosen_companion(self):
+    def test_the_window_shows_the_chosen_companion(self):
         self.assertEqual("aki_face.png", share.art_file("aki"))
         self.assertEqual("ankilope_face.png", share.art_file("ankilope"))
         self.assertIsNone(share.art_file("none"))
         for companion in ("aki", "ankilope"):
             self.assertTrue((ADDON / share.art_file(companion)).is_file())
-
-
-class CardLayoutTests(unittest.TestCase):
-    measure = staticmethod(lambda text: 10 * len(text))
-
-    def test_art_sits_centred_above_the_title(self):
-        layout = share.card_layout(True)
-        left, top, side, _ = layout["art"]
-        self.assertEqual(share.CARD_SIZE, 2 * left + side)
-        self.assertEqual(top + side + share.ART_GAP, layout["title_top"])
-        self.assertEqual(share.CARD_SIZE - 2 * share.MARGIN, layout["width"])
-        plain = share.card_layout(False)
-        self.assertIsNone(plain["art"])
-        self.assertEqual(share.ART_TOP, plain["title_top"])
-
-    def test_text_never_runs_into_the_footer(self):
-        for top in (90, 650, 900, 960):
-            lines = share.lines_that_fit(top, 80)
-            self.assertLessEqual(lines, share.MAX_LINES)
-            if lines:
-                self.assertLessEqual(top + lines * 80, share.FOOTER_TOP - share.FOOTER_GAP)
-        self.assertEqual(0, share.lines_that_fit(960, 80))
-        self.assertEqual(share.MAX_LINES, share.lines_that_fit(90, 50))
-        self.assertEqual(0, share.lines_that_fit(100, 0))
-
-    def test_wrapping_keeps_words_whole_and_marks_a_cut(self):
-        self.assertEqual(["one two", "three"], share.wrap("one two three", 70, self.measure, 4))
-        self.assertEqual(["abcde", "fghij", "k"], share.wrap("abcdefghijk", 50, self.measure, 4))
-        self.assertEqual(["first", "second"], share.wrap("first\nsecond", 200, self.measure, 4))
-        cut = share.wrap("a b c d e f", 30, self.measure, 2)
-        self.assertEqual(2, len(cut))
-        self.assertTrue(cut[-1].endswith(share.ELLIPSIS))
-        self.assertLessEqual(self.measure(cut[-1]), 30)
-        self.assertEqual([], share.wrap("anything", 100, self.measure, 0))
-        self.assertEqual([], share.wrap("", 100, self.measure, 4))
 
 
 def translated_literals(path):
@@ -241,7 +279,7 @@ def translated_literals(path):
 class TranslationTests(unittest.TestCase):
     def test_every_new_label_has_a_spanish_translation(self):
         wanted = set()
-        for name in ("inbox_ui", "share_ui", "share"):
+        for name in ("inbox_ui", "share_ui", "share", "inbox", "sharing"):
             wanted.update(translated_literals(ADDON / (name + ".py")))
         for group in inbox.QUICK.values():
             wanted.update(group)
@@ -275,19 +313,20 @@ class CelebrationHookTests(unittest.TestCase):
         self.api.rank.return_value = {"order": ["cerro", "hill"], "change": {"title": "Crown", "body": "You passed Hill."}}
         self.addon.poll()
         win = offer.call_args.args[2]
-        self.assertEqual({"title": "Crown", "body": "You passed Hill.", "notification": None, "place": 1}, win)
+        self.assertEqual({"title": "Crown", "body": "You passed Hill.", "notification": None, "place": 1, "win": None}, win)
 
     def test_only_the_newest_own_win_is_offered(self):
         offer = self.offered()
         now = int(time.time())
         self.inbox[:] = [
             {"id": 6, "title": "Level 5!", "body": "a", "created_at": now, "kind": "celebration", "sender": ""},
-            {"id": 7, "title": "Recap", "body": "b", "created_at": now, "kind": "reminder_weekly_recap", "sender": ""},
+            {"id": 7, "title": "Recap", "body": "b", "created_at": now, "kind": "reminder_weekly_recap", "sender": "", "win": 21},
             {"id": 8, "title": "Hill shared a win", "body": "c", "created_at": now, "kind": "share", "sender": "hill"},
         ]
         self.addon.poll()
         offer.assert_called_once()
         self.assertEqual(7, offer.call_args.args[2]["notification"])
+        self.assertEqual(21, offer.call_args.args[2]["win"])
 
     def test_nothing_pops_up_with_celebrations_off_or_on_a_quiet_poll(self):
         offer = self.offered(celebrations=False)

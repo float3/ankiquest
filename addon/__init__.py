@@ -12,7 +12,7 @@ from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
 from . import board, home, notify, ui, updates, web
-from . import inbox_ui, share, share_ui
+from . import inbox_ui, share, share_ui, sharing
 from .inbox import shareable
 from .language import tr
 from .client import (
@@ -68,6 +68,13 @@ def save_config(values):
     current = config()
     current.update(values)
     mw.addonManager.writeConfig(__name__, current)
+
+
+def drop_config(keys):
+    """Removes settings an older version kept, once they live elsewhere."""
+    current = config()
+    if any(key in current for key in keys):
+        mw.addonManager.writeConfig(__name__, {key: value for key, value in current.items() if key not in keys})
 
 
 def client():
@@ -137,6 +144,7 @@ def refresh(show_feedback, resync=False):
         except Exception as e:
             print("ankiquest:", e)
             return
+        keep_goal(profile)
         message = notify.feedback(profile, show_feedback)
         if message:
             tooltip(message[0], period=3500 if message[1] else 1800)
@@ -150,6 +158,13 @@ def refresh(show_feedback, resync=False):
             refresh(True)
 
     mw.taskman.run_in_background(work, done, uses_collection=True)
+
+
+def keep_goal(answer):
+    """An upload answers with the profile; its goal progress is fresher than the last poll's."""
+    fresh = (answer or {}).get("profile") if isinstance(answer, dict) else None
+    if isinstance(state["profile"], dict) and isinstance(fresh, dict) and isinstance(fresh.get("goal"), dict):
+        state["profile"]["goal"] = fresh["goal"]
 
 
 def refresh_shared_decks():
@@ -355,12 +370,13 @@ def open_account():
     refresh(False, resync=True)
     poll(quiet=True)
     tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
+    home.sync_goal(prompt=True)
 
 
 def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
-        extra=lambda dialog, layout: preferences.section(dialog, layout, mw, client()),
+        extra=settings_sections, on_goal=home.open_goal_dialog,
     )
     if values is None:
         return
@@ -372,7 +388,20 @@ def open_settings():
     state["companion"], state["companion_account"] = "aki", None
     refresh_shared_decks()
     poll(quiet=True)
+    home.sync_goal()
     tooltip(tr("ankiquest settings saved."))
+
+
+def settings_sections(dialog, layout):
+    """The server-side settings below the local ones; answers what to run once they are saved."""
+    api = client()
+    finishes = [found for found in (
+        preferences.section(dialog, layout, mw, api),
+        sharing.section(layout, mw, api),
+    ) if found]
+    if not finishes:
+        return None
+    return lambda: [finish() for finish in finishes]
 
 
 def test_connection(values):

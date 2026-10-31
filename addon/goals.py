@@ -1,10 +1,12 @@
-"""Today's two targets, ported from the phone app's daily goal.
+"""Today's two targets: the streak minimum and the daily goal the server keeps.
 
 - the streak minimum: the review minutes the server needs for today to count toward the
   streak (`today.streak_minutes`; 0 means any review counts), and
-- the daily goal: by default the cards due today plus a share of the overdue backlog, so a
-  backlog shrinks a little every day. Players can pick a fixed number of cards or minutes,
-  or turn the goal off.
+- the daily goal (`/api/goal`): a number of cards or minutes, which the server judges itself,
+  or the backlog plan, which only the collection can work out: today's due cards plus enough of
+  the overdue backlog that it is gone `value` days after the plan started.
+
+Plain Python, so the tests load it without Anki; callers hand in the collection and the client.
 """
 
 import math
@@ -12,26 +14,34 @@ from collections import namedtuple
 
 OFF, BACKLOG, CARDS, MINUTES = "off", "backlog", "cards", "minutes"
 MODES = (BACKLOG, CARDS, MINUTES, OFF)
-BACKLOG_PERCENTS = (5, 10, 20, 34, 100)
+DEFAULTS = {BACKLOG: 30, CARDS: 100, MINUTES: 20}
+RANGES = {BACKLOG: (1, 365), CARDS: (1, 5000), MINUTES: (1, 600)}
+PRESET_DAYS = (7, 14, 30, 60)
+DEFAULT_SECONDS_PER_CARD = 8
+FORECAST_DAYS = 7
+ANSWER_WINDOW_DAYS = 30
 
-DEFAULT_MODE = BACKLOG
-DEFAULT_BACKLOG_PERCENT = 10
-DEFAULT_CARDS = 100
-DEFAULT_MINUTES = 20
+LEGACY_KEYS = ("goal_mode", "goal_backlog_percent", "goal_cards", "goal_minutes")
+LEGACY_DEFAULT = (BACKLOG, 10)
+PERCENT_DAYS = {5: 60, 10: 30, 20: 14, 34: 7, 100: 1}
 
 MINIMUM, GOAL, BOTH = "minimum", "goal", "both"
 
 Load = namedtuple("Load", "day studied_cards minutes due_today backlog")
-Settings = namedtuple("Settings", "mode backlog_percent cards minutes")
-Goal = namedtuple("Goal", "target backlog backlog_share")
+Plan = namedtuple("Plan", "mode value since chosen")
+Goal = namedtuple("Goal", "target backlog extra days_left")
+Forecast = namedtuple("Forecast", "due backlog daily_due seconds_per_card")
+Projection = namedtuple("Projection", "cards seconds cleared_in")
 
 
-class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode backlog_percent goal")):
-    """Today's targets and progress. `goal` is None when the daily goal is off."""
+class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode goal served reached")):
+    """Today's targets and progress. `goal` is None when the daily goal is off; `served` is the
+    server's own count for a cards or minutes goal, `reached` whether it says the goal is met."""
 
     @property
     def progress(self):
-        return self.minutes if self.mode == MINUTES else self.studied_cards
+        local = self.minutes if self.mode == MINUTES else self.studied_cards
+        return local if self.served is None else max(local, self.served)
 
     @property
     def minimum_done(self):
@@ -40,7 +50,9 @@ class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode
 
     @property
     def goal_done(self):
-        return self.goal is not None and self.progress > 0 and self.progress >= self.goal.target
+        if self.goal is None:
+            return False
+        return bool(self.reached) or (self.progress > 0 and self.progress >= self.goal.target)
 
 
 def _int(value, default):
@@ -50,64 +62,129 @@ def _int(value, default):
         return default
 
 
-def settings(config):
-    """The goal settings from the add-on config, with the phone app's defaults."""
-    mode = config.get("goal_mode", DEFAULT_MODE)
-    return Settings(
-        mode if mode in MODES else DEFAULT_MODE,
-        _int(config.get("goal_backlog_percent"), DEFAULT_BACKLOG_PERCENT),
-        _int(config.get("goal_cards"), DEFAULT_CARDS),
-        _int(config.get("goal_minutes"), DEFAULT_MINUTES),
-    )
-
-
-def signature(chosen):
-    return "%s:%d:%d:%d" % tuple(chosen)
-
-
-def backlog_share(backlog, percent):
-    """Cards from a backlog to work off today: at least one while any is left."""
-    if backlog <= 0 or percent <= 0:
-        return 0
-    return min(backlog, max(1, math.ceil(backlog * min(percent, 100) / 100)))
-
-
-def goal(load, chosen):
-    """The goal for `load` under `chosen` settings; cards already studied today stay part of it."""
-    if chosen.mode == OFF:
+def clamp(mode, value):
+    """`value` within `mode`'s range, or the mode's default when it is missing."""
+    if mode not in RANGES:
         return None
-    if chosen.mode == CARDS:
-        return Goal(max(1, chosen.cards), 0, 0)
-    if chosen.mode == MINUTES:
-        return Goal(max(1, chosen.minutes), 0, 0)
-    share = backlog_share(load.backlog, chosen.backlog_percent)
-    return Goal(load.studied_cards + load.due_today + share, load.backlog, share)
+    low, high = RANGES[mode]
+    return max(low, min(high, _int(value, DEFAULTS[mode])))
 
 
-def fixed_goal(load, chosen, stored):
+def default_plan(today):
+    return Plan(BACKLOG, DEFAULTS[BACKLOG], today, False)
+
+
+def plan(answer, today, chosen=None):
+    """A `/api/goal` answer (or a profile's `goal`) as a Plan; the default plan when it is unusable."""
+    if not isinstance(answer, dict) or answer.get("mode") not in MODES:
+        return default_plan(today)
+    mode = answer["mode"]
+    value = clamp(mode, answer.get("value")) if mode != OFF else _int(answer.get("value"), 0) or None
+    since = _int(answer.get("since"), today)
+    picked = answer.get("chosen", chosen)
+    return Plan(mode, value, since, bool(picked))
+
+
+def plan_record(found, account):
+    return {"account": list(account), "mode": found.mode, "value": found.value, "since": found.since, "chosen": found.chosen}
+
+
+def remembered_plan(answer, stored, account, today):
+    """The server's goal for `account`, kept so it is known offline and between polls.
+
+    `answer` is a `/api/goal` answer or a profile's `goal`, which leaves out `chosen`. Returns the
+    plan and what to store; another account's goal is never assumed."""
+    stored = stored if isinstance(stored, dict) and stored.get("account") == list(account) else None
+    if isinstance(answer, dict) and answer.get("mode") in MODES:
+        found = plan(answer, today, stored.get("chosen", False) if stored else False)
+        return found, plan_record(found, account)
+    if stored:
+        return plan(stored, today), stored
+    return default_plan(today), None
+
+
+def days_left(found, today):
+    return found.value - (today - found.since)
+
+
+def backlog_extra(backlog, left):
+    """Cards from the backlog to clear today so that it is gone when the days run out."""
+    if backlog <= 0:
+        return 0
+    return max(1, math.ceil(backlog / max(1, left)))
+
+
+def goal(load, found, today):
+    """Today's goal under `found`, and whether the backlog plan ran out and starts again.
+    Cards already studied today stay part of a backlog goal."""
+    if found.mode == OFF:
+        return None, False
+    if found.mode in (CARDS, MINUTES):
+        return Goal(max(1, found.value), 0, 0, None), False
+    left = days_left(found, today)
+    restart = left < 1
+    if restart:
+        left = found.value
+    extra = backlog_extra(load.backlog, left)
+    return Goal(load.studied_cards + load.due_today + extra, load.backlog, extra, left), restart
+
+
+def signature(found):
+    return "%s:%s" % (found.mode, found.value)
+
+
+def fixed_goal(load, found, today, stored):
     """Today's goal, fixed when first worked out so studying never moves it.
 
-    Returns the goal and what to store for the rest of the day.
-    """
+    Returns the goal, what to store for the rest of the day, and whether the plan must restart."""
     stored = stored if isinstance(stored, dict) else {}
-    if stored.get("day") == load.day and stored.get("settings") == signature(chosen):
+    if stored.get("day") == load.day and stored.get("plan") == signature(found):
         target = stored.get("target")
         if target is None:
-            return None, stored
-        return Goal(target, stored.get("backlog", 0), stored.get("share", 0)), stored
-    fresh = goal(load, chosen)
-    record = {"day": load.day, "settings": signature(chosen)}
+            return None, stored, False
+        return Goal(target, stored.get("backlog", 0), stored.get("extra", 0), stored.get("days_left")), stored, False
+    fresh, restart = goal(load, found, today)
+    record = {"day": load.day, "plan": signature(found)}
     if fresh is not None:
-        record.update(target=fresh.target, backlog=fresh.backlog, share=fresh.backlog_share)
-    return fresh, record
+        record.update(target=fresh.target, backlog=fresh.backlog, extra=fresh.extra, days_left=fresh.days_left)
+    return fresh, record, restart
 
 
-def status(load, chosen, stored, streak_minutes):
-    """Today's status and the record that keeps its goal fixed."""
-    fixed, record = fixed_goal(load, chosen, stored)
+def served(profile, found, today):
+    """The server's progress and verdict for today's goal; (None, False) when the profile
+    describes another goal or another day."""
+    view = (profile or {}).get("goal")
+    if not isinstance(view, dict) or view.get("mode") != found.mode:
+        return None, False
+    if view.get("day") is not None and _int(view.get("day"), None) != today:
+        return None, False
+    progress = view.get("progress")
+    return (_int(progress, None) if progress is not None else None), bool(view.get("reached"))
+
+
+def status(load, found, today, stored, streak_minutes, profile=None):
+    """Today's status, the record that keeps its goal fixed and whether the plan must restart."""
+    fixed, record, restart = fixed_goal(load, found, today, stored)
+    progress, reached = served(profile, found, today)
     return Status(
-        load.day, load.minutes, streak_minutes, load.studied_cards, chosen.mode, chosen.backlog_percent, fixed,
-    ), record
+        load.day, load.minutes, streak_minutes, load.studied_cards, found.mode, fixed, progress, reached,
+    ), record, restart
+
+
+def legacy_goal(config):
+    """A goal picked in an older add-on's settings, as a `PUT /api/goal` body; None when there is
+    none, or it was left at the old default."""
+    mode = config.get("goal_mode")
+    if mode not in MODES:
+        return None
+    percent = _int(config.get("goal_backlog_percent"), LEGACY_DEFAULT[1])
+    if mode == BACKLOG and percent == LEGACY_DEFAULT[1]:
+        return None
+    if mode == BACKLOG:
+        return {"mode": BACKLOG, "value": PERCENT_DAYS.get(percent, DEFAULTS[BACKLOG])}
+    if mode == OFF:
+        return {"mode": OFF}
+    return {"mode": mode, "value": clamp(mode, config.get("goal_" + mode))}
 
 
 def remembered_streak_minutes(profile, stored, account):
@@ -154,6 +231,42 @@ def claim(current, stored):
     }
 
 
+def to_report(current, account, server_day, stored):
+    """A reached backlog goal the server has not been told about yet; it judges the others itself."""
+    if current.mode != BACKLOG or not current.goal_done or current.reached:
+        return False
+    stored = stored if isinstance(stored, dict) else {}
+    return stored.get("account") != list(account) or stored.get("day") != server_day
+
+
+def clear_days(backlog, cards, daily_due):
+    """Days until the backlog is gone at `cards` a day: 0 with nothing overdue, None when it never shrinks."""
+    if backlog <= 0:
+        return 0
+    if cards <= daily_due:
+        return None
+    return math.ceil(backlog / (cards - daily_due))
+
+
+def projection(mode, value, forecast):
+    """What a choice means today and for the backlog, as the goal dialog shows it; None for no goal."""
+    pace = forecast.seconds_per_card
+    if mode == BACKLOG:
+        cards = forecast.due + backlog_extra(forecast.backlog, value)
+        return Projection(cards, cards * pace, value if forecast.backlog > 0 else 0)
+    if mode == CARDS:
+        return Projection(value, value * pace, clear_days(forecast.backlog, value, forecast.daily_due))
+    if mode == MINUTES:
+        cards = int(value * 60 // pace)
+        return Projection(cards, value * 60, clear_days(forecast.backlog, cards, forecast.daily_due))
+    return None
+
+
+def shrinking_pace(forecast):
+    """The smallest daily goal that makes the backlog shrink; with none, what keeps it at zero."""
+    return forecast.daily_due + 1 if forecast.backlog > 0 else forecast.daily_due
+
+
 STUDIED_SQL = (
     "select count(distinct cid), coalesce(sum(time), 0) from revlog "
     "where id >= ? and ease > 0 and type < 4"
@@ -163,6 +276,11 @@ REVIEWS_SQL = (
     "(select case when odid != 0 then odue else due end as day from cards where queue = 2)"
 )
 LEARNING_SQL = "select count() from cards where (queue in (1, 4) and due < ?) or (queue = 3 and due <= ?)"
+FORECAST_SQL = (
+    "select count() from (select case when odid != 0 then odue else due end as day from cards "
+    "where type = 2 and queue = 2) where day between ? and ?"
+)
+ANSWER_SQL = "select avg(time) from revlog where id >= ? and ease > 0 and type < 4 and time > 0"
 
 
 def load(col, tree=None):
@@ -177,6 +295,52 @@ def load(col, tree=None):
     return Load(today, studied or 0, int(time_ms or 0) // 60_000, (due_reviews or 0) + (learning or 0) + new_cards, backlog or 0)
 
 
+def daily_due(col):
+    """The average number of review cards due per day over the next week, from the cards table.
+
+    Review cards (type and queue 2) keep their due date as an Anki day number, the same count
+    as `col.sched.today`; cards in filtered decks keep it in `odue`. Days 1 to 7 after today
+    are counted, so the backlog, which is due today or earlier, is left out."""
+    today = col.sched.today
+    total = col.db.scalar(FORECAST_SQL, today + 1, today + FORECAST_DAYS) or 0
+    return int(round(total / FORECAST_DAYS))
+
+
+def seconds_per_card(col):
+    """The average answer time over the last 30 days (revlog keeps it in milliseconds), or 8 s."""
+    since = (col.sched.day_cutoff - (ANSWER_WINDOW_DAYS + 1) * 86_400) * 1000
+    average = col.db.scalar(ANSWER_SQL, since)
+    return round(average / 1000, 1) if average and average >= 1000 else DEFAULT_SECONDS_PER_CARD
+
+
+def forecast(col, tree=None):
+    """Everything the goal dialog's estimates need. Call where the collection may be read."""
+    today = load(col, tree)
+    return Forecast(today.due_today, today.backlog, daily_due(col), seconds_per_card(col))
+
+
+def fetch(api):
+    return api._request("/api/goal/" + api.user)
+
+
+def put(api, mode, value=None, restart=False):
+    """Saves a goal; the server answers with it as saved."""
+    body = {"mode": mode}
+    if mode != OFF and value is not None:
+        body["value"] = int(value)
+    if restart:
+        body["restart"] = True
+    return api._request("/api/goal/" + api.user, body, method="PUT")
+
+
+def report_reached(api, day):
+    """Tells the server today's backlog goal is reached. Its answer is `204 No Content`."""
+    try:
+        api._request("/api/goal/%s/reached" % api.user, {"day": int(day)})
+    except ValueError:
+        pass
+
+
 def progress_text(current, translate=lambda value: value):
     """Progress toward the daily goal, like "34 of 50 cards" or "12 of 20 minutes"."""
     if current.mode == MINUTES:
@@ -184,6 +348,20 @@ def progress_text(current, translate=lambda value: value):
     else:
         template = translate("%d of %d cards")
     return template % (min(current.progress, current.goal.target), current.goal.target)
+
+
+def backlog_text(current, translate=lambda value: value):
+    """What today's backlog goal is made of; None when nothing is overdue."""
+    fixed = current.goal
+    if current.mode != BACKLOG or fixed is None or not fixed.backlog:
+        return None
+    left = fixed.days_left or 1
+    template = translate(
+        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d day."
+        if left == 1 else
+        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d days."
+    )
+    return template % (fixed.extra, fixed.backlog, left)
 
 
 def minimum_text(current, translate=lambda value: value):
@@ -209,3 +387,39 @@ def celebration_text(earned, current, translate=lambda value: value):
     if earned == GOAL:
         return translate("You reached today’s goal: %s.") % progress_text(current, translate)
     return translate("%s And you reached today’s goal: %s.") % (minimum, progress_text(current, translate))
+
+
+def time_text(seconds, translate=lambda value: value):
+    minutes = int(round(seconds / 60))
+    if minutes < 1:
+        return translate("Time today: less than a minute")
+    return (translate("Time today: about %d minute") if minutes == 1 else translate("Time today: about %d minutes")) % minutes
+
+
+def cleared_text(days, translate=lambda value: value):
+    if days == 0:
+        return translate("Nothing overdue")
+    if days is None:
+        return translate("At this pace your backlog is never cleared.")
+    return (translate("Backlog cleared in %d day") if days == 1 else translate("Backlog cleared in %d days")) % days
+
+
+def pace_text(forecast, translate=lambda value: value):
+    if forecast.backlog > 0:
+        return translate("To shrink your backlog, study at least %d cards a day.") % shrinking_pace(forecast)
+    return translate("Nothing overdue. About %d cards a day keeps it that way.") % shrinking_pace(forecast)
+
+
+def summary(mode, value, forecast, translate=lambda value: value):
+    """The goal dialog's estimate lines for a choice."""
+    if forecast is None:
+        return []
+    found = projection(mode, value, forecast)
+    if found is None:
+        return [translate("Without a daily goal, the Today panel only follows your streak."), pace_text(forecast, translate)]
+    return [
+        translate("Cards today: about %d") % found.cards,
+        time_text(found.seconds, translate),
+        cleared_text(found.cleared_in, translate),
+        pace_text(forecast, translate),
+    ]

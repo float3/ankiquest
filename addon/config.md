@@ -19,13 +19,13 @@ when a card you forgot at least four times finally earns an interval of three we
 
 to share daily deck completions, open **Tools → ankiquest deck notifications…**, tick the decks you want to share and the people who should hear about them. ticking a deck ticks its subdecks. sharing is off by default. recipients receive at most one completion message per deck per Anki day; later learning steps still count as unfinished work.
 
-**Tools → ankiquest inbox…** (Ctrl+Shift+M) lists your recent messages in a window: reply with a quick pick or your own words, mark them read, open them on the website, or share your own wins. when a poll announces a win of yours (a celebration, a finished challenge, a weekly recap or a climb into the top three) and celebrations are on, a small window offers to share it with your friends or as a picture with an invitation to your server.
+**Tools → ankiquest inbox…** (Ctrl+Shift+M) lists your recent messages in a window: reply with a quick pick or your own words, mark them read, open them on the website, share your own wins, and cheer a friend's shared win with 🎉; their card picture shows in the row. when a poll announces a win of yours (a celebration, a finished challenge, a weekly recap or a climb into the top three) and celebrations are on, a small window offers to share it with your friends, or as the server's card picture with a link and an invitation. the settings window says, for each kind of win, whether only you see it, you are asked, or friends are told automatically, and how many automatic shares each friend gets per day.
 
 with a server set, the block under the deck list is a Today panel: your companion's mood, streak and level, the next deck with a Study button, today's streak minimum and daily goal, the daily quests, a top-5 leaderboard for the period you pick (your own row is always there), and links to Today, History, Reminders and the website's settings.
 
-- `goal_mode`: `backlog` (cards due today plus a share of the overdue backlog), `cards`, `minutes`, or `off`
-- `goal_backlog_percent`: the share of the backlog to work off each day (5, 10, 20, 34 or 100)
-- `goal_cards`, `goal_minutes`: the daily goal for the `cards` and `minutes` modes
+the daily goal lives on the server, so every device agrees. pick it with **Daily goal…** in the settings window or **Change goal** on the panel: clear your overdue backlog in a number of days (on top of what is due), a number of cards or minutes a day, or no goal. the dialog estimates each choice from your own collection: cards and time today, and when the backlog would be gone. it opens once by itself while you have not picked a goal. a goal from an older version of the add-on moves to the server the first time.
+
+- `goal_setup_shown`: the accounts the goal dialog already opened for by itself
 - `deck_status`: mark decks in the deck list as done today, learning later today, or ready
 - `session_summary`: show a recap with your reviews, time and cards left when you leave a study session
 - `goal_celebrations`: once a day, celebrate when today counts for your streak and when you reach your daily goal; that popup replaces the recap for that session
