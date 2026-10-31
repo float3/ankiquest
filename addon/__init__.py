@@ -7,10 +7,12 @@ from pathlib import Path
 import anki.lang
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction
+from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
 from . import board, notify, ui, updates, web
+from . import inbox_ui, share, share_ui
+from .inbox import shareable
 from .language import tr
 from .client import (
     MAX_PENDING,
@@ -196,6 +198,7 @@ def poll(quiet=False):
 def announce(rank, profile, inbox, quiet):
     settings = config()
     now_ms = int(time.time() * 1000)
+    previous = mw.pm.profile.get(ORDER_KEY) or []
     mw.pm.profile[ORDER_KEY] = rank.get("order") or []
     fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
     mw.pm.profile[INBOX_KEY] = cursor
@@ -217,8 +220,9 @@ def announce(rank, profile, inbox, quiet):
     for entry in fresh:
         text = notify.notice(entry)
         if notify.answerable(entry):
-            text += "<br><i>Tools → ankiquest inbox to reply</i>"
+            text += "<br><i>%s</i>" % html.escape(tr("Tools → ankiquest inbox… to reply"))
         tooltip(text, period=6000)
+    celebrate_latest(previous, rank, fresh, settings)
 
 
 def failed(template, error):
@@ -290,7 +294,7 @@ def open_inbox():
     mw.pm.profile[INBOX_KEY] = max(
         [entry["id"] for entry in state["inbox"]] + [mw.pm.profile.get(INBOX_KEY, 0)]
     )
-    open_page(board.PAGES["inbox"])
+    open_native_inbox()
     redraw()
 
 
@@ -561,13 +565,14 @@ def add_action(title, handler):
     action = QAction(title, mw)
     action.triggered.connect(handler)
     mw.form.menuTools.addAction(action)
+    return action
 
 
 add_action(tr("ankiquest: sign in or create account…"), open_account)
 add_action(tr("ankiquest settings…"), open_settings)
 add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
-add_action(tr("ankiquest inbox…"), open_inbox)
+add_action(tr("ankiquest inbox…"), open_inbox).setShortcut(QKeySequence(inbox_ui.SHORTCUT))
 add_action(tr("ankiquest on the web…"), open_website)
 add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
 
@@ -579,3 +584,52 @@ gui_hooks.sync_did_finish.append(on_sync)
 gui_hooks.profile_did_open.append(on_profile_open)
 gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
+
+
+def current_companion():
+    api = client()
+    return state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
+
+
+def open_native_inbox():
+    api = client()
+    if not api.configured:
+        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        return
+    inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, open_page, on_replied)
+
+
+def on_replied(notification):
+    for entry in state["inbox"]:
+        if entry.get("id") == notification:
+            entry["replied"] = True
+    redraw()
+
+
+def celebrate_latest(previous, rank, fresh, settings):
+    """The newest win this poll announced, offered for sharing: an own celebration, finished
+    challenge or weekly recap, or a climb into the top three."""
+    api = client()
+    wins = [share.win_from_entry(entry) for entry in fresh if shareable(entry)]
+    if settings.get("notify_rank", True) and rank.get("change"):
+        place = share.podium(previous, rank.get("order"), api.name)
+        if place:
+            wins.append(share.win_from_place(rank["change"], place))
+    if wins:
+        celebrate(api, wins[-1])
+
+
+def celebrate(api, win):
+    """Shows the share window only to players who keep celebrations on."""
+
+    def done(future):
+        try:
+            celebrations = future.result().get("celebrations")
+        except Exception as e:
+            print("ankiquest celebrations:", e)
+            return
+        if celebrations is False or not share_ui.same_account(api, client()):
+            return
+        share_ui.offer(mw, api, win, current_companion(), client, mw.taskman.run_in_background)
+
+    mw.taskman.run_in_background(lambda: api.deck_settings(), done)

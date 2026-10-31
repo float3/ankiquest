@@ -61,6 +61,34 @@ SPANISH = {
     "Signed in as %s.": "Sesión iniciada como %s.",
 }
 
+SPANISH.update({
+    "Tools → ankiquest inbox… to reply": "Herramientas → Bandeja de entrada de ankiquest… para responder",
+    "ankiquest inbox": "Bandeja de entrada de ankiquest",
+    "From %s": "De %s", "Unread": "Sin leer", "Reply sent": "Respuesta enviada", "In reply to: %s": "En respuesta a: %s",
+    "Reply": "Responder", "Share": "Compartir", "Open on the website": "Abrir en la web",
+    "Mark read": "Marcar como leído", "Mark all read": "Marcar todo como leído", "Refresh": "Actualizar",
+    "Close": "Cerrar", "Loading…": "Cargando…", "Nothing in your inbox yet.": "Tu bandeja de entrada está vacía.",
+    "Could not load your inbox (%s).": "No se pudo cargar tu bandeja de entrada (%s).",
+    "Could not mark everything read (%s).": "No se pudo marcar todo como leído (%s).",
+    "This inbox belongs to an AnkiQuest account that is no longer signed in.": "Esta bandeja de entrada es de una cuenta de AnkiQuest que ya no tiene la sesión iniciada.",
+    "Say something nice": "Di algo bonito", "Send": "Enviar", "Sending…": "Enviando…",
+    "Could not send “%s” (%s).": "No se pudo enviar «%s» (%s).", "Sent to %s: %s": "Respuesta a %s: %s",
+    "Good job!": "¡Buen trabajo!", "Nice one 🔥": "¡Genial! 🔥", "Keep it up!": "¡Sigue así!",
+    "Thanks!": "¡Gracias!", "You made my day!": "¡Me alegraste el día!", "I appreciate it!": "¡Te lo agradezco!",
+    "On it!": "¡Voy!", "Starting now": "Empiezo ahora", "I will study later": "Estudiaré más tarde",
+    "Share this win": "Compartir este logro", "Share with friends": "Compartir con mis amigos",
+    "Copy as image": "Copiar como imagen", "Save image…": "Guardar imagen…", "Sharing…": "Compartiendo…",
+    "Couldn't share it (%s).": "No se pudo compartir (%s).",
+    "This win belongs to an AnkiQuest account that is no longer signed in.": "Este logro es de una cuenta de AnkiQuest que ya no tiene la sesión iniciada.",
+    "Nobody new got it: your friends already have it, or you have no friends in AnkiQuest yet.": "Nadie nuevo lo recibió: tus amigos ya lo tienen, o todavía no tienes amigos en AnkiQuest.",
+    "Shared with %d friend": "Compartido con %d amigo", "Shared with %d friends": "Compartido con %d amigos",
+    "%s: %s\nStudy with me on AnkiQuest: %s": "%s: %s\nEstudia conmigo en AnkiQuest: %s",
+    "%s: %s\nI study with AnkiQuest.": "%s: %s\nEstudio con AnkiQuest.",
+    "The picture and an invitation are on the clipboard.": "La imagen y una invitación están en el portapapeles.",
+    "Could not save the picture.": "No se pudo guardar la imagen.",
+    "Picture saved. An invitation is on the clipboard.": "Imagen guardada. Hay una invitación en el portapapeles.",
+})
+
 
 def tr(source, language=None):
     if language is None:
