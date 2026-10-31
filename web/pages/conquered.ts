@@ -1,4 +1,5 @@
-export {};
+import {nativeAccount} from "../common";
+import {request} from "../http";
 
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 const esc = AnkiQuestSite.escape;
@@ -29,8 +30,8 @@ const pageUrl = () => location.origin + location.pathname;
 
 /** The browser session, or the account AnkiDroid hands a page it opened. */
 async function owner(): Promise<OwnerSession | null> {
-  const native = window.ankiquestSession;
-  if (native && native.user === user && typeof native.token === "string" && native.token.trim()) return {user, token: native.token.trim()};
+  const native = nativeAccount();
+  if (native?.user === user) return native;
   return AnkiQuestSite.member(user).catch(() => null);
 }
 
@@ -196,15 +197,7 @@ async function tell(data: Shared, session: OwnerSession, button: HTMLButtonEleme
   button.disabled = true;
   say(aqText("Telling your friends…"));
   try {
-    const response = await fetch(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/tell`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: AnkiQuestSite.ownerHeaders(session, {}),
-      body: "{}",
-    });
-    await AnkiQuestSite.checkAccess(response, {method: "POST"});
-    if (!response.ok) throw new Error(String(response.status));
-    const {told} = await response.json() as {told: number};
+    const {told} = await request<{told: number}>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/tell`, {session, json: {}});
     button.textContent = aqText("Friends told");
     say(told === 1 ? aqText("One friend will see it in their activity.") : aqText`${told} friends will see it in their activity.`);
   } catch (_) {
@@ -216,14 +209,7 @@ async function tell(data: Shared, session: OwnerSession, button: HTMLButtonEleme
 async function label(session: OwnerSession, value: string | null) {
   say(value === null ? aqText("Removing…") : aqText("Saving…"));
   try {
-    const response = await fetch(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/label`, {
-      method: value === null ? "DELETE" : "POST",
-      credentials: "same-origin",
-      headers: AnkiQuestSite.ownerHeaders(session, {}),
-      body: value === null ? undefined : JSON.stringify({label: value}),
-    });
-    await AnkiQuestSite.checkAccess(response, {method: "POST"});
-    if (!response.ok) throw new Error(String(response.status));
+    await request(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/label`, value === null ? {method: "DELETE", session} : {session, json: {label: value}});
     await load();
   } catch (_) {
     say(aqText("That did not save. Please try again."), true);
@@ -303,10 +289,7 @@ async function load() {
   }
   const session = await owner();
   try {
-    const data = await AnkiQuestSite.readJSON<Shared>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}`, {
-      credentials: "same-origin",
-      headers: AnkiQuestSite.ownerHeaders(session),
-    });
+    const data = await AnkiQuestSite.readJSON<Shared>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}`, {session});
     render(data, session);
   } catch (_) {
     app.innerHTML = aqHtml`<p class="notice error" role="alert">This card could not be found. It may be private, or the review behind it was undone.</p>`;

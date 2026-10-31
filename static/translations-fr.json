@@ -408,11 +408,11 @@
   "Notify selected people once per deck each Anki day, after you finish all scheduled cards, including learning cards due later today.": "Prévenez les personnes sélectionnées une fois par jeu chaque jour Anki, après avoir terminé toutes les cartes programmées, y compris les cartes d'apprentissage qui doivent être reçues plus tard aujourd'hui.",
   "Notify these people:": "Prévenez ces personnes :",
   "Nudge": "Coup de pouce",
-  "Nudge friends": "Des amis de puéril",
-  "Nudge me when a place, a personal best or a level is within reach": "Nudge moi quand un endroit, un meilleur personnel ou un niveau est à portée de main",
-  "Nudge sent!": "Nudge envoyé !",
-  "Nudge your friends": "Mangez vos amis",
-  "Nudged today": "Aujourd'hui.",
+  "Nudge friends": "Donner un coup de pouce à des amis",
+  "Nudge me when a place, a personal best or a level is within reach": "Donne-moi un coup de pouce quand une place, un record personnel ou un niveau est à portée",
+  "Nudge sent!": "Coup de pouce envoyé !",
+  "Nudge your friends": "Donne un coup de pouce à tes amis",
+  "Nudged today": "Coup de pouce envoyé aujourd’hui",
   "Nudges": "Coups de pouce",
   "Off": "Arrêt",
   "Old Friends": "Anciens amis",
@@ -1241,5 +1241,7 @@
   "{0} of {1} minutes today. A little more can start your next streak.": "{0} minutes sur {1} aujourd’hui. Encore un peu et ta prochaine série commence.",
   "{0} of {1} minutes today. Your {2}-day streak is still waiting.": "{0} minutes sur {1} aujourd’hui. Ta série de {2} jours t’attend.",
   "{0} of {1} minutes today": "{0} minutes sur {1} aujourd’hui",
-  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Ta série de {0} jours t’attend : {1} minutes sur {2} aujourd’hui."
+  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Ta série de {0} jours t’attend : {1} minutes sur {2} aujourd’hui.",
+  "Ends {0}": "Se termine le {0}",
+  "{0} new updates": "{0} nouveautés"
 }

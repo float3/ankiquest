@@ -16,7 +16,7 @@ const initial = () => ({
   companion:{companion:'aki'},
   freezes:{enabled:false,freezes:1,capacity:3},
   nudges:{receiving:true,automatic_receiving:false,friends:[{user:'bob',display:'Bob',muted_by_me:false,enabled:true,sent_today:false}]},
-  subscriptions:{enabled:true,unsubscribed_senders:[],sharing_senders:['bob'],senders:[{user:'bob',display:'Bob'}]},
+  subscriptions:{enabled:true,unsubscribed_senders:[],muted_senders:['carol'],sharing_senders:['bob'],senders:[{user:'bob',display:'Bob'}]},
   decks:{decks:[{id:'1',name:'Spanish',enabled:false,recipients:[]}],recipients:[{user:'bob',display:'Bob'}],nudges:false,celebrations:true},
   writes:[] as {pathname:string,body:Record<string,unknown>}[],
 });
@@ -114,7 +114,7 @@ async function noOverflow(page: Page,label: string){const size=await page.evalua
     await f.page.locator('#subscriptions-form [data-unsubscribe="bob"]').check();
     await f.page.locator('#subscriptions-form button[type="submit"]').click();
     await f.page.waitForFunction(()=>document.querySelector('#subscriptions-form .status')?.textContent.includes('Saved'));
-    assert.deepEqual(f.data.writes.at(-1)!.body.unsubscribed_senders,['bob']);
+    assert.deepEqual(f.data.writes.at(-1)!.body.unsubscribed_senders,['bob','carol'],'saving keeps earlier mutes as unsubscribes');
     await f.page.locator('#decks-form summary').click();
     await f.page.locator('[data-deck-enabled]').check();
     await f.page.locator('[data-deck-recipient="bob"]').check();

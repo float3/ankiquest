@@ -1,4 +1,6 @@
-export {};
+import {alertSenders} from "../deck-alerts";
+import {escape as esc, nativeAccount} from "../common";
+import {send} from "../http";
 
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
@@ -106,8 +108,6 @@ const app = document.getElementById("app")!;
 document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = location.pathname.replace(/\/+$/, "") === "/records" ? "records" : "leaderboard";
 document.querySelector<HTMLAnchorElement>("[data-community-link]")!.href = AnkiQuestSite.href("/community");
 document.querySelector(".skip")!.addEventListener("click", event => { event.preventDefault(); app.focus(); });
-const escapes: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-const esc = (s: unknown) => String(s).replace(/[&<>"]/g, c => escapes[c]);
 const num = (n: number) => n.toLocaleString(AnkiQuestI18n.language);
 const pct = (a: number, b: number) => b ? Math.min(100, Math.round(a / b * 100)) : 0;
 const dialogElement = (id: string) => document.getElementById(id) as HTMLDialogElement;
@@ -141,14 +141,12 @@ addEventListener("ankiquest-auth", () => {
   previousNativeSettings = identity;
 });
 function nativeSettingsToken(user: string) {
-  const session = window.ankiquestSession;
-  return session?.user === user && typeof session.token === "string" && session.token.trim()
-    ? session.token.trim() : "";
+  const session = nativeAccount();
+  return session?.user === user ? session.token : "";
 }
 function nativeSettingsIdentity() {
-  const session = window.ankiquestSession;
-  return typeof session?.user === "string" && session.user && typeof session.token === "string" && session.token.trim()
-    ? JSON.stringify([session.user, session.token.trim()]) : "";
+  const session = nativeAccount();
+  return session ? JSON.stringify([session.user, session.token]) : "";
 }
 function settingsToken(user: string) {
   return nativeSettingsToken(user) || settingsTokens.get(user) || "";
@@ -320,9 +318,7 @@ addEventListener("ankiquest:identity", () => { scopeCache = null; });
 addEventListener("ankiquest-auth", () => { scopeCache = null; });
 
 async function viewer(): Promise<OwnerSession | null> {
-  const native = window.ankiquestSession;
-  if (typeof native?.user === "string" && native.user && typeof native.token === "string" && native.token.trim()) return {user: native.user, token: native.token.trim()};
-  return AnkiQuestSite.member();
+  return nativeAccount() ?? AnkiQuestSite.member();
 }
 
 function scopeChoices(session: OwnerSession): Promise<ScopeChoice[]> {
@@ -696,16 +692,12 @@ function openDeckSharing(user: string, display: string) {
   };
   const request = async (body?: DeckUpdate): Promise<DeckSettings> => {
     const requestToken = token, requestSession = session;
-    const response = await fetch("/api/decks/" + encodeURIComponent(user), {
-      method: body ? "POST" : "GET",
-      headers: AnkiQuestSite.ownerHeaders(requestToken ? {user, token: requestToken} : requestSession, body),
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      cache: "no-store", signal: controller.signal,
+    const response = await send("/api/decks/" + encodeURIComponent(user), {
+      session: requestToken ? {user, token: requestToken} : requestSession, json: body, signal: controller.signal,
     });
     if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        if (!requestToken) await AnkiQuestSite.checkAccess(response);
         if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
         forgetSettingsToken(user, requestToken);
         const message = body === undefined
@@ -897,16 +889,12 @@ function openNotificationPreferences(user = "", display = "") {
     const loading = body === undefined;
     const requestUser = user, requestToken = token, requestSession = ownerSession, requestController = authController!;
     const active = () => current() && !requestController.signal.aborted && requestUser === user && requestToken === token && requestSession === ownerSession;
-    const response = await fetch("/api/deck-subscriptions/" + encodeURIComponent(requestUser), {
-      method: loading ? "GET" : "POST",
-      headers: AnkiQuestSite.ownerHeaders(requestToken ? {user:requestUser, token:requestToken} : requestSession, body),
-      ...(loading ? {} : { body: JSON.stringify(body) }),
-      cache: "no-store", signal: requestController.signal,
+    const response = await send("/api/deck-subscriptions/" + encodeURIComponent(requestUser), {
+      session: requestToken ? {user:requestUser, token:requestToken} : requestSession, json: body, signal: requestController.signal,
     });
     if (!active()) throw new DOMException(aqText("Settings changed."), "AbortError");
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        if (!requestToken) await AnkiQuestSite.checkAccess(response);
         if (!active()) throw new DOMException(aqText("Settings changed."), "AbortError");
         forgetSettingsToken(requestUser, requestToken);
         const message = loading
@@ -927,12 +915,7 @@ function openNotificationPreferences(user = "", display = "") {
   };
   const showSettings = (data: NotificationSettings) => {
     if (!current()) return;
-    const unsubscribed = new Set([...data.unsubscribed_senders, ...data.muted_senders]);
-    const relevant = new Set([...data.sharing_senders, ...unsubscribed]);
-    const people = new Map(data.senders.filter(person => relevant.has(person.user)).map(person => [person.user, person]));
-    // Keep subscriptions and previous mutes editable for former players too.
-    for (const sender of unsubscribed) if (!people.has(sender)) people.set(sender, { user: sender, display: sender });
-    const senders = [...people.values()].sort((a, b) => a.display.localeCompare(b.display) || a.user.localeCompare(b.user));
+    const {senders, unsubscribed} = alertSenders(data);
     dialog.querySelector("#notification-intro")!.textContent = `Deck completion alerts for ${fixedUser ? display || user : user}. These settings apply across your devices.`;
     content.innerHTML = aqHtml`<form id="notification-settings" data-notification-settings>
       <label class="receive-toggle" for="notification-enabled">
@@ -1046,10 +1029,9 @@ function openNotificationPreferences(user = "", display = "") {
   dialog.addEventListener("close", onClose);
   dialog.addEventListener("cancel", onCancel);
   dialog.showModal();
-  const native = window.ankiquestSession;
+  const native = nativeAccount();
   if (fixedUser) bindAccount(fixedUser);
-  // A native identity means `native.user` is a non-empty string.
-  else if (nativeSettingsIdentity()) bindAccount(native!.user as string);
+  else if (native) bindAccount(native.user);
   else AnkiQuestSite.member().then(identity => {
     if (!current() || playerEdited || nativeSettingsCleared || nativeSettingsIdentity()) return;
     if (identity) bindAccount(identity.user);
@@ -1092,16 +1074,12 @@ function openStreakFreezes(user: string, display: string) {
   };
   const request = async (body?: {enabled: boolean}): Promise<FreezeSettings> => {
     const requestToken = token, requestSession = session;
-    const response = await fetch("/api/streak-freezes/" + encodeURIComponent(user), {
-      method: body === undefined ? "GET" : "POST",
-      headers: AnkiQuestSite.ownerHeaders(requestToken ? {user, token: requestToken} : requestSession, body),
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      cache: "no-store", signal: controller.signal,
+    const response = await send("/api/streak-freezes/" + encodeURIComponent(user), {
+      session: requestToken ? {user, token: requestToken} : requestSession, json: body, signal: controller.signal,
     });
     if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
-        if (!requestToken) await AnkiQuestSite.checkAccess(response);
         if (controller.signal.aborted || requestToken !== token || requestSession !== session) throw new DOMException(aqText("Settings changed."), "AbortError");
         forgetSettingsToken(user, requestToken);
         const message = body === undefined
@@ -1212,8 +1190,7 @@ async function render() {
     ]);
     weekEnds = week?.ends_at ?? 0;
     if (user) {
-      const res = await fetch("/api/profile/" + encodeURIComponent(user), {cache: "no-store"});
-      await AnkiQuestSite.checkAccess(res);
+      const res = await send("/api/profile/" + encodeURIComponent(user), auth);
       if (res.ok) {
         const p: Profile = await res.json();
         if (!canRender()) return;
@@ -1222,8 +1199,7 @@ async function render() {
         try { localStorage.setItem("ankiquestPlayer", p.user); } catch (e) {}
         const access = await AnkiQuestSite.status();
         if (!canRender()) return;
-        const native = window.ankiquestSession;
-        const canEditAvatar = access?.member?.user === p.user || (native?.user === p.user && typeof native.token === "string" && !!native.token.trim());
+        const canEditAvatar = access?.member?.user === p.user || nativeAccount()?.user === p.user;
         app.innerHTML = view(p, rows, canEditAvatar);
         if (canEditAvatar) document.getElementById("manage-avatar")!.addEventListener("click", () => AnkiQuestAvatars!.open({user:p.user,display:p.display}));
         document.getElementById("manage-decks")!.addEventListener("click", () => openDeckSharing(p.user, p.display));
