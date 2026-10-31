@@ -43,7 +43,9 @@ The goal lives on the server so every client agrees.
 | `minutes` | review minutes today, `today.minutes >= value` | 20 | 1–600 |
 | `backlog` | percent of today's due cards, `value` percent | 100 | 1–100 |
 
-The default mode is `cards`, value 100.
+The default mode is `cards`, value 100. `value` may be left out and then takes the mode's default;
+`{ "mode": "off" }` keeps the last value, which `GET` still returns. `PUT` answers 200 with the saved
+goal; a value out of range or an unknown mode is 400.
 
 The server decides `cards` and `minutes` itself, when reviews are uploaded. Only the client knows
 due counts, so for `backlog` the client reports
@@ -63,15 +65,16 @@ reported reach.
 
 - `GET /api/sharing/{user}` answers `{ "policies": { "<kind>": "private"|"ask"|"auto", ... }, "daily_cap": 3 }`
   for every kind in the table.
-- `PUT /api/sharing/{user}` takes the same shape. Kinds left out keep their value; an unknown kind or
-  policy is 400.
+- `PUT /api/sharing/{user}` takes the same shape and answers 200 with the saved settings. Kinds left
+  out keep their value; an unknown kind or policy, or a cap outside 1–10, is 400.
 - `daily_cap` (1–10) limits how many automatic wins one player sends each friend per Anki day. Wins
   over the cap still appear in the player's own list and can be shared by hand.
 
 ## Wins
 
-Wins are stored per player. A row in `GET /api/wins/{user}?limit=50&before=<id>` (owner only, newest
-first) looks like this:
+Wins are stored per player. `GET /api/wins/{user}?limit=50&before=<id>` (owner only, `limit` 1–200)
+answers `{ "wins": [...] }`, newest first. Clients page with `before` set to the last id until a page
+comes back shorter than `limit`. A row looks like this:
 
 ```json
 {
@@ -88,13 +91,16 @@ first) looks like this:
 - `link` is `{ "url": "...", "image": "..." }` once a link exists.
 
 Celebration notifications in the inbox (`kind` `celebration`, `challenge_complete`,
-`reminder_weekly_recap`) gain `"win": 17` when they belong to a win. Clients share by win id.
+`reminder_weekly_recap`) gain `"win": 17` when they belong to a win. Clients share by win id. A
+grouped "N new unlocks" row stands for several wins and has none. Celebrations for the new moments
+carry the topics `goal` and `secured`.
 
 ## Sharing a win
 
 `POST /api/share/{user}` keeps its current bodies (`{notification}`, `{place}`) and adds:
 
-- `{ "win": 17, "to": "friends" }` sends the win to the circle. It answers `{ "recipients": n }`.
+- `{ "win": 17, "to": "friends" }` sends the win to the circle. It answers
+  `{ "recipients": n, "link": { "url": "...", "image": "..." } }`.
 - `{ "win": 17, "to": "link" }` answers
   `{ "url": "https://host/w/<token>", "image": "https://host/w/<token>.png", "text": "<invitation text>" }`.
   The link is created once and reused.
@@ -105,7 +111,9 @@ Friends receive a `share` row as today. It has the same `topic` and quoted title
 `"win": 17` and `"image": "https://host/w/<token>.png"`. Mutes and unsubscriptions are respected, and
 each win reaches each friend once.
 
-`DELETE /api/wins/{user}/{id}/link` revokes the link. The page and the image then answer 404.
+`{ "notification": id }` for a row that has a `win` shares that win to friends, so it is not sent twice.
+
+`DELETE /api/wins/{user}/{id}/link` revokes the link (204, or 404 for someone else's win). The page and the image then answer 404.
 
 ## Automatic sharing and digests
 
