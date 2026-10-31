@@ -122,6 +122,15 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(3, cursor)
         self.assertEqual(([], 3), notify.fresh_messages(inbox, cursor, now))
 
+    def test_server_words_cannot_inject_markup_into_tooltips(self):
+        entry = {"title": "<a href='https://evil.example'>win</a>", "body": "line one\n<img src=x>"}
+        self.assertEqual(
+            "&lt;a href=&#x27;https://evil.example&#x27;&gt;win&lt;/a&gt;<br>line one<br>&lt;img src=x&gt;",
+            notify.notice(entry),
+        )
+        told = {"feedback": {"headlines": ["<b>Level 5!</b>"], "status": "<i>+10 XP</i>"}}
+        self.assertEqual(("&lt;b&gt;Level 5!&lt;/b&gt;<br>&lt;i&gt;+10 XP&lt;/i&gt;", True), notify.feedback(told, False))
+
     def test_a_message_can_be_answered_until_it_has_been(self):
         self.assertTrue(notify.answerable({"sender": "cerro"}))
         self.assertFalse(notify.answerable({"sender": "cerro", "replied": True}))
@@ -180,7 +189,10 @@ class WebTests(unittest.TestCase):
     base = "https://anki.example.com"
 
     def test_only_the_servers_own_pages_are_signed_in(self):
-        for url in ("/", "/week", "/community#activity", "/#hill", "/community?period=week", "/conquered/hill/1789000000456"):
+        for url in (
+            "/", "/week", "/community#activity", "/#hill", "/community?period=week", "/conquered/hill/1789000000456",
+            "/today", "/history", "/settings", "/friends", "/privacy", "/join/abc123",
+        ):
             self.assertTrue(web.allowed(self.base, self.base + url), url)
         for url in (
             "https://evil.example.com/week",
@@ -192,6 +204,8 @@ class WebTests(unittest.TestCase):
             "https://anki.example.com/conquered/hill",
             "https://anki.example.com/conquered/hill/12x",
             "https://anki.example.com/conquered/hill/12/more",
+            "https://anki.example.com/join/",
+            "https://anki.example.com/join/abc/more",
         ):
             self.assertFalse(web.allowed(self.base, url), url)
 

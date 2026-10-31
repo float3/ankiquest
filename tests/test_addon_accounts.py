@@ -22,10 +22,12 @@ def load(name):
 
 class Server(BaseHTTPRequestHandler):
     received = []
+    headers = []
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Server.received.append((self.path, body))
+        Server.headers.append(dict(self.headers))
         if self.path == "/api/accounts/tokens" and body["password"] == "right password":
             self.answer(200, {"user": body["user"], "display": "Ana", "token": "device-token"})
         elif self.path == "/api/accounts/tokens":
@@ -70,12 +72,25 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(Server.received, [("/api/accounts/tokens", {"user": "ana", "password": "right password", "device": "Anki desktop (Linux)"})])
 
     def test_refusals_carry_the_status_and_the_servers_message(self):
-        with self.assertRaises(self.client.AccountError) as refused:
+        with self.assertRaises(self.client.ServerError) as refused:
             self.client.sign_in(self.base, "ana", "wrong", "Anki desktop")
         self.assertEqual((refused.exception.status, refused.exception.message), (401, "Username or password not recognized."))
-        with self.assertRaises(self.client.AccountError) as taken:
+        with self.assertRaises(self.client.ServerError) as taken:
             self.client.sign_up(self.base, "taken", "long enough pw", "", "Anki desktop")
         self.assertEqual(taken.exception.status, 409)
+
+    def test_player_requests_carry_the_token_language_and_the_servers_refusal(self):
+        api = self.client.Client(self.base, "ana", "device-token", "es")
+        with self.assertRaises(self.client.ServerError) as refused:
+            api._request("/api/accounts/tokens", {"user": "ana", "password": "wrong"})
+        self.assertEqual((refused.exception.status, str(refused.exception)), (401, "Username or password not recognized."))
+        headers = Server.headers[-1]
+        self.assertEqual((headers["Authorization"], headers["Accept-Language"]), ("Bearer device-token", "es"))
+
+    def test_a_refusal_without_words_still_names_its_status(self):
+        with self.assertRaises(self.client.ServerError) as missing:
+            self.client.request_json(self.base + "nowhere", {})
+        self.assertEqual((missing.exception.status, missing.exception.message, str(missing.exception)), (404, "", "HTTP Error 404"))
 
     def test_signing_up_sends_the_display_name_only_when_given(self):
         self.client.sign_up(self.base, "ana", "long enough pw", "", "Anki desktop")
