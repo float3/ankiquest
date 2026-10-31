@@ -3,10 +3,10 @@
 use crate::app::{App, mark_events_seen, now_ms};
 use crate::config::Config;
 use crate::game::{Clock, Profile};
-use crate::refresh_community;
 use crate::store::{Error, Store};
 use crate::{
-    admin, challenges, competition, freezes, game, i18n, notifications, privacy, reminders, social,
+    admin, challenges, competition, freezes, game, i18n, notifications, privacy, refresh_community,
+    reminders, social,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -395,12 +395,10 @@ pub(crate) fn spawn(app: Arc<App>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts;
     use crate::app::load_player;
-    use crate::freezes::FreezeUpdate;
-    use crate::freezes::set_freezes;
-    use crate::set_decks;
+    use crate::freezes::{FreezeUpdate, set_freezes};
     use crate::test_support::*;
+    use crate::{accounts, set_decks};
 
     fn queued_message(app: &App, user: &str) -> i64 {
         app.store

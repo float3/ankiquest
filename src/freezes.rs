@@ -1,20 +1,15 @@
 use crate::access::authorized;
-use crate::app::App;
-use crate::app::now_ms;
+use crate::app::{App, now_ms};
 use crate::game;
 use crate::game::{FreezePolicy, FreezePreference};
 use crate::store::{Error, Store};
 use crate::web_util::failed_for;
-use axum::Json;
-use axum::Router;
-use axum::extract::Path as UrlPath;
-use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::http::StatusCode;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -259,13 +254,8 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 mod tests {
     use crate::app::load_player;
     use crate::decks::tests::temporary_store;
-    use crate::freezes::FreezeUpdate;
-    use crate::freezes::get_freezes;
-    use crate::freezes::set_freezes;
-    use crate::study::Pending;
-    use crate::study::Upload;
-    use crate::study::preview;
-    use crate::study::upload;
+    use crate::freezes::{FreezeUpdate, get_freezes, set_freezes};
+    use crate::study::{Pending, Upload, preview, upload};
     use crate::test_support::*;
 
     #[test]

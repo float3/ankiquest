@@ -226,8 +226,7 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::set_decks;
-    use crate::study::Upload;
-    use crate::study::upload;
+    use crate::study::{Upload, upload};
     use crate::test_support::*;
 
     #[tokio::test]

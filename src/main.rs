@@ -861,14 +861,10 @@ fn router(app: Arc<App>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inbox::ReplyRequest;
-
-    use crate::study::upload;
-
     use crate::config::UserConfig;
     use crate::game::Week;
-    use crate::inbox::{get_notifications, reply};
-    use crate::study::profile;
+    use crate::inbox::{ReplyRequest, get_notifications, reply};
+    use crate::study::{profile, upload};
     use crate::test_support::*;
     use crate::worker::{sync_users, tick};
     use std::path::PathBuf;

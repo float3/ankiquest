@@ -1,8 +1,9 @@
 //! The server's JSON configuration and the checks it gets at startup.
 
+use crate::app::now_ms;
 use crate::game::{self, Week};
 use crate::store::Error;
-use crate::{admin, app::now_ms, oauth, privacy};
+use crate::{admin, oauth, privacy};
 use chrono::Datelike;
 use serde::Deserialize;
 use std::collections::HashMap;
