@@ -41,7 +41,7 @@ fn save(store: &Store, user: &str, image: Option<&[u8]>) -> Result<i64, Error> {
     )?)
 }
 
-fn picture(store: &Store, user: &str) -> Result<Option<(i64, Vec<u8>)>, Error> {
+pub(crate) fn picture(store: &Store, user: &str) -> Result<Option<(i64, Vec<u8>)>, Error> {
     Ok(store
         .conn
         .query_row(

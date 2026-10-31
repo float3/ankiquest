@@ -13,6 +13,7 @@ mod aki;
 mod app;
 mod avatars;
 mod boards;
+mod cards;
 mod challenges;
 mod cli;
 mod companions;
@@ -41,6 +42,7 @@ mod subscriptions;
 mod test_support;
 mod web_util;
 mod weekly_challenges;
+mod wins;
 mod worker;
 
 use access::authorized;
@@ -223,6 +225,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(inbox::routes())
         .merge(study::routes())
         .merge(boards::routes())
+        .merge(cards::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))

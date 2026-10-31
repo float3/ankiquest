@@ -68,6 +68,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("friendships", "select case when a = ?1 then b else a end as friend, requested_by, accepted, created_at
          from friendships where a = ?1 or b = ?1"),
     ("avatar", "select revision, image from avatars where user = ?1"),
+    ("wins", "select id, kind, key, day, created_at, title, body, stats, art, shared_friends, link_token from wins where user = ?1 order by id"),
     ("conquest_labels", "select at, label from conquest_labels where user = ?1 order by at"),
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
     ("announcements_sent", "select id, title, body, groups, recipients, created_at from announcements where sender = ?1 order by id"),
@@ -122,6 +123,7 @@ const OWNED: &[(&str, &str)] = &[
     ("community_weekly_suggestions", "owner = ?1 or friend = ?1"),
     ("friendships", "a = ?1 or b = ?1"),
     ("avatars", "user = ?1"),
+    ("wins", "user = ?1"),
     ("conquest_labels", "user = ?1"),
     ("server_log", "user = ?1"),
     ("announcements", "sender = ?1"),

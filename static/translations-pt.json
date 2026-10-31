@@ -1242,6 +1242,10 @@
   "{0} of {1} minutes today. Your {2}-day streak is still waiting.": "{0} de {1} minutos hoje. A tua sequência de {2} dias continua à espera.",
   "{0} of {1} minutes today": "{0} de {1} minutos hoje",
   "Your {0} day streak is waiting: {1} of {2} minutes today.": "A tua sequência de {0} dias está à espera: {1} de {2} minutos hoje.",
+  "{0} day streak": "Sequência de {0} dias",
+  "{0} cards": "{0} cartões",
+  "Study with {0} on AnkiQuest": "Estude com {0} no AnkiQuest",
+  "Join AnkiQuest": "Entre no AnkiQuest",
   "Ends {0}": "Termina a {0}",
   "{0} new updates": "{0} novidades"
 }
