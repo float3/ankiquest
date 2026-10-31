@@ -324,7 +324,9 @@ class RefreshTests(unittest.TestCase):
         self.assertIn("#1 this week", content.stats)
         self.assertIn("ankiquest:web:inbox", content.stats)
         self.assertIn('/_addons/ankiquest/aki_face.png', content.stats)
-        self.mw.addonManager.setWebExports.assert_called_once_with("ankiquest_test_addon", r"(aki|ankilope)_face\.png")
+        self.mw.addonManager.setWebExports.assert_called_once_with(
+            "ankiquest_test_addon", r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png"
+        )
 
     def test_a_quiet_poll_only_remembers_what_a_loud_one_would_have_said(self):
         self.with_board()

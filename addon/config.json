@@ -4,5 +4,8 @@
     "token": "",
     "notify_rank": true,
     "streak_hours": 2,
-    "update_channel": "stable"
+    "update_channel": "stable",
+    "deck_status": true,
+    "session_summary": true,
+    "goal_celebrations": true
 }

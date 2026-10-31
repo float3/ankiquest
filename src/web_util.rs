@@ -51,6 +51,21 @@ pub(crate) fn set_cookie(
     .unwrap()
 }
 
+/// The server's own address for absolute links: `public_url`, or else the request's host.
+pub(crate) fn base_url(app: &App, headers: &HeaderMap) -> String {
+    app.config
+        .public_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(|url| url.trim_end_matches('/').to_string())
+        .or_else(|| {
+            let host = headers.get(header::HOST)?.to_str().ok()?;
+            crate::access::origin(&format!("http://{host}"))
+        })
+        .unwrap_or_default()
+}
+
 /// 32 random bytes; `unavailable` is the error when the system has none to give.
 pub(crate) fn random_bytes(unavailable: &'static str) -> Result<[u8; 32], Error> {
     let mut bytes = [0u8; 32];

@@ -26,6 +26,7 @@ from aqt.qt import Qt
 from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
+from .today_ui import settings_section
 
 
 def _enum(owner, group, name):
@@ -162,9 +163,9 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     return result
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None):
+def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None, on_goal=None):
     """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
-    a section and return what to run once the dialog is saved."""
+    a section and return what to run once the dialog is saved; `on_goal()` opens the daily goal dialog."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("ankiquest")
     layout = QVBoxLayout(dialog)
@@ -194,6 +195,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
     layout.addWidget(_row(QLabel(tr("Update channel")), channel))
+    today_values = settings_section(layout, config, on_goal)
 
     if on_account is not None:
         account = QPushButton(tr("Sign in or create account…"))
@@ -219,7 +221,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
         return None
     if finish:
         finish()
-    return _values(url, user, token, rank, hours, channel)
+    return dict(_values(url, user, token, rank, hours, channel), **today_values())
 
 
 def _values(url, user, token, rank, hours, channel):

@@ -1166,7 +1166,7 @@ async fn public(
     let site = site(&app, &headers);
     let found = (|| -> Result<Option<(Win, Shown, Option<Card>)>, Error> {
         let store = app.store.lock().unwrap();
-        let Some(win) = wins::by_token(&store.conn, token)? else {
+        let Some((_, win)) = wins::by_token(&store.conn, token) else {
             return Ok(None);
         };
         if !app.is_user(&win.user) {
@@ -1215,7 +1215,7 @@ async fn owner_card(
     let site = site(&app, &headers);
     let found = (|| -> Result<Option<Card>, Error> {
         let store = app.store.lock().unwrap();
-        let Some(win) = wins::win(&store.conn, &user, id)? else {
+        let Some(win) = wins::win(&store.conn, &user, id) else {
             return Ok(None);
         };
         let shown = shown(&store, &win)?;

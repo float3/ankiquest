@@ -354,7 +354,7 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
     response
 }
 
-fn origin(value: &str) -> Option<String> {
+pub(crate) fn origin(value: &str) -> Option<String> {
     let uri: Uri = value.parse().ok()?;
     let scheme = uri.scheme_str()?;
     if !matches!(scheme, "http" | "https") {

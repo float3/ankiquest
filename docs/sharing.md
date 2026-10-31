@@ -33,17 +33,73 @@ whether it is pushed).
 
 The goal lives on the server so every client agrees.
 
-`GET /api/goal/{user}` answers `{ "mode": "off" | "cards" | "minutes" | "backlog", "value": n }`.
-`PUT /api/goal/{user}` takes the same body. Defaults and limits:
+`GET /api/goal/{user}` answers
+`{ "mode": "off" | "cards" | "minutes" | "backlog", "value": n, "since": d, "chosen": bool }`.
+`PUT /api/goal/{user}` takes `{ "mode", "value"?, "restart"? }`. Defaults and limits:
 
 | mode | meaning | default `value` | allowed range |
 |---|---|---|---|
 | `off` | no goal | — | — |
 | `cards` | reviews today, `today.reviews >= value` | 100 | 1–5000 |
 | `minutes` | review minutes today, `today.minutes >= value` | 20 | 1–600 |
-| `backlog` | percent of today's due cards, `value` percent | 100 | 1–100 |
+| `backlog` | clear the overdue backlog in `value` days, on top of today's due cards | 30 | 1–365 |
 
-The default mode is `cards`, value 100.
+- The default goal is `backlog`, 30 days.
+- `value` may be left out, and then takes the mode's default.
+- `{ "mode": "off" }` keeps the last value, which `GET` still returns.
+- `PUT` answers 200 with the saved goal. A value out of range or an unknown mode is 400.
+- `chosen` is false until the player first saves a goal. Clients ask for one at setup while it is
+  false.
+- `since` is the Anki day the current plan started. The server sets it to today when `mode` or
+  `value` changes, or when a PUT carries `"restart": true`.
+
+### The backlog plan
+
+Only clients know due counts, so they compute the backlog target. It uses three numbers:
+
+- `due`: cards due today that are not overdue, plus learning and new cards still to do
+- `backlog`: review cards overdue from earlier days, including those past the daily review limit
+- `studied`: cards already studied today
+
+The target for the day is:
+
+```
+days_left = value - (today - since)
+if days_left < 1: restart the plan (PUT restart) and use days_left = value
+extra     = backlog == 0 ? 0 : max(1, ceil(backlog / days_left))
+target    = studied + due + extra
+```
+
+`backlog` and `due` are read at the first upload of the day, and that day's target stays fixed.
+The target spreads what is left over the days left, so the backlog is gone on day `since + value`
+even when some days fall short. It doesn't dwindle to a trickle near the end.
+
+### Goal setup and projections
+
+Clients show the player what each choice means for their own collection:
+
+- whenever the goal dialog opens
+- once as part of setup while `chosen` is false: right after signing in, or on the next start for
+  players who were already signed in
+
+Inputs for the estimates, besides `due` and `backlog`:
+
+- `daily_due`: the average number of cards due per day over the next 7 days, from the
+  collection's forecast, not counting the backlog
+- `seconds_per_card`: the player's average answer time over the last 30 days, or 8 s with no history
+
+Estimates per choice, updated as the player changes the value:
+
+| choice | cards today | time today | backlog cleared in |
+|---|---|---|---|
+| backlog, N days | `due + ceil(backlog/N)` | that × `seconds_per_card` | N days |
+| cards C | C | C × `seconds_per_card` | `ceil(backlog / (C − daily_due))` days, or never if `C ≤ daily_due` |
+| minutes M | `M×60 / seconds_per_card` | M minutes | as for cards, with C = `M×60 / seconds_per_card` |
+
+The dialog also names the smallest goal that shrinks the backlog: `daily_due + 1` cards a day.
+With no backlog it says "Nothing overdue" and suggests `daily_due` cards.
+
+Presets for N: 7, 14, 30 and 60 days, plus a custom value.
 
 The server decides `cards` and `minutes` itself, when reviews are uploaded. Only the client knows
 due counts, so for `backlog` the client reports
@@ -53,7 +109,7 @@ when the mode is `backlog` and `d` is the player's current Anki day. Otherwise i
 `GET /api/profile/{user}` (owner view) gains `goal`:
 
 ```json
-{ "mode": "cards", "value": 100, "progress": 64, "reached": false }
+{ "mode": "cards", "value": 100, "since": 20391, "day": 20395, "progress": 64, "reached": false }
 ```
 
 `progress` is reviews or minutes so far. For `backlog` it is `null`, and `reached` reflects a
@@ -63,15 +119,16 @@ reported reach.
 
 - `GET /api/sharing/{user}` answers `{ "policies": { "<kind>": "private"|"ask"|"auto", ... }, "daily_cap": 3 }`
   for every kind in the table.
-- `PUT /api/sharing/{user}` takes the same shape. Kinds left out keep their value; an unknown kind or
-  policy is 400.
+- `PUT /api/sharing/{user}` takes the same shape and answers 200 with the saved settings. Kinds left
+  out keep their value; an unknown kind or policy, or a cap outside 1–10, is 400.
 - `daily_cap` (1–10) limits how many automatic wins one player sends each friend per Anki day. Wins
   over the cap still appear in the player's own list and can be shared by hand.
 
 ## Wins
 
-Wins are stored per player. A row in `GET /api/wins/{user}?limit=50&before=<id>` (owner only, newest
-first) looks like this:
+Wins are stored per player. `GET /api/wins/{user}?limit=50&before=<id>` (owner only, `limit` 1–200)
+answers `{ "wins": [...] }`, newest first. Clients page with `before` set to the last id until a page
+comes back shorter than `limit`. A row looks like this:
 
 ```json
 {
@@ -88,13 +145,16 @@ first) looks like this:
 - `link` is `{ "url": "...", "image": "..." }` once a link exists.
 
 Celebration notifications in the inbox (`kind` `celebration`, `challenge_complete`,
-`reminder_weekly_recap`) gain `"win": 17` when they belong to a win. Clients share by win id.
+`reminder_weekly_recap`) gain `"win": 17` when they belong to a win. Clients share by win id. A
+grouped "N new unlocks" row stands for several wins and has none. Celebrations for the new moments
+carry the topics `goal` and `secured`.
 
 ## Sharing a win
 
 `POST /api/share/{user}` keeps its current bodies (`{notification}`, `{place}`) and adds:
 
-- `{ "win": 17, "to": "friends" }` sends the win to the circle. It answers `{ "recipients": n }`.
+- `{ "win": 17, "to": "friends" }` sends the win to the circle. It answers
+  `{ "recipients": n, "link": { "url": "...", "image": "..." } }`.
 - `{ "win": 17, "to": "link" }` answers
   `{ "url": "https://host/w/<token>", "image": "https://host/w/<token>.png", "text": "<invitation text>" }`.
   The link is created once and reused.
@@ -105,7 +165,9 @@ Friends receive a `share` row as today. It has the same `topic` and quoted title
 `"win": 17` and `"image": "https://host/w/<token>.png"`. Mutes and unsubscriptions are respected, and
 each win reaches each friend once.
 
-`DELETE /api/wins/{user}/{id}/link` revokes the link. The page and the image then answer 404.
+`{ "notification": id }` for a row that has a `win` shares that win to friends, so it is not sent twice.
+
+`DELETE /api/wins/{user}/{id}/link` revokes the link (204, or 404 for someone else's win). The page and the image then answer 404.
 
 ## Automatic sharing and digests
 

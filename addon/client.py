@@ -51,11 +51,12 @@ def open_url(url, data=None, headers=None, method=None, timeout=20):
         raise ServerError(error.code, _error_text(error)) from None
 
 
-def request_json(url, body=None, headers=None, timeout=20):
-    """Sends `body` as JSON (a GET when it is None) and returns the decoded answer."""
+def request_json(url, body=None, headers=None, timeout=20, method=None):
+    """Sends `body` as JSON (a GET when it is None, else a POST unless `method` says otherwise)
+    and returns the decoded answer."""
     headers = dict(headers or {}, **{"Content-Type": "application/json"})
     data = None if body is None else json.dumps(body).encode()
-    with open_url(url, data, headers, timeout=timeout) as response:
+    with open_url(url, data, headers, method=method, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -96,11 +97,11 @@ class Client:
     def configured(self):
         return bool(self.base and self.user and self.token)
 
-    def _request(self, path, body=None):
+    def _request(self, path, body=None, method=None):
         headers = {"Accept-Language": self.language}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
-        return request_json(self.base + path, body, headers)
+        return request_json(self.base + path, body, headers, method=method)
 
     def rank(self, previous):
         """The weekly order, and how this player moved since `previous`."""
@@ -108,6 +109,10 @@ class Client:
 
     def profile(self):
         return self._request("/api/profile/" + self.user)
+
+    def leaderboard(self):
+        """Every visible player's standing, with XP for each period."""
+        return self._request("/api/leaderboard")
 
     def companion(self):
         return _companion(self._request("/api/companion/" + self.user))

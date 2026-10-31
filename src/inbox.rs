@@ -2,8 +2,8 @@
 
 use crate::access::authorized;
 use crate::app::{App, now_ms};
-use crate::web_util::{failed_for, store_error};
-use crate::{challenges, decks, i18n, notifications, reminders};
+use crate::web_util::{base_url, failed_for, store_error};
+use crate::{challenges, decks, i18n, notifications, reminders, wins};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -29,6 +29,7 @@ pub(crate) async fn get_notifications(
             .map_err(store_error)?;
     }
     let mut result = Vec::new();
+    let base = base_url(&app, &headers);
     let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
     for mut notice in store.notifications(&user, now).map_err(store_error)? {
         if notice.kind.starts_with("reminder_") {
@@ -45,6 +46,7 @@ pub(crate) async fn get_notifications(
         }
         let sender_display = app.display(&notice.sender);
         i18n::notification(&mut notice, &language, &sender_display);
+        wins::decorate(&mut notice, &base);
         result.push(notice);
     }
     Ok(Json(result))
@@ -96,11 +98,10 @@ async fn activity(
             },
         )
         .map_err(store_error)?;
-    for notice in &mut activity.items {
+    let base = base_url(&app, &headers);
+    for notice in activity.items.iter_mut().chain(&mut activity.attention) {
         i18n::notification(notice, &language, &app.display(&notice.sender));
-    }
-    for notice in &mut activity.attention {
-        i18n::notification(notice, &language, &app.display(&notice.sender));
+        wins::decorate(notice, &base);
     }
     Ok(Json(activity))
 }

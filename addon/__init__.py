@@ -1,5 +1,6 @@
 import html
 import platform
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -10,7 +11,9 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
-from . import board, notify, ui, updates, web
+from . import board, home, notify, ui, updates, web
+from . import inbox_ui, share, share_ui, sharing
+from .inbox import shareable
 from .language import tr
 from .client import (
     MAX_PENDING,
@@ -54,7 +57,7 @@ state = {
     "conquest": None,
 }
 
-mw.addonManager.setWebExports(__name__, r"(aki|ankilope)_face\.png")
+mw.addonManager.setWebExports(__name__, r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png")
 
 
 def config():
@@ -65,6 +68,13 @@ def save_config(values):
     current = config()
     current.update(values)
     mw.addonManager.writeConfig(__name__, current)
+
+
+def drop_config(keys):
+    """Removes settings an older version kept, once they live elsewhere."""
+    current = config()
+    if any(key in current for key in keys):
+        mw.addonManager.writeConfig(__name__, {key: value for key, value in current.items() if key not in keys})
 
 
 def client():
@@ -134,6 +144,7 @@ def refresh(show_feedback, resync=False):
         except Exception as e:
             print("ankiquest:", e)
             return
+        keep_goal(profile)
         message = notify.feedback(profile, show_feedback)
         if message:
             tooltip(message[0], period=3500 if message[1] else 1800)
@@ -147,6 +158,13 @@ def refresh(show_feedback, resync=False):
             refresh(True)
 
     mw.taskman.run_in_background(work, done, uses_collection=True)
+
+
+def keep_goal(answer):
+    """An upload answers with the profile; its goal progress is fresher than the last poll's."""
+    fresh = (answer or {}).get("profile") if isinstance(answer, dict) else None
+    if isinstance(state["profile"], dict) and isinstance(fresh, dict) and isinstance(fresh.get("goal"), dict):
+        state["profile"]["goal"] = fresh["goal"]
 
 
 def refresh_shared_decks():
@@ -201,6 +219,7 @@ def poll(quiet=False):
 def announce(rank, profile, inbox, quiet):
     settings = config()
     now_ms = int(time.time() * 1000)
+    previous = mw.pm.profile.get(ORDER_KEY) or []
     mw.pm.profile[ORDER_KEY] = rank.get("order") or []
     fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
     mw.pm.profile[INBOX_KEY] = cursor
@@ -222,8 +241,9 @@ def announce(rank, profile, inbox, quiet):
     for entry in fresh:
         text = notify.notice(entry)
         if notify.answerable(entry):
-            text += "<br><i>Tools → ankiquest inbox to reply</i>"
+            text += "<br><i>%s</i>" % html.escape(tr("Tools → ankiquest inbox… to reply"))
         tooltip(text, period=6000)
+    celebrate_latest(previous, rank, fresh, settings)
 
 
 def failed(template, error):
@@ -246,7 +266,7 @@ def on_deck_browser(deck_browser, content):
     waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
-    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot)
+    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))
 
 
 def on_js_message(handled, message, context):
@@ -295,7 +315,7 @@ def open_inbox():
     mw.pm.profile[INBOX_KEY] = max(
         [entry["id"] for entry in state["inbox"]] + [mw.pm.profile.get(INBOX_KEY, 0)]
     )
-    open_page(board.PAGES["inbox"])
+    open_native_inbox()
     redraw()
 
 
@@ -350,12 +370,13 @@ def open_account():
     refresh(False, resync=True)
     poll(quiet=True)
     tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
+    home.sync_goal(prompt=True)
 
 
 def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
-        extra=lambda dialog, layout: preferences.section(dialog, layout, mw, client()),
+        extra=settings_sections, on_goal=home.open_goal_dialog,
     )
     if values is None:
         return
@@ -367,7 +388,20 @@ def open_settings():
     state["companion"], state["companion_account"] = "aki", None
     refresh_shared_decks()
     poll(quiet=True)
+    home.sync_goal()
     tooltip(tr("ankiquest settings saved."))
+
+
+def settings_sections(dialog, layout):
+    """The server-side settings below the local ones; answers what to run once they are saved."""
+    api = client()
+    finishes = [found for found in (
+        preferences.section(dialog, layout, mw, api),
+        sharing.section(layout, mw, api),
+    ) if found]
+    if not finishes:
+        return None
+    return lambda: [finish() for finish in finishes]
 
 
 def test_connection(values):
@@ -571,13 +605,14 @@ def add_action(title, handler, shortcut=None):
     if shortcut:
         action.setShortcut(QKeySequence(shortcut))
     mw.form.menuTools.addAction(action)
+    return action
 
 
 add_action(tr("ankiquest: sign in or create account…"), open_account)
 add_action(tr("ankiquest settings…"), open_settings)
 add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
-add_action(tr("ankiquest inbox…"), open_inbox)
+add_action(tr("ankiquest inbox…"), open_inbox, inbox_ui.SHORTCUT)
 add_action(tr("ankiquest on the web…"), open_website, WEBSITE_SHORTCUT)
 add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
 copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
@@ -590,3 +625,55 @@ gui_hooks.sync_did_finish.append(on_sync)
 gui_hooks.profile_did_open.append(on_profile_open)
 gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
+
+
+def current_companion():
+    api = client()
+    return state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
+
+
+def open_native_inbox():
+    api = client()
+    if not api.configured:
+        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        return
+    inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, open_page, on_replied)
+
+
+def on_replied(notification):
+    for entry in state["inbox"]:
+        if entry.get("id") == notification:
+            entry["replied"] = True
+    redraw()
+
+
+def celebrate_latest(previous, rank, fresh, settings):
+    """The newest win this poll announced, offered for sharing: an own celebration, finished
+    challenge or weekly recap, or a climb into the top three."""
+    api = client()
+    wins = [share.win_from_entry(entry) for entry in fresh if shareable(entry)]
+    if settings.get("notify_rank", True) and rank.get("change"):
+        place = share.podium(previous, rank.get("order"), api.name)
+        if place:
+            wins.append(share.win_from_place(rank["change"], place))
+    if wins:
+        celebrate(api, wins[-1])
+
+
+def celebrate(api, win):
+    """Shows the share window only to players who keep celebrations on."""
+
+    def done(future):
+        try:
+            celebrations = future.result().get("celebrations")
+        except Exception as e:
+            print("ankiquest celebrations:", e)
+            return
+        if celebrations is False or not share_ui.same_account(api, client()):
+            return
+        share_ui.offer(mw, api, win, current_companion(), client, mw.taskman.run_in_background)
+
+    mw.taskman.run_in_background(lambda: api.deck_settings(), done)
+
+
+home.install(sys.modules[__name__])
