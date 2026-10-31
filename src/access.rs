@@ -1,10 +1,11 @@
 //! Private site access is deliberately separate from each player's write permission.
 //! A master session unlocks shared pages; a member session owns exactly one player.
 //! Browser mutations also pass the same-origin/custom-header CSRF gate.
+use crate::config::Config;
 use crate::web_util::{
     bearer, hex, hex_cookie, json_error, normalize_user, random_bytes, set_cookie,
 };
-use crate::{App, Config, Error, now_ms};
+use crate::{App, Error, now_ms};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};

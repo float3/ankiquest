@@ -270,7 +270,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Config, game::Week};
+    use crate::{config::Config, game::Week};
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use image::{GenericImageView, Rgb, RgbImage};

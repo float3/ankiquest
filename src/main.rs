@@ -14,6 +14,7 @@ mod avatars;
 mod challenges;
 mod companions;
 mod competition;
+mod config;
 mod conquests;
 mod deck_copies;
 mod decks;
@@ -31,6 +32,8 @@ mod shares;
 mod social;
 mod store;
 mod subscriptions;
+#[cfg(test)]
+mod test_support;
 mod web_util;
 mod weekly_challenges;
 
@@ -41,10 +44,11 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Datelike;
+use config::Config;
 use game::{Clock, ClockHistory, Periods, Profile, Records, Review, Week};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use store::{Error, Store};
@@ -54,79 +58,6 @@ const MAX_PENDING: usize = 5000;
 const PUSH_BUDGET: Duration = Duration::from_secs(20);
 /// How many people a record names: the holder and whoever came closest.
 const PODIUM: usize = 3;
-
-#[derive(Deserialize, Clone, Default)]
-struct UserConfig {
-    display: Option<String>,
-    ntfy_topic: Option<String>,
-    token: Option<String>,
-    token_file: Option<PathBuf>,
-}
-
-#[derive(Deserialize, Clone)]
-struct Config {
-    #[serde(default = "default_addr")]
-    addr: String,
-    sync_base: Option<PathBuf>,
-    #[serde(default = "default_state")]
-    state_dir: PathBuf,
-    ntfy: Option<String>,
-    #[serde(default, rename = "remind_hour")]
-    legacy_remind_hour: Option<i64>,
-    public_url: Option<String>,
-    #[serde(default)]
-    private_site: bool,
-    site_password_file: Option<PathBuf>,
-    #[serde(default)]
-    site_trust_proxy: bool,
-    #[serde(default = "default_week_timezone")]
-    week_timezone: String,
-    #[serde(default = "default_week_rollover_hour")]
-    week_rollover_hour: u32,
-    #[serde(default)]
-    competition_start_date: Option<String>,
-    #[serde(default)]
-    review_weighting: game::ReviewWeighting,
-    #[serde(default = "default_log_retention_days")]
-    log_retention_days: u32,
-    /// Review minutes a day needs to count toward the streak; 0 lets any review count.
-    #[serde(default)]
-    streak_minutes: u32,
-    #[serde(default)]
-    users: HashMap<String, UserConfig>,
-    /// Lets anyone create an account with a username and password.
-    #[serde(default)]
-    registration: bool,
-    /// Players who can open the dev console: announcements, statistics and recent errors.
-    #[serde(default)]
-    devs: Vec<String>,
-    /// Who runs this server, for the privacy notice.
-    #[serde(default)]
-    privacy: privacy::Notice,
-    /// Sign-in with Google, GitHub and GitLab, each off until configured.
-    #[serde(default)]
-    oauth: oauth::Settings,
-}
-
-fn default_log_retention_days() -> u32 {
-    admin::DEFAULT_LOG_RETENTION_DAYS
-}
-
-fn default_week_timezone() -> String {
-    "UTC".into()
-}
-
-fn default_week_rollover_hour() -> u32 {
-    4
-}
-
-fn default_addr() -> String {
-    "127.0.0.1:8097".into()
-}
-
-fn default_state() -> PathBuf {
-    "state".into()
-}
 
 struct Player {
     reviews: Arc<Vec<Review>>,
@@ -169,16 +100,6 @@ struct App {
     store: Mutex<Store>,
     players: RwLock<HashMap<String, Player>>,
     standings: StandingCache,
-}
-
-impl Config {
-    fn settings(&self) -> admin::Settings {
-        admin::Settings {
-            review_weighting: self.review_weighting,
-            log_retention_days: self.log_retention_days,
-            streak_minutes: self.streak_minutes,
-        }
-    }
 }
 
 impl App {
@@ -2274,9 +2195,7 @@ async fn main() -> Result<(), Error> {
     let path = given
         .or_else(|| std::env::var("ANKIQUEST_CONFIG").ok())
         .unwrap_or_else(|| "ankiquest.json".into());
-    let mut config: Config = serde_json::from_slice(
-        &std::fs::read(&path).map_err(|e| format!("cannot read config {path}: {e}"))?,
-    )?;
+    let mut config = Config::read(&path)?;
 
     if let Some(at) = admin_at {
         let command = match &args[at + 1..] {
@@ -2302,34 +2221,14 @@ async fn main() -> Result<(), Error> {
 
     game::set_review_weighting(config.review_weighting);
 
-    if config.legacy_remind_hour.is_some() {
-        eprintln!("remind_hour is superseded by personal reminder preferences at /community.");
-    }
-    if let Some(date) = &config.competition_start_date {
-        let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-            .map_err(|_| "competition_start_date must be YYYY-MM-DD")?;
-        if date.year() < 1970
-            || date
-                > chrono::DateTime::from_timestamp_millis(now_ms())
-                    .unwrap()
-                    .date_naive()
-        {
-            return Err("competition_start_date must be between 1970 and today".into());
-        }
-    }
+    config.check()?;
 
     // Sending needs no tokens, and the running service holds the only readable copy.
     if let Some(message) = message {
         return send_message(&config, &message);
     }
 
-    for (name, user) in &mut config.users {
-        if let Some(file) = &user.token_file {
-            let token = std::fs::read_to_string(file)
-                .map_err(|e| format!("cannot read token for {name}: {e}"))?;
-            user.token = Some(token.trim().to_string());
-        }
-    }
+    config.load_tokens()?;
 
     config.oauth.load_secrets(config.public_url.as_deref())?;
     let access = access::Access::from_config(&config)?;
@@ -2344,16 +2243,7 @@ async fn main() -> Result<(), Error> {
     for user in store.users()? {
         players.insert(user.clone(), load_player(&store, &user)?);
     }
-    let week = Week {
-        tz: config
-            .week_timezone
-            .parse()
-            .map_err(|e| format!("week_timezone {:?}: {e}", config.week_timezone))?,
-        rollover_hour: config.week_rollover_hour,
-    };
-    if week.rollover_hour > 23 {
-        return Err("week_rollover_hour must be between 0 and 23".into());
-    }
+    let week = config.week()?;
     let app = Arc::new(App {
         week,
         config,
@@ -2505,39 +2395,9 @@ fn router(app: Arc<App>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = decks::tests::temporary_store();
-        let config: Config = serde_json::from_value(serde_json::json!({
-            "users": {
-                "cerro": {"display": "Cerro", "token": "cerro-secret"},
-                "hill": {"display": "Hill", "token": "hill-secret"},
-                "friend": {"token": "friend-secret"}
-            }
-        }))
-        .unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: access::Access::default(),
-                accounts: Default::default(),
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-            }),
-            path,
-        )
-    }
-
-    fn headers(user: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            format!("Bearer {user}-secret").parse().unwrap(),
-        );
-        headers
-    }
+    use crate::config::UserConfig;
+    use crate::test_support::*;
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn companion_choice_is_private_validated_and_independent_for_each_player() {
