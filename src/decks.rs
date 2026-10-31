@@ -1,6 +1,5 @@
 use crate::access::authorized;
 use crate::app::App;
-use crate::decks;
 use crate::game::Clock;
 use crate::notifications::{INBOX_AGE_MS, NUDGE_ALLOWED_SQL, Outgoing, insert_notification};
 use crate::store::{Error, Store, has_column};
@@ -701,7 +700,7 @@ impl Store {
     }
 }
 
-fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings, Error> {
+fn deck_settings(app: &App, store: &Store, user: &str) -> Result<Settings, Error> {
     let unsubscribed = store.unsubscribed_recipients(user)?;
     let circle = app.circle(&store.conn, user)?;
     let pushable = app
@@ -718,7 +717,7 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings
             candidate != user && circle.contains(candidate) && !unsubscribed.contains(candidate)
         })
         .collect();
-    Ok(decks::Settings {
+    Ok(Settings {
         decks: store.decks(user)?,
         recipients: users.into_iter().map(|user| app.recipient(user)).collect(),
         nudges: store.nudges_enabled(user)?,
@@ -730,7 +729,7 @@ pub(crate) async fn get_decks(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-) -> Result<Json<decks::Settings>, StatusCode> {
+) -> Result<Json<Settings>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
@@ -743,18 +742,18 @@ pub(crate) async fn set_decks(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-    Json(update): Json<decks::SettingsUpdate>,
-) -> Result<Json<decks::Settings>, StatusCode> {
+    Json(update): Json<SettingsUpdate>,
+) -> Result<Json<Settings>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    if update.decks.len() > decks::MAX_DECKS {
+    if update.decks.len() > MAX_DECKS {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
     let store_error = failed_for("deck settings for", &user);
     let mut store = app.store.lock().unwrap();
     let current = deck_settings(&app, &store, &user).map_err(store_error)?;
-    if !decks::valid_preferences(&update.decks, &current.decks, &current.recipients) {
+    if !valid_preferences(&update.decks, &current.decks, &current.recipients) {
         return Err(StatusCode::BAD_REQUEST);
     }
     store
@@ -2123,8 +2122,8 @@ pub(crate) mod tests {
             preferences(&["unknown"]),
             preferences(&[]),
             preferences(&["hill", "hill"]),
-            decks::SettingsUpdate {
-                decks: vec![decks::Preference {
+            SettingsUpdate {
+                decks: vec![Preference {
                     id: "missing".into(),
                     enabled: false,
                     recipients: vec![],
@@ -2132,14 +2131,14 @@ pub(crate) mod tests {
                 nudges: None,
                 celebrations: None,
             },
-            decks::SettingsUpdate {
+            SettingsUpdate {
                 decks: vec![
-                    decks::Preference {
+                    Preference {
                         id: "1".into(),
                         enabled: true,
                         recipients: vec!["hill".into()],
                     },
-                    decks::Preference {
+                    Preference {
                         id: "1".into(),
                         enabled: false,
                         recipients: vec![],
@@ -2200,7 +2199,7 @@ pub(crate) mod tests {
         );
         let mut oversized = sample_upload(0, false);
         let deck = oversized.decks.as_ref().unwrap()[0].clone();
-        oversized.decks = Some(vec![deck; decks::MAX_DECKS + 1]);
+        oversized.decks = Some(vec![deck; MAX_DECKS + 1]);
         assert_eq!(
             upload(
                 State(app.clone()),

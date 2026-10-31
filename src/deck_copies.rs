@@ -2,10 +2,10 @@
 
 use crate::access::authorized;
 use crate::app::{App, now_ms};
+use crate::decks;
 use crate::game::DAY_MS;
 use crate::store::Error;
 use crate::web_util::store_error;
-use crate::{deck_copies, decks};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, Response, StatusCode, header};
@@ -172,7 +172,7 @@ struct CopyRequest {
 
 #[derive(Serialize)]
 struct CopyInbox {
-    offers: Vec<deck_copies::Offer>,
+    offers: Vec<Offer>,
     friends: Vec<decks::Recipient>,
     max_bytes: usize,
 }
@@ -188,7 +188,7 @@ async fn deck_copy_inbox(
     let (offers, reachable) = {
         let store = app.store.lock().unwrap();
         (
-            deck_copies::inbox(&store.conn, &user, now_ms()).map_err(store_error)?,
+            inbox(&store.conn, &user, now_ms()).map_err(store_error)?,
             app.reachable(&store, &user).map_err(store_error)?,
         )
     };
@@ -196,7 +196,7 @@ async fn deck_copy_inbox(
     Ok(Json(CopyInbox {
         offers,
         friends,
-        max_bytes: deck_copies::MAX_BYTES,
+        max_bytes: MAX_BYTES,
     }))
 }
 
@@ -212,18 +212,18 @@ async fn offer_deck_copy(
     }
     let recipients: Vec<String> =
         serde_json::from_str(&request.recipients).map_err(|_| StatusCode::BAD_REQUEST)?;
-    if package.len() > deck_copies::MAX_BYTES {
+    if package.len() > MAX_BYTES {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
     let reachable = app
         .reachable(&app.store.lock().unwrap(), &user)
         .map_err(store_error)?;
-    if !deck_copies::valid_request(&user, &request.deck, &recipients, &package)
+    if !valid_request(&user, &request.deck, &recipients, &package)
         || recipients.iter().any(|id| !reachable.contains(id))
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let id = deck_copies::create(
+    let id = create(
         &mut app.store.lock().unwrap().conn,
         &user,
         &request.deck,
@@ -244,7 +244,7 @@ async fn download_deck_copy(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let package = deck_copies::package(&app.store.lock().unwrap().conn, &user, id, now_ms())
+    let package = package(&app.store.lock().unwrap().conn, &user, id, now_ms())
         .map_err(store_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
     Response::builder()
@@ -266,7 +266,7 @@ async fn dismiss_deck_copy(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    if deck_copies::dismiss(&mut app.store.lock().unwrap().conn, &user, id).map_err(store_error)? {
+    if dismiss(&mut app.store.lock().unwrap().conn, &user, id).map_err(store_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -279,7 +279,7 @@ pub(crate) fn routes() -> Router<Arc<App>> {
             "/api/deck-copies/{user}",
             get(deck_copy_inbox)
                 .post(offer_deck_copy)
-                .layer(axum::extract::DefaultBodyLimit::max(deck_copies::MAX_BYTES)),
+                .layer(axum::extract::DefaultBodyLimit::max(MAX_BYTES)),
         )
         .route(
             "/api/deck-copies/{user}/{id}",
@@ -290,7 +290,6 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deck_copies;
     use crate::test_support::*;
 
     #[test]
@@ -421,7 +420,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            axum::body::to_bytes(download.into_body(), deck_copies::MAX_BYTES)
+            axum::body::to_bytes(download.into_body(), MAX_BYTES)
                 .await
                 .unwrap(),
             package

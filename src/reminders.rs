@@ -3,7 +3,6 @@ use crate::access::authorized;
 use crate::app::App;
 use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
 use crate::notifications::{Notification, Outgoing};
-use crate::reminders;
 use crate::store::{Error, Store};
 use crate::web_util::store_error;
 use axum::extract::{Path as UrlPath, State};
@@ -653,11 +652,11 @@ async fn get_reminders(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-) -> Result<Json<reminders::Settings>, StatusCode> {
+) -> Result<Json<Settings>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    reminders::settings(&app.store.lock().unwrap(), &user)
+    settings(&app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(store_error)
 }
@@ -666,16 +665,15 @@ async fn set_reminders(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-    Json(settings): Json<reminders::Settings>,
-) -> Result<Json<reminders::Settings>, StatusCode> {
+    Json(settings): Json<Settings>,
+) -> Result<Json<Settings>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     if !settings.valid() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    reminders::save_settings(&mut app.store.lock().unwrap(), &user, &settings)
-        .map_err(store_error)?;
+    save_settings(&mut app.store.lock().unwrap(), &user, &settings).map_err(store_error)?;
     Ok(Json(settings))
 }
 

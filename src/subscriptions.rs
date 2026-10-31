@@ -1,9 +1,9 @@
 use crate::access::authorized;
 use crate::app::App;
+use crate::decks;
 use crate::decks::{IncomingSettings, valid_incoming_settings};
 use crate::store::{Error, Store};
 use crate::web_util::store_error;
-use crate::{decks, subscriptions};
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
@@ -252,7 +252,7 @@ async fn set_deck_subscriptions(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-    Json(update): Json<subscriptions::Settings>,
+    Json(update): Json<Settings>,
 ) -> Result<Json<IncomingPreferences>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);

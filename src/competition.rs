@@ -5,11 +5,11 @@
 
 use crate::app::{App, now_ms};
 use crate::game::{self, ClockHistory, DAY_MS, FreezePolicy, Week};
+use crate::i18n;
 use crate::store::{Error, Store};
 use crate::study::valid_year;
 use crate::web_util::store_error;
 use crate::worker::import;
-use crate::{competition, i18n};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::get;
@@ -949,7 +949,7 @@ struct CommunityQuery {
 pub(crate) fn refresh_community(
     app: &App,
     store: &mut Store,
-    players: &[competition::Participant],
+    players: &[Participant],
     now: i64,
 ) -> Result<(), Error> {
     use rusqlite::OptionalExtension;
@@ -964,7 +964,7 @@ pub(crate) fn refresh_community(
     if last.is_some_and(|last| now >= last && now - last < 60_000) {
         return Ok(());
     }
-    competition::refresh(
+    refresh(
         store,
         players,
         &app.week,
@@ -1001,8 +1001,8 @@ async fn community_dashboard(
     let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now).map_err(store_error)?;
     let language = i18n::selected(&headers, &store, "").map_err(store_error)?;
-    let mut dashboard = competition::dashboard(&store, &participants, &app.week, now, year, month)
-        .map_err(store_error)?;
+    let mut dashboard =
+        dashboard(&store, &participants, &app.week, now, year, month).map_err(store_error)?;
     i18n::community(&mut dashboard, &language);
     Ok(Json(dashboard))
 }
@@ -1017,7 +1017,7 @@ async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>,
     }
     let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now_ms()).map_err(store_error)?;
-    competition::winner_history(&store, &participants)
+    winner_history(&store, &participants)
         .map(Json)
         .map_err(store_error)
 }

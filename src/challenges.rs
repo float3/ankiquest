@@ -5,7 +5,7 @@ use crate::competition::Participant;
 use crate::game::DAY_MS;
 use crate::store::Store;
 use crate::web_util::store_error;
-use crate::{challenges, competition, decks, weekly_challenges};
+use crate::{competition, decks, weekly_challenges};
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -635,7 +635,7 @@ pub fn list(
 
 #[derive(Serialize)]
 struct ChallengeList {
-    challenges: Vec<challenges::Challenge>,
+    challenges: Vec<Challenge>,
     recipients: Vec<decks::Recipient>,
     weekly_suggestion: Option<weekly_challenges::Suggestion>,
 }
@@ -658,12 +658,12 @@ fn challenge_roster(
 
 type ChallengeFailure = (StatusCode, Json<serde_json::Value>);
 
-fn challenge_error(error: challenges::Error) -> ChallengeFailure {
+fn challenge_error(error: Error) -> ChallengeFailure {
     let (status, message) = match error {
-        challenges::Error::Invalid(message) => (StatusCode::BAD_REQUEST, message),
-        challenges::Error::Forbidden => (StatusCode::FORBIDDEN, "This challenge is private."),
-        challenges::Error::NotFound => (StatusCode::NOT_FOUND, "Challenge not found."),
-        challenges::Error::Storage(error) => {
+        Error::Invalid(message) => (StatusCode::BAD_REQUEST, message),
+        Error::Forbidden => (StatusCode::FORBIDDEN, "This challenge is private."),
+        Error::NotFound => (StatusCode::NOT_FOUND, "Challenge not found."),
+        Error::Storage(error) => {
             log_error!("challenge storage failed: {error}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -679,10 +679,10 @@ fn challenge_list(
     store: &Store,
     user: &str,
     players: &[competition::Participant],
-) -> Result<ChallengeList, challenges::Error> {
+) -> Result<ChallengeList, Error> {
     let recipients = app.sorted_recipients(app.reachable(store, user)?);
     Ok(ChallengeList {
-        challenges: challenges::list(store, user, players, now_ms())?,
+        challenges: list(store, user, players, now_ms())?,
         recipients,
         weekly_suggestion: weekly_challenges::suggestion(
             store,
@@ -707,7 +707,7 @@ async fn get_challenges(
     }
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
-    challenges::refresh(&mut store, &participants, now_ms()).map_err(|error| {
+    refresh(&mut store, &participants, now_ms()).map_err(|error| {
         (
             store_error(error),
             Json(serde_json::json!({"error":"Unable to refresh challenges."})),
@@ -722,7 +722,7 @@ async fn create_challenge(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
-    Json(request): Json<challenges::Create>,
+    Json(request): Json<Create>,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
     if !authorized(&app, &user, &headers) {
         return Err((
@@ -735,8 +735,7 @@ async fn create_challenge(
         .reachable(&store, &user)
         .map_err(|error| challenge_error(error.into()))?;
     let participants = app.participants();
-    challenges::create(&mut store, &user, &request, &eligible, now_ms())
-        .map_err(challenge_error)?;
+    create(&mut store, &user, &request, &eligible, now_ms()).map_err(challenge_error)?;
     challenge_list(&app, &store, &user, &participants)
         .map(Json)
         .map_err(challenge_error)
@@ -746,7 +745,7 @@ async fn act_on_challenge(
     State(app): State<Arc<App>>,
     UrlPath((user, id)): UrlPath<(String, i64)>,
     headers: HeaderMap,
-    Json(action): Json<challenges::Action>,
+    Json(action): Json<Action>,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
     if !authorized(&app, &user, &headers) {
         return Err((
@@ -756,8 +755,8 @@ async fn act_on_challenge(
     }
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
-    challenges::act(&mut store, &user, id, &action.action, now_ms()).map_err(challenge_error)?;
-    challenges::refresh(&mut store, &participants, now_ms()).map_err(|error| {
+    act(&mut store, &user, id, &action.action, now_ms()).map_err(challenge_error)?;
+    refresh(&mut store, &participants, now_ms()).map_err(|error| {
         (
             store_error(error),
             Json(serde_json::json!({"error":"Unable to refresh challenges."})),
@@ -812,7 +811,7 @@ mod tests {
     use super::*;
     use crate::game::{ClockHistory, FreezePolicy, Review};
     use crate::test_support::*;
-    use crate::{challenges, weekly_challenges};
+    use crate::weekly_challenges;
 
     #[test]
     fn challenge_events_are_private_transactional_and_retry_safe() {
@@ -1381,10 +1380,10 @@ mod tests {
     #[tokio::test]
     async fn community_challenges_are_owner_authenticated_and_membership_is_opt_in() {
         let (app, path) = fixture();
-        let request = || challenges::Create {
+        let request = || Create {
             request_id: None,
             title: "Five study days".into(),
-            kind: challenges::Kind::StudyDays,
+            kind: Kind::StudyDays,
             cooperative: false,
             target: 5,
             duration_days: 7,
@@ -1441,7 +1440,7 @@ mod tests {
                 State(app.clone()),
                 UrlPath(("friend".into(), id)),
                 headers("friend"),
-                Json(challenges::Action {
+                Json(Action {
                     action: "accept".into()
                 })
             )
@@ -1455,7 +1454,7 @@ mod tests {
             State(app.clone()),
             UrlPath(("hill".into(), id)),
             headers("hill"),
-            Json(challenges::Action {
+            Json(Action {
                 action: "accept".into(),
             }),
         )
@@ -1476,7 +1475,7 @@ mod tests {
                 State(app.clone()),
                 UrlPath(("hill".into(), id)),
                 headers("hill"),
-                Json(challenges::Action {
+                Json(Action {
                     action: "cancel".into()
                 })
             )
@@ -1490,7 +1489,7 @@ mod tests {
             State(app.clone()),
             UrlPath(("cerro".into(), id)),
             headers("cerro"),
-            Json(challenges::Action {
+            Json(Action {
                 action: "cancel".into(),
             }),
         )
