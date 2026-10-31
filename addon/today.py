@@ -134,9 +134,9 @@ def label(day, translate=lambda value: value, show_time=clock):
 
 
 BADGE_STYLE = {
-    DONE: ("✓", "#2e8b57"),
-    LEARNING_LATER: ("⏱", "#b7791f"),
-    REVIEW_NOW: ("●", "#5b8def"),
+    DONE: ("✓", "#46a302"),
+    LEARNING_LATER: ("⏱", "#ff9600"),
+    REVIEW_NOW: ("●", "#1cb0f6"),
 }
 
 
@@ -152,9 +152,9 @@ def badge(day, translate=lambda value: value, show_time=clock):
     else:
         text = translate("ready")
     return (
-        "<span class='ankiquest-day ankiquest-%s' title='%s' style='margin-left:.5em;font-size:11px;"
-        "color:%s;white-space:nowrap'>%s %s</span>"
-        % (day.status.replace("_", "-"), escape(label(day, translate, show_time), True), color, icon, escape(text))
+        "<span class='ankiquest-day ankiquest-%s' title='%s' style='margin-left:.5em;font-size:11px;font-weight:800;"
+        "color:%s;background:%s22;border-radius:999px;padding:1px 8px;white-space:nowrap'>%s %s</span>"
+        % (day.status.replace("_", "-"), escape(label(day, translate, show_time), True), color, color, icon, escape(text))
     )
 
 

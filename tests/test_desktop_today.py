@@ -352,7 +352,8 @@ class PanelTests(unittest.TestCase):
         self.assertIn("aria-valuenow=4 aria-valuemax=50", html)
         self.assertIn("Complete · 15 XP", html)
         self.assertIn("<option value=day selected>", html)
-        self.assertIn("<tr class=aq-me><td>#6</td><td>hill</td><td>3 XP</td>", html)
+        self.assertIn("<div class='aq-player aq-me'><span class=aq-place>#6</span>", html)
+        self.assertIn("<span class=aq-name>hill</span><span class=aq-xp>3 XP</span>", html)
         self.assertIn("1,200 XP", html)
         self.assertIn("Your last study session", html)
         self.assertNotIn("aki_winner.png", html)
@@ -507,7 +508,7 @@ class HomeTests(unittest.TestCase):
         self.assertIn("/_addons/ankiquest/art/ankilope_study.png", content.stats)
         self.assertIn("pycmd('ankiquest:study:5')", content.stats)
         self.assertIn("Today’s goal", content.stats)
-        self.assertIn("<tr class=aq-me>", content.stats)
+        self.assertIn("aq-player aq-me", content.stats)
         self.assertIn("ankiquest-review-now", content.tree)
         self.settings["deck_status"] = False
         self.home.local["days"] = None
