@@ -1,9 +1,19 @@
+use crate::access::authorized;
+use crate::app::App;
+use crate::decks;
 use crate::game::Clock;
 use crate::notifications::{INBOX_AGE_MS, NUDGE_ALLOWED_SQL, Outgoing, insert_notification};
 use crate::store::{Error, Store, has_column};
+use crate::web_util::failed_for;
+use crate::worker::push_destination;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 pub const MAX_DECKS: usize = 2000;
 const MAX_RECIPIENTS: usize = 100;
@@ -691,10 +701,89 @@ impl Store {
     }
 }
 
+fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings, Error> {
+    let unsubscribed = store.unsubscribed_recipients(user)?;
+    let circle = app.circle(&store.conn, user)?;
+    let pushable = app
+        .config
+        .users
+        .keys()
+        .filter(|candidate| push_destination(&app.config, candidate).is_some())
+        .cloned();
+    let users: BTreeSet<String> = app
+        .members()
+        .into_iter()
+        .chain(pushable)
+        .filter(|candidate| {
+            candidate != user && circle.contains(candidate) && !unsubscribed.contains(candidate)
+        })
+        .collect();
+    Ok(decks::Settings {
+        decks: store.decks(user)?,
+        recipients: users.into_iter().map(|user| app.recipient(user)).collect(),
+        nudges: store.nudges_enabled(user)?,
+        celebrations: store.celebrations_enabled(user)?,
+    })
+}
+
+pub(crate) async fn get_decks(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<decks::Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    deck_settings(&app, &app.store.lock().unwrap(), &user)
+        .map(Json)
+        .map_err(failed_for("deck settings for", &user))
+}
+
+pub(crate) async fn set_decks(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(update): Json<decks::SettingsUpdate>,
+) -> Result<Json<decks::Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if update.decks.len() > decks::MAX_DECKS {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    let store_error = failed_for("deck settings for", &user);
+    let mut store = app.store.lock().unwrap();
+    let current = deck_settings(&app, &store, &user).map_err(store_error)?;
+    if !decks::valid_preferences(&update.decks, &current.decks, &current.recipients) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    store
+        .set_deck_preferences(&user, &update.decks)
+        .map_err(store_error)?;
+    if let Some(nudges) = update.nudges {
+        store.set_nudges(&user, nudges).map_err(store_error)?;
+    }
+    if let Some(celebrations) = update.celebrations {
+        store
+            .set_celebrations(&user, celebrations)
+            .map_err(store_error)?;
+    }
+    deck_settings(&app, &store, &user)
+        .map(Json)
+        .map_err(store_error)
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new().route("/api/decks/{user}", get(get_decks).post(set_decks))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::config::UserConfig;
     use crate::notifications::PUSH_LEASE_MS;
+    use crate::study::upload;
+    use crate::test_support::*;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     pub(crate) const DAY: i64 = 20_000;
@@ -1914,5 +2003,216 @@ pub(crate) mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn recipient_choices_require_a_configured_delivery_channel() {
+        let (mut app, path) = fixture();
+        let config = &mut Arc::get_mut(&mut app).unwrap().config;
+        config.ntfy = Some("http://localhost:9999".into());
+        config.users.insert(
+            "push-only".into(),
+            UserConfig {
+                ntfy_topic: Some("friend-topic".into()),
+                ..UserConfig::default()
+            },
+        );
+        config.users.insert(
+            "empty-token".into(),
+            UserConfig {
+                token: Some(String::new()),
+                ..UserConfig::default()
+            },
+        );
+        config
+            .users
+            .insert("display-only".into(), UserConfig::default());
+        config.users.insert(
+            "empty-topic".into(),
+            UserConfig {
+                ntfy_topic: Some(String::new()),
+                ..UserConfig::default()
+            },
+        );
+        {
+            let mut store = app.store.lock().unwrap();
+            store
+                .upsert("imported", &[], &[], Clock::default())
+                .unwrap();
+            let settings = deck_settings(&app, &store, "cerro").unwrap();
+            assert_eq!(
+                settings
+                    .recipients
+                    .iter()
+                    .map(|r| r.user.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["friend", "hill", "push-only"]
+            );
+            assert!(settings.decks.is_empty());
+        }
+        Arc::get_mut(&mut app).unwrap().config.ntfy = None;
+        assert_eq!(
+            deck_settings(&app, &app.store.lock().unwrap(), "cerro")
+                .unwrap()
+                .recipients
+                .iter()
+                .map(|r| r.user.as_str())
+                .collect::<Vec<_>>(),
+            vec!["friend", "hill"]
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn nudges_are_off_until_asked_for_and_then_stay_on() {
+        let (app, path) = fixture();
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(sample_upload(2, false)),
+        )
+        .await
+        .unwrap();
+        let save = |nudges: Option<bool>| {
+            let app = app.clone();
+            async move {
+                let mut update = preferences(&["hill"]);
+                update.nudges = nudges;
+                set_decks(
+                    State(app),
+                    UrlPath("cerro".into()),
+                    headers("cerro"),
+                    Json(update),
+                )
+                .await
+                .unwrap()
+                .0
+            }
+        };
+        assert!(!save(None).await.nudges, "off until someone asks");
+        assert!(save(Some(true)).await.nudges);
+        assert!(save(None).await.nudges, "an older client leaves it alone");
+        assert!(!save(Some(false)).await.nudges);
+        assert!(
+            !get_decks(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+                .await
+                .unwrap()
+                .0
+                .nudges,
+            "the setting belongs to one player"
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_updates_without_changing_settings() {
+        let (app, path) = fixture();
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(sample_upload(2, false)),
+        )
+        .await
+        .unwrap();
+        for update in [
+            preferences(&["cerro"]),
+            preferences(&["unknown"]),
+            preferences(&[]),
+            preferences(&["hill", "hill"]),
+            decks::SettingsUpdate {
+                decks: vec![decks::Preference {
+                    id: "missing".into(),
+                    enabled: false,
+                    recipients: vec![],
+                }],
+                nudges: None,
+                celebrations: None,
+            },
+            decks::SettingsUpdate {
+                decks: vec![
+                    decks::Preference {
+                        id: "1".into(),
+                        enabled: true,
+                        recipients: vec!["hill".into()],
+                    },
+                    decks::Preference {
+                        id: "1".into(),
+                        enabled: false,
+                        recipients: vec![],
+                    },
+                ],
+                nudges: None,
+                celebrations: None,
+            },
+        ] {
+            assert_eq!(
+                set_decks(
+                    State(app.clone()),
+                    UrlPath("cerro".into()),
+                    headers("cerro"),
+                    Json(update)
+                )
+                .await
+                .unwrap_err(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let settings = get_decks(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!settings.decks[0].enabled);
+        assert!(settings.decks[0].recipients.is_empty());
+        let mut bad = sample_upload(0, false);
+        bad.clock.offset_west_min = i64::MAX;
+        assert_eq!(
+            upload(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(bad)
+            )
+            .await
+            .unwrap_err(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut duplicate = sample_upload(0, false);
+        let repeated = duplicate.decks.as_ref().unwrap()[0].clone();
+        duplicate.decks.as_mut().unwrap().push(repeated);
+        assert_eq!(
+            upload(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(duplicate)
+            )
+            .await
+            .unwrap_err(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut oversized = sample_upload(0, false);
+        let deck = oversized.decks.as_ref().unwrap()[0].clone();
+        oversized.decks = Some(vec![deck; decks::MAX_DECKS + 1]);
+        assert_eq!(
+            upload(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(oversized)
+            )
+            .await
+            .unwrap_err(),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

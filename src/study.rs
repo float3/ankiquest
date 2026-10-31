@@ -314,8 +314,8 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::app::load_player;
+    use crate::decks::set_decks;
     use crate::inbox::get_notifications;
-    use crate::set_decks;
     use crate::test_support::*;
 
     #[tokio::test]
