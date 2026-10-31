@@ -6,6 +6,8 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub(crate) const SESSION_GAP_MS: i64 = 300_000;
+/// Milliseconds in a UTC day.
+pub const DAY_MS: i64 = 86_400_000;
 const MATURE_IVL: i64 = 21;
 pub const MAX_FREEZES: u32 = 3;
 const QUEST_XP: u64 = 50;
@@ -809,13 +811,7 @@ pub struct Records {
 
 impl Records {
     pub const NAMES: [&'static str; 5] = ["hour", "day", "week", "month", "year"];
-    pub const WINDOWS_MS: [i64; 5] = [
-        3_600_000,
-        86_400_000,
-        7 * 86_400_000,
-        30 * 86_400_000,
-        365 * 86_400_000,
-    ];
+    pub const WINDOWS_MS: [i64; 5] = [3_600_000, DAY_MS, 7 * DAY_MS, 30 * DAY_MS, 365 * DAY_MS];
     pub const TITLES: [&'static str; 5] = [
         "New best hour!",
         "New best 24 hours!",
@@ -1761,9 +1757,9 @@ pub const LEECH_LAPSES: u32 = 8;
 const RECENT_CONQUESTS: usize = 12;
 /// Older conquests are listed but not announced, so resending a history that now
 /// carries intervals does not celebrate cards learned long ago.
-const ANNOUNCE_CONQUESTS_MS: i64 = 2 * 86_400_000;
+const ANNOUNCE_CONQUESTS_MS: i64 = 2 * DAY_MS;
 /// Without the new interval, a pass is trusted once no relearning step followed it for this long.
-const UNCONFIRMED_PASS_MS: i64 = 86_400_000;
+const UNCONFIRMED_PASS_MS: i64 = DAY_MS;
 
 /// A card that lapsed at least [`HARD_LAPSES`] times and has since earned a mature interval.
 /// It carries no card id or content: only what can be shared.
@@ -1853,7 +1849,6 @@ fn conquest_event(c: &Conquest) -> Event {
 mod tests {
     use super::*;
 
-    const DAY_MS: i64 = 86_400_000;
     const NOON: i64 = 12 * 3_600_000;
 
     /// One card's answers a day apart: (kind, last_ivl, ivl).

@@ -1,10 +1,10 @@
 //! Hard cards learned at last: a page to share each one, and telling friends about it.
 //! Only what [`Conquest`] carries is shared, never the card itself, unless its owner
 //! chooses to add a label saying what the card was.
-use crate::decks::Outgoing;
 use crate::game::{self, Conquest};
+use crate::notifications::Outgoing;
 use crate::store::Error;
-use crate::{App, access, authorized, now_ms, store_error};
+use crate::{access, access::authorized, app::App, app::now_ms, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Html;
@@ -107,14 +107,7 @@ pub(crate) async fn show(
     let label = label_of(&app.store.lock().unwrap().conn, &user, at).map_err(store_error)?;
     let (told, friends) = if authorized(&app, &user, &headers) {
         let store = app.store.lock().unwrap();
-        let told: bool = store
-            .conn
-            .query_row(
-                "select exists (select 1 from seen where user = ?1 and key = ?2)",
-                [user.as_str(), &told_key(at)],
-                |r| r.get(0),
-            )
-            .map_err(store_error)?;
+        let told = store.is_seen(&user, &told_key(at)).map_err(store_error)?;
         let friends = crate::social::friends(&store.conn, &user)
             .map_err(store_error)?
             .len();

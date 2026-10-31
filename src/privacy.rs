@@ -2,7 +2,8 @@
 //! Every table is listed in `OWNED` or `SHARED`, and a test fails when a new one is not, so nothing new escapes deletion or export.
 
 use crate::accounts::{has_password, password_matches, refuse, reply};
-use crate::{App, access, now_ms};
+use crate::web_util::base64;
+use crate::{access, app::App, app::now_ms};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -156,25 +157,6 @@ fn value(value: ValueRef) -> serde_json::Value {
         ValueRef::Text(text) => String::from_utf8_lossy(text).into(),
         ValueRef::Blob(bytes) => base64(bytes).into(),
     }
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..4 {
-            out.push(if i <= chunk.len() {
-                ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char
-            } else {
-                '='
-            });
-        }
-    }
-    out
 }
 
 /// Everything stored about `user`, as one JSON document.
@@ -894,14 +876,5 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(left, ["conquest:axb:1", "friend-nudge:1:axb"]);
-    }
-
-    #[test]
-    fn base64_matches_the_standard_encoding() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 }

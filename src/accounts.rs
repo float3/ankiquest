@@ -1,7 +1,8 @@
 //! Self-service accounts: a username and password, and a token per device.
 //! Configured users keep working; accounts only exist when registration is on.
 
-use crate::{App, Error, now_ms};
+use crate::web_util::{bearer, hex, normalize_user, random_bytes};
+use crate::{Error, app::App, app::now_ms};
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
@@ -206,16 +207,11 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
 }
 
 pub fn token_hash(token: &str) -> String {
-    Sha256::digest(token.as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex(&Sha256::digest(token.as_bytes()))
 }
 
 fn new_token() -> Result<String, Error> {
-    let mut random = [0u8; 32];
-    getrandom::fill(&mut random).map_err(|_| "token randomness unavailable")?;
-    Ok(random.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hex(&random_bytes("token randomness unavailable")?))
 }
 
 /// Saves a new account; an empty `hash` means it has no password and signs in another way.
@@ -311,7 +307,7 @@ pub async fn signup(
     let Ok(request) = serde_json::from_slice::<Signup>(&body) else {
         return refuse(StatusCode::BAD_REQUEST, "Send a username and a password.");
     };
-    let user = request.user.trim().to_ascii_lowercase();
+    let user = normalize_user(&request.user);
     if !valid_username(&user) {
         return refuse(
             StatusCode::BAD_REQUEST,
@@ -418,7 +414,7 @@ pub async fn login(
             "Too many attempts. Try again in one minute.",
         );
     }
-    let user = request.user.trim().to_ascii_lowercase();
+    let user = normalize_user(&request.user);
     if !password_matches(&app, &user, &request.password).await {
         app.access.failure(client, now);
         return refuse(
@@ -438,11 +434,7 @@ pub async fn login(
 
 /// Signs this device out: forgets the token it presents.
 pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
-    let Some(token) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-    else {
+    let Some(token) = bearer(&headers) else {
         return refuse(
             StatusCode::UNAUTHORIZED,
             "Send the device token to sign out.",

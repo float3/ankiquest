@@ -223,7 +223,11 @@ pub fn profile(profile: &mut crate::game::Profile, language: &str) {
     }
 }
 
-pub fn notification(notice: &mut crate::decks::Notification, language: &str, sender_display: &str) {
+pub fn notification(
+    notice: &mut crate::notifications::Notification,
+    language: &str,
+    sender_display: &str,
+) {
     let language = normalize(language);
     if matches!(notice.kind.as_str(), "message" | "reply") || language == "en" {
         return;
@@ -268,7 +272,7 @@ mod tests {
     use super::*;
     #[test]
     fn celebrations_speak_spanish() {
-        let mut notice = crate::decks::Notification {
+        let mut notice = crate::notifications::Notification {
             id: 1,
             title: "New best 24 hours!".into(),
             body: "1200 XP in 24 hours, beating your old best of 900 XP.".into(),
@@ -322,7 +326,7 @@ mod tests {
                 "Aldana terminou as revisões de Spanish::{0} por hoje.",
             ),
         ] {
-            let mut notice = crate::decks::Notification {
+            let mut notice = crate::notifications::Notification {
                 id: 1,
                 title: "Deck complete".into(),
                 body: "Aldana has finished their Spanish::{0} studies for today.".into(),

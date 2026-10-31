@@ -1,14 +1,21 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
-use crate::decks::{Notification, Outgoing};
-use crate::game::{Clock, MAX_FREEZES, Profile, Week};
+use crate::access::authorized;
+use crate::app::App;
+use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
+use crate::notifications::{Notification, Outgoing};
 use crate::store::{Error, Store};
+use crate::web_util::store_error;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub use crate::competition::WeeklyRecap as Recap;
 
 const HOUR: i64 = 3_600_000;
-const DAY: i64 = 24 * HOUR;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -118,7 +125,7 @@ pub fn settings(store: &Store, user: &str) -> Result<Settings, Error> {
 /// Full replacement, after authentication by the API handler. No historical
 /// freeze or recap is announced when its switch is enabled for the first time.
 pub fn save_settings(store: &mut Store, user: &str, value: &Settings) -> Result<(), Error> {
-    save_settings_at(store, user, value, crate::now_ms())
+    save_settings_at(store, user, value, crate::app::now_ms())
 }
 
 fn save_settings_at(
@@ -211,17 +218,17 @@ fn baseline(store: &Store, user: &str, kind: &str, enabled: bool, now: i64) -> R
 
 fn local_midnight(clock: &Clock, now: i64) -> i64 {
     let offset = clock.offset_west_min * 60_000;
-    (now - offset).div_euclid(DAY) * DAY + offset
+    (now - offset).div_euclid(DAY_MS) * DAY_MS + offset
 }
 
 fn deadline(clock: &Clock, now: i64) -> i64 {
-    (clock.day(now) + 1) * DAY + clock.rollover_hour * HOUR + clock.offset_west_min * 60_000
+    (clock.day(now) + 1) * DAY_MS + clock.rollover_hour * HOUR + clock.offset_west_min * 60_000
 }
 
 /// Place the preferred wall-clock hour inside the current Anki day. Hours
 /// before rollover belong to its final morning, rather than its opening day.
 fn reminder_due(prefs: &Settings, clock: &Clock, now: i64) -> bool {
-    let day_start = deadline(clock, now) - DAY;
+    let day_start = deadline(clock, now) - DAY_MS;
     let scheduled =
         day_start + (i64::from(prefs.reminder_hour) - clock.rollover_hour).rem_euclid(24) * HOUR;
     now >= scheduled
@@ -245,7 +252,7 @@ fn deadline_window(prefs: &Settings, clock: &Clock, now: i64, cutoff: i64) -> bo
     }
     let mut quiet_at = local_midnight(clock, now) + i64::from(prefs.quiet_start) * HOUR;
     if quiet_at <= now {
-        quiet_at += DAY;
+        quiet_at += DAY_MS;
     }
     let quiet_length =
         (i64::from(prefs.quiet_end) - i64::from(prefs.quiet_start)).rem_euclid(24) * HOUR;
@@ -271,24 +278,12 @@ fn next_milestone(profile: &Profile) -> Option<u64> {
     .then_some(next)
 }
 
-fn seen(store: &Store, user: &str, key: &str) -> Result<bool, Error> {
-    Ok(store
-        .conn
-        .query_row(
-            "select 1 from seen where user = ?1 and key = ?2",
-            params![user, key],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
 fn used_budget(store: &Store, user: &str, clock: &Clock, now: i64) -> Result<u8, Error> {
     let start = local_midnight(clock, now);
     let count: i64 = store.conn.query_row(
         "select count(*) from notifications where recipient = ?1
          and kind glob 'reminder_*' and created_at >= ?2 and created_at < ?3",
-        params![user, start, start + DAY],
+        params![user, start, start + DAY_MS],
         |row| row.get(0),
     )?;
     Ok(count.min(255) as u8)
@@ -472,7 +467,7 @@ pub fn tick(
     }
     let day = profile.day;
     let urgent_key = format!("reminder:urgent:{day}");
-    let urgent_seen = seen(store, user, &urgent_key)?;
+    let urgent_seen = store.is_seen(user, &urgent_key)?;
     let due = reminder_due(&prefs, clock, now_ms);
     let mut candidates = Vec::new();
     if prefs.urgent_streak && unprotected(profile) && urgent_window(&prefs, clock, now_ms) {
@@ -488,9 +483,9 @@ pub fn tick(
     if prefs.freeze_used
         && let Some(frozen) = profile.history.iter().rev().find(|item| {
             item.frozen
-                && item.at + DAY > freeze_since
-                && item.at + DAY <= now_ms
-                && now_ms - (item.at + DAY) < 2 * DAY
+                && item.at + DAY_MS > freeze_since
+                && item.at + DAY_MS <= now_ms
+                && now_ms - (item.at + DAY_MS) < 2 * DAY_MS
         })
     {
         candidates.push(Candidate {
@@ -619,10 +614,10 @@ pub fn tick(
         });
     }
     for candidate in candidates {
-        if seen(store, user, &candidate.key)? {
+        if store.is_seen(user, &candidate.key)? {
             continue;
         }
-        let already_urgent = seen(store, user, &urgent_key)?;
+        let already_urgent = store.is_seen(user, &urgent_key)?;
         if already_urgent && matches!(candidate.kind, "reminder_daily" | "reminder_milestone") {
             continue;
         }
@@ -653,14 +648,51 @@ pub fn tick(
     Ok(())
 }
 
+async fn get_reminders(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    settings(&app.store.lock().unwrap(), &user)
+        .map(Json)
+        .map_err(store_error)
+}
+
+async fn set_reminders(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(settings): Json<Settings>,
+) -> Result<Json<Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if !settings.valid() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    save_settings(&mut app.store.lock().unwrap(), &user, &settings).map_err(store_error)?;
+    Ok(Json(settings))
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new().route(
+        "/api/community/reminders/{user}",
+        get(get_reminders).post(set_reminders),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game::{self, FreezePolicy, HistoryDay, Review};
+    use crate::test_support::*;
 
     const DATE: i64 = 20_000;
     fn at(hour: i64) -> i64 {
-        DATE * DAY + hour * HOUR
+        DATE * DAY_MS + hour * HOUR
     }
 
     fn store() -> (Store, std::path::PathBuf) {
@@ -680,7 +712,7 @@ mod tests {
             "hill",
             "Hill",
             &[Review {
-                id: now - DAY,
+                id: now - DAY_MS,
                 cid: 1,
                 last_ivl: 1,
                 ivl: None,
@@ -763,7 +795,7 @@ mod tests {
         drop(store);
         let mut store = Store::open(&path).unwrap();
         assert!(store.take_deck_deliveries(at(20)).unwrap().is_empty());
-        assert!(seen(&store, "hill", "risk:legacy").unwrap());
+        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         assert!(store.notifications("hill", at(20)).unwrap().is_empty());
         cleanup(store, path);
     }
@@ -792,7 +824,7 @@ mod tests {
         let pending = store.take_deck_deliveries(at(20)).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].user, "friend");
-        assert!(seen(&store, "hill", "risk:legacy").unwrap());
+        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         cleanup(store, path);
     }
 
@@ -864,7 +896,11 @@ mod tests {
         assert!(store.notifications("hill", retry_at).unwrap().is_empty());
         assert!(store.take_deck_deliveries(retry_at).unwrap().is_empty());
         assert_eq!(used_budget(&store, "hill", &clock, retry_at).unwrap(), 1);
-        assert!(seen(&store, "hill", &format!("reminder:urgent:{}", p.day)).unwrap());
+        assert!(
+            store
+                .is_seen("hill", &format!("reminder:urgent:{}", p.day))
+                .unwrap()
+        );
         cleanup(store, path);
     }
 
@@ -1058,12 +1094,12 @@ mod tests {
         super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
-        let now = end + DAY + HOUR;
+        let now = end + DAY_MS + HOUR;
         let p = profile(&clock, now);
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,
@@ -1099,12 +1135,12 @@ mod tests {
             ..Settings::default()
         };
         super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
-        let now = end + DAY + HOUR;
+        let now = end + DAY_MS + HOUR;
         let p = profile(&clock, now);
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,
@@ -1313,7 +1349,7 @@ mod tests {
         let clock = Clock::default();
         let mut p = profile(&clock, at(20));
         p.history.push(HistoryDay {
-            at: at(4) - DAY,
+            at: at(4) - DAY_MS,
             date: game::date_string(DATE - 1),
             xp: 0,
             reviews: 0,
@@ -1378,8 +1414,8 @@ mod tests {
         save_settings(&mut store, "hill", &prefs).unwrap();
         let mut p = profile(&clock, at(20));
         let historical = Recap {
-            week_start: end - 14 * DAY,
-            week_end: end - 7 * DAY,
+            week_start: end - 14 * DAY_MS,
+            week_end: end - 7 * DAY_MS,
             valid_until: end,
             days_studied: 6,
             xp: 800,
@@ -1411,9 +1447,9 @@ mod tests {
             "reminder_weekly_closing"
         );
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,
@@ -1495,5 +1531,81 @@ mod tests {
         assert_eq!(guard(&done), DeliveryGuard::Cancel);
         assert_eq!(next_milestone(&done), None);
         cleanup(store, path);
+    }
+
+    #[tokio::test]
+    async fn community_reminder_preferences_require_owner_auth_and_validate_before_saving() {
+        let (app, path) = fixture();
+        assert_eq!(
+            get_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                HeaderMap::new()
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get_reminders(State(app.clone()), UrlPath("cerro".into()), headers("hill"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        let prefs = get_reminders(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!prefs.urgent_streak);
+        let mut enabled = prefs.clone();
+        enabled.urgent_streak = true;
+        let _ = set_reminders(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(enabled.clone()),
+        )
+        .await
+        .unwrap();
+        let mut invalid = enabled.clone();
+        invalid.quiet_start = 24;
+        assert_eq!(
+            set_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(invalid)
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            get_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro")
+            )
+            .await
+            .unwrap()
+            .0,
+            enabled
+        );
+        assert!(
+            !get_reminders(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+                .await
+                .unwrap()
+                .0
+                .urgent_streak
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

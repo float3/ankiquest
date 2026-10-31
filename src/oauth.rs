@@ -4,7 +4,8 @@
 
 use crate::accounts::{clean_device, clean_display, refuse, reply, valid_username};
 use crate::privacy::escape;
-use crate::{App, Error, access, now_ms};
+use crate::web_util::{base64url, hex, hex_cookie, normalize_user, random_bytes, set_cookie};
+use crate::{Error, access, app::App, app::now_ms};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, DefaultBodyLimit, Form, Path, Query, State};
@@ -297,29 +298,7 @@ impl Flows {
 }
 
 fn random() -> Result<[u8; 32], Error> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|_| "randomness unavailable")?;
-    Ok(bytes)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// Unpadded base64url, as PKCE uses.
-pub(crate) fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..=chunk.len() {
-            out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
-        }
-    }
-    out
+    random_bytes("randomness unavailable")
 }
 
 /// The S256 code challenge for a PKCE verifier.
@@ -328,37 +307,11 @@ pub(crate) fn challenge(verifier: &str) -> String {
 }
 
 fn flow_cookie(headers: &HeaderMap) -> Option<&str> {
-    let mut found = None;
-    for header in headers.get_all(header::COOKIE) {
-        for cookie in header.to_str().ok()?.split(';') {
-            if let Some((name, value)) = cookie.trim().split_once('=')
-                && name == COOKIE
-            {
-                if found.is_some()
-                    || value.len() != 64
-                    || !value.bytes().all(|b| b.is_ascii_hexdigit())
-                {
-                    return None;
-                }
-                found = Some(value);
-            }
-        }
-    }
-    found
+    hex_cookie(headers, COOKIE)
 }
 
 fn set_flow(app: &App, value: &str, max_age: i64) -> HeaderValue {
-    let secure = app
-        .config
-        .public_url
-        .as_deref()
-        .is_some_and(|url| url.starts_with("https://"));
-    format!(
-        "{COOKIE}={value}; Path=/auth/oauth/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
-        if secure { "; Secure" } else { "" }
-    )
-    .parse()
-    .unwrap()
+    set_cookie(app, COOKIE, "/auth/oauth/", value, max_age)
 }
 
 /// A page on this site to return to, or the start page.
@@ -1017,7 +970,7 @@ async fn create(
         );
     }
     let again = |status, text| form_page(status, &choice.user, &choice.display, Some(text));
-    let user = choice.user.trim().to_ascii_lowercase();
+    let user = normalize_user(&choice.user);
     if !valid_username(&user) {
         return again(
             StatusCode::BAD_REQUEST,
