@@ -20,9 +20,13 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              user text primary key,
              mode text not null,
              value integer,
-             reached_day integer
+             reached_day integer,
+             since integer
          ) without rowid;",
     )?;
+    if !crate::store::has_column(conn, "goals", "since")? {
+        conn.execute("alter table goals add column since integer", [])?;
+    }
     Ok(())
 }
 
@@ -32,19 +36,31 @@ fn limits(mode: &str) -> Option<Option<(u32, u32, u32)>> {
         "off" => Some(None),
         "cards" => Some(Some((100, 1, 5000))),
         "minutes" => Some(Some((20, 1, 600))),
-        "backlog" => Some(Some((10, 1, 100))),
+        "backlog" => Some(Some((30, 1, 365))),
         _ => None,
     }
 }
 
-/// A goal as clients send and receive it. `value` may be left out, and is kept but unused
-/// while the mode is `off`.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+/// A goal as clients send it. `value` may be left out, and is kept but unused while the mode
+/// is `off`; `restart` starts the backlog plan again from today.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Setting {
     pub mode: String,
     #[serde(default)]
     pub value: Option<u32>,
+    #[serde(default)]
+    pub restart: bool,
+}
+
+/// A goal as the server keeps it: `since` is the Anki day the plan started, and `chosen` says
+/// whether the player ever picked one.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Goal {
+    pub mode: String,
+    pub value: Option<u32>,
+    pub since: i64,
+    pub chosen: bool,
 }
 
 impl Setting {
@@ -52,14 +68,14 @@ impl Setting {
     fn checked(self) -> Option<Self> {
         match limits(&self.mode)? {
             None => Some(Self {
-                mode: self.mode,
                 value: None,
+                ..self
             }),
             Some((default, low, high)) => {
                 let value = self.value.unwrap_or(default);
                 (low..=high).contains(&value).then_some(Self {
-                    mode: self.mode,
                     value: Some(value),
+                    ..self
                 })
             }
         }
@@ -71,21 +87,24 @@ impl Setting {
 pub struct GoalView {
     pub mode: String,
     pub value: Option<u32>,
+    pub since: i64,
     /// Reviews or minutes so far; `null` for `off` and `backlog`.
     pub progress: Option<u64>,
     pub reached: bool,
 }
 
-fn stored(conn: &Connection, user: &str) -> rusqlite::Result<(Setting, Option<i64>)> {
+fn stored(conn: &Connection, user: &str, today: i64) -> rusqlite::Result<(Goal, Option<i64>)> {
     Ok(conn
         .query_row(
-            "select mode, value, reached_day from goals where user = ?1",
+            "select mode, value, reached_day, since from goals where user = ?1",
             [user],
             |r| {
                 Ok((
-                    Setting {
+                    Goal {
                         mode: r.get(0)?,
                         value: r.get::<_, Option<u32>>(1)?.or(Some(100)),
+                        since: r.get::<_, Option<i64>>(3)?.unwrap_or(today),
+                        chosen: true,
                     },
                     r.get(2)?,
                 ))
@@ -93,9 +112,11 @@ fn stored(conn: &Connection, user: &str) -> rusqlite::Result<(Setting, Option<i6
         )
         .optional()?
         .unwrap_or((
-            Setting {
+            Goal {
                 mode: "backlog".into(),
-                value: Some(10),
+                value: Some(30),
+                since: today,
+                chosen: false,
             },
             None,
         )))
@@ -103,7 +124,7 @@ fn stored(conn: &Connection, user: &str) -> rusqlite::Result<(Setting, Option<i6
 
 /// The player's goal and how far today's study is toward it.
 pub fn view(conn: &Connection, user: &str, profile: &Profile) -> rusqlite::Result<GoalView> {
-    let (setting, reached_day) = stored(conn, user)?;
+    let (setting, reached_day) = stored(conn, user, profile.day)?;
     let value = u64::from(setting.value.unwrap_or(0));
     let progress = match setting.mode.as_str() {
         "cards" => Some(profile.today.reviews),
@@ -118,6 +139,7 @@ pub fn view(conn: &Connection, user: &str, profile: &Profile) -> rusqlite::Resul
     Ok(GoalView {
         mode: setting.mode,
         value: setting.value,
+        since: setting.since,
         progress,
         reached,
     })
@@ -132,7 +154,7 @@ pub fn event(conn: &Connection, user: &str, profile: &Profile) -> rusqlite::Resu
 
 /// Records a reached backlog goal for `day`, once, if that is the player's mode and today.
 fn report(conn: &Connection, user: &str, day: i64, today: i64) -> rusqlite::Result<bool> {
-    let (setting, reached_day) = stored(conn, user)?;
+    let (setting, reached_day) = stored(conn, user, today)?;
     if setting.mode != "backlog" || day != today || reached_day == Some(day) {
         return Ok(false);
     }
@@ -143,25 +165,39 @@ fn report(conn: &Connection, user: &str, day: i64, today: i64) -> rusqlite::Resu
     Ok(true)
 }
 
-fn save(conn: &Connection, user: &str, setting: &Setting) -> rusqlite::Result<()> {
+/// Saves a goal. A new mode or value, or a restart, starts the plan from `today`.
+fn save(conn: &Connection, user: &str, setting: &Setting, today: i64) -> rusqlite::Result<()> {
+    let (current, _) = stored(conn, user, today)?;
+    let value = setting.value.or(current.value);
+    let unchanged = current.chosen && current.mode == setting.mode && current.value == value;
+    let since = if unchanged && !setting.restart {
+        current.since
+    } else {
+        today
+    };
     conn.execute(
-        "insert into goals (user, mode, value) values (?1, ?2, ?3)
-         on conflict (user) do update set mode = excluded.mode, value = coalesce(excluded.value, goals.value)",
-        params![user, setting.mode, setting.value],
+        "insert into goals (user, mode, value, since) values (?1, ?2, ?3, ?4)
+         on conflict (user) do update set mode = excluded.mode, value = excluded.value, since = excluded.since",
+        params![user, setting.mode, value, since],
     )?;
     Ok(())
+}
+
+fn today_of(conn: &Connection, user: &str) -> rusqlite::Result<i64> {
+    Ok(clock_in(conn, user)?.day(now_ms()))
 }
 
 async fn get_goal(
     State(app): State<Arc<App>>,
     Path(user): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Setting>, StatusCode> {
+) -> Result<Json<Goal>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let store = app.store.lock().unwrap();
-    Ok(Json(stored(&store.conn, &user).map_err(store_error)?.0))
+    let today = today_of(&store.conn, &user).map_err(store_error)?;
+    Ok(Json(stored(&store.conn, &user, today).map_err(store_error)?.0))
 }
 
 async fn set_goal(
@@ -169,14 +205,15 @@ async fn set_goal(
     Path(user): Path<String>,
     headers: HeaderMap,
     Json(setting): Json<Setting>,
-) -> Result<Json<Setting>, StatusCode> {
+) -> Result<Json<Goal>, StatusCode> {
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let setting = setting.checked().ok_or(StatusCode::BAD_REQUEST)?;
     let store = app.store.lock().unwrap();
-    save(&store.conn, &user, &setting).map_err(store_error)?;
-    Ok(Json(stored(&store.conn, &user).map_err(store_error)?.0))
+    let today = today_of(&store.conn, &user).map_err(store_error)?;
+    save(&store.conn, &user, &setting, today).map_err(store_error)?;
+    Ok(Json(stored(&store.conn, &user, today).map_err(store_error)?.0))
 }
 
 #[derive(Deserialize)]
@@ -195,9 +232,7 @@ async fn reached(
         return Err(StatusCode::UNAUTHORIZED);
     }
     let store = app.store.lock().unwrap();
-    let today = clock_in(&store.conn, &user)
-        .map_err(store_error)?
-        .day(now_ms());
+    let today = today_of(&store.conn, &user).map_err(store_error)?;
     if report(&store.conn, &user, reached.day, today).map_err(store_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -220,7 +255,16 @@ mod tests {
         Setting {
             mode: mode.into(),
             value,
+            restart: false,
         }
+    }
+
+    fn shown(goal: Goal) -> (String, Option<u32>, bool) {
+        (goal.mode, goal.value, goal.chosen)
+    }
+
+    fn plain(mode: &str, value: u32, chosen: bool) -> (String, Option<u32>, bool) {
+        (mode.into(), Some(value), chosen)
     }
 
     #[test]
@@ -235,7 +279,7 @@ mod tests {
         );
         assert_eq!(
             setting("backlog", None).checked(),
-            Some(setting("backlog", Some(10)))
+            Some(setting("backlog", Some(30)))
         );
         assert_eq!(
             setting("off", Some(7)).checked(),
@@ -245,7 +289,7 @@ mod tests {
             setting("cards", Some(0)),
             setting("cards", Some(5001)),
             setting("minutes", Some(601)),
-            setting("backlog", Some(101)),
+            setting("backlog", Some(366)),
             setting("weekly", Some(3)),
         ] {
             assert_eq!(bad.checked(), None);
@@ -257,14 +301,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_goal_is_private_validated_and_defaults_to_a_tenth_of_the_backlog() {
+    async fn the_goal_is_private_validated_and_defaults_to_a_month_of_backlog() {
         let (app, path) = fixture();
         let get = |user: &str, token: &str| {
             get_goal(State(app.clone()), UrlPath(user.into()), headers(token))
         };
         assert_eq!(
-            get("hill", "hill").await.unwrap().0,
-            setting("backlog", Some(10))
+            shown(get("hill", "hill").await.unwrap().0),
+            plain("backlog", 30, false)
         );
         assert_eq!(
             get("hill", "cerro").await.err(),
@@ -283,22 +327,22 @@ mod tests {
             Some(StatusCode::BAD_REQUEST)
         );
         assert_eq!(
-            put(setting("minutes", Some(30))).await.unwrap().0,
-            setting("minutes", Some(30))
+            shown(put(setting("minutes", Some(30))).await.unwrap().0),
+            plain("minutes", 30, true)
         );
         assert_eq!(
-            get("hill", "hill").await.unwrap().0,
-            setting("minutes", Some(30))
+            shown(get("hill", "hill").await.unwrap().0),
+            plain("minutes", 30, true)
         );
         let off: Setting = serde_json::from_value(serde_json::json!({"mode": "off"})).unwrap();
-        assert_eq!(put(off).await.unwrap().0, setting("off", Some(30)));
+        assert_eq!(shown(put(off).await.unwrap().0), plain("off", 30, true));
         assert_eq!(
-            get("hill", "hill").await.unwrap().0,
-            setting("off", Some(30))
+            shown(get("hill", "hill").await.unwrap().0),
+            plain("off", 30, true)
         );
         assert_eq!(
-            get("cerro", "cerro").await.unwrap().0,
-            setting("backlog", Some(10))
+            shown(get("cerro", "cerro").await.unwrap().0),
+            plain("backlog", 30, false)
         );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
@@ -363,7 +407,7 @@ mod tests {
             now_ms(),
             &game::FreezePolicy::default(),
         );
-        save(&store.conn, "hill", &setting("cards", Some(100))).unwrap();
+        save(&store.conn, "hill", &setting("cards", Some(100)), profile.day).unwrap();
         let today = view(&store.conn, "hill", &profile).unwrap();
         assert_eq!(
             (today.progress, today.reached),
@@ -371,12 +415,12 @@ mod tests {
             "three of a hundred cards"
         );
         assert!(event(&store.conn, "hill", &profile).unwrap().is_none());
-        save(&store.conn, "hill", &setting("cards", Some(3))).unwrap();
+        save(&store.conn, "hill", &setting("cards", Some(3)), profile.day).unwrap();
         let moment = event(&store.conn, "hill", &profile).unwrap().unwrap();
         assert_eq!(moment.key, format!("goal:{}", profile.day));
         assert_eq!(moment.title, "Daily goal reached!");
         assert_eq!(moment.body, "3 cards today in 0 minutes.");
-        save(&store.conn, "hill", &setting("backlog", Some(100))).unwrap();
+        save(&store.conn, "hill", &setting("backlog", Some(100)), profile.day).unwrap();
         assert_eq!(view(&store.conn, "hill", &profile).unwrap().progress, None);
         assert!(event(&store.conn, "hill", &profile).unwrap().is_none());
         assert!(report(&store.conn, "hill", profile.day, profile.day).unwrap());
@@ -386,6 +430,27 @@ mod tests {
             event(&store.conn, "hill", &profile).unwrap().is_none(),
             "a reported reach counts for its own day"
         );
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn a_plan_starts_when_the_goal_changes_or_restarts() {
+        let (store, path) = crate::decks::tests::temporary_store();
+        let since = |today| stored(&store.conn, "hill", today).unwrap().0.since;
+        assert_eq!(since(5), 5, "an unchosen goal starts today");
+        save(&store.conn, "hill", &setting("backlog", Some(14)), 10).unwrap();
+        assert_eq!(since(12), 10);
+        save(&store.conn, "hill", &setting("backlog", Some(14)), 12).unwrap();
+        assert_eq!(since(12), 10, "saving the same goal keeps its plan");
+        save(&store.conn, "hill", &setting("backlog", Some(30)), 13).unwrap();
+        assert_eq!(since(13), 13, "a new length starts a new plan");
+        let restart = Setting {
+            restart: true,
+            ..setting("backlog", Some(30))
+        };
+        save(&store.conn, "hill", &restart, 20).unwrap();
+        assert_eq!(since(20), 20);
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
     }
