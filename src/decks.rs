@@ -225,6 +225,7 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
         ("reply_to_title", "text"),
         ("reply_to_body", "text"),
         ("topic", "text"),
+        ("win_id", "integer"),
     ] {
         if !has_column(conn, "notifications", column)? {
             conn.execute(

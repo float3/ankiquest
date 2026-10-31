@@ -260,6 +260,9 @@ pub(crate) fn mark_events_seen(store: &Store, user: &str, profile: &Profile) -> 
     for event in &profile.events {
         store.mark_seen(user, &event.key)?;
     }
+    if let Some(goal) = crate::goals::event(&store.conn, user, profile)? {
+        store.mark_seen(user, &goal.key)?;
+    }
     Ok(())
 }
 

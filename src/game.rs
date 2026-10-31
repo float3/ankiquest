@@ -1017,6 +1017,9 @@ pub struct Profile {
     pub events: Vec<Event>,
     #[serde(skip)]
     pub history: Vec<HistoryDay>,
+    /// The daily goal and today's progress, in the owner's view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<crate::goals::GoalView>,
 }
 
 pub fn level_need(level: u64) -> u64 {
@@ -1656,6 +1659,13 @@ pub fn compute_with_rules(
             body: format!("You have studied {streak} days in a row."),
         });
     }
+    if today_counts {
+        events.push(Event {
+            key: format!("secured:{today}"),
+            title: "Streak secured!".into(),
+            body: format!("Today counts toward your {streak}-day streak."),
+        });
+    }
 
     let all_conquests = conquests(reviews, now_ms);
     events.extend(
@@ -1748,6 +1758,20 @@ pub fn compute_with_rules(
         day: today,
         events,
         history,
+        goal: None,
+    }
+}
+
+/// The moment the daily goal is reached, with today's reviews and minutes.
+pub fn goal_event(day: i64, reviews: u64, minutes: u64) -> Event {
+    Event {
+        key: format!("goal:{day}"),
+        title: "Daily goal reached!".into(),
+        body: format!(
+            "{reviews} {} today in {minutes} {}.",
+            if reviews == 1 { "card" } else { "cards" },
+            if minutes == 1 { "minute" } else { "minutes" }
+        ),
     }
 }
 
@@ -3224,6 +3248,22 @@ mod tests {
         assert_eq!(heat, p.xp_total);
         assert!(p.xp_total > 0);
         assert_eq!(p.week_xp, p.xp_total);
+    }
+
+    #[test]
+    fn a_day_that_counts_secures_the_streak_once_per_day() {
+        let reviews: Vec<Review> = reviews_on(1, 5, 0);
+        let p = compute("a", "a", &reviews, &utc(), &Week::default(), at(1));
+        let secured = p.events.iter().find(|e| e.key == "secured:1").unwrap();
+        assert_eq!(secured.title, "Streak secured!");
+        assert_eq!(secured.body, "Today counts toward your 1-day streak.");
+        let later = compute("a", "a", &reviews, &utc(), &Week::default(), at(2));
+        assert!(!later.events.iter().any(|e| e.key.starts_with("secured:")));
+        let goal = goal_event(1, 1, 12);
+        assert_eq!(
+            (goal.key.as_str(), goal.body.as_str()),
+            ("goal:1", "1 card today in 12 minutes.")
+        );
     }
 
     #[test]

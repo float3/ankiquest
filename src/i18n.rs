@@ -114,6 +114,11 @@ pub fn notice(notice: &mut crate::feedback::Notice, language: &str) {
     notice.body = system_text(&notice.body, language);
 }
 
+/// A server-written title or body in `language`.
+pub fn system(value: &str, language: &str) -> String {
+    system_text(value, language)
+}
+
 fn system_text(value: &str, language: &str) -> String {
     let language = normalize(language);
     if language == "en" {
@@ -134,6 +139,24 @@ fn system_text(value: &str, language: &str) -> String {
         } else {
             substitute(&text("Quest complete: {0}", language), &[&title])
         };
+    }
+    if let Some(streak) = value
+        .strip_prefix("Today counts toward your ")
+        .and_then(|rest| rest.strip_suffix("-day streak."))
+    {
+        return substitute(
+            &text("Today counts toward your {0}-day streak.", language),
+            &[streak],
+        );
+    }
+    if let Some((cards, minutes)) = value
+        .split_once(" cards today in ")
+        .and_then(|(cards, rest)| Some((cards, rest.strip_suffix(" minutes.")?)))
+    {
+        return substitute(
+            &text("{0} cards today in {1} minutes.", language),
+            &[cards, minutes],
+        );
     }
     if let Some((description, xp)) = value.rsplit_once(" (+") {
         return format!("{} (+{xp}", text(description, language));
@@ -287,6 +310,10 @@ mod tests {
             action_required: false,
             reply_to: None,
             topic: None,
+            win: None,
+            image: None,
+            reacted: false,
+            link_token: None,
         };
         notification(&mut notice, "es", "");
         assert_eq!(notice.title, "¡Nuevo récord en 24 horas!");
@@ -295,6 +322,18 @@ mod tests {
             "1200 XP en 24 horas: has superado tu récord anterior de 900 XP."
         );
         assert_eq!(text("50-day streak!", "es"), "¡Racha de 50 días!");
+    }
+
+    #[test]
+    fn new_moment_texts_keep_their_numbers_without_a_translation() {
+        assert_eq!(
+            system("Today counts toward your 12-day streak.", "de"),
+            "Today counts toward your 12-day streak."
+        );
+        assert_eq!(
+            system("120 cards today in 35 minutes.", "fr"),
+            "120 cards today in 35 minutes."
+        );
     }
 
     #[test]
@@ -341,6 +380,10 @@ mod tests {
                 action_required: false,
                 reply_to: None,
                 topic: None,
+                win: None,
+                image: None,
+                reacted: false,
+                link_token: None,
             };
             notification(&mut notice, language, "Aldana");
             assert_eq!(notice.title, title);
