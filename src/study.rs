@@ -4,7 +4,7 @@ use crate::access::authorized;
 use crate::app::{App, Player, mark_events_seen, now_ms};
 use crate::game::{Clock, Profile, Review};
 use crate::web_util::{failed_for, store_error};
-use crate::{access, challenges, decks, feedback, game, i18n};
+use crate::{access, challenges, decks, feedback, game, goals, i18n};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -38,6 +38,11 @@ pub(crate) async fn profile(
         return Err(StatusCode::NOT_FOUND);
     }
     let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
+    if owner {
+        profile.goal = Some(
+            goals::view(&app.store.lock().unwrap().conn, &user, &profile).map_err(store_error)?,
+        );
+    }
     i18n::profile(&mut profile, &language);
     Ok(Json(profile))
 }
@@ -292,6 +297,8 @@ pub(crate) async fn upload(
     if silent {
         mark_events_seen(&store, &user, &profile).map_err(store_error)?;
     }
+    profile.goal =
+        Some(goals::view(&store.conn, &user, &profile).map_err(|e| store_error(e.into()))?);
     let mut feedback = feedback::feedback(before.as_ref(), &profile, &announced);
     let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
     i18n::profile(&mut profile, &language);

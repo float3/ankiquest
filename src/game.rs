@@ -1017,6 +1017,9 @@ pub struct Profile {
     pub events: Vec<Event>,
     #[serde(skip)]
     pub history: Vec<HistoryDay>,
+    /// The daily goal and today's progress, in the owner's view only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub goal: Option<crate::goals::GoalView>,
 }
 
 pub fn level_need(level: u64) -> u64 {
@@ -1748,6 +1751,20 @@ pub fn compute_with_rules(
         day: today,
         events,
         history,
+        goal: None,
+    }
+}
+
+/// The moment the daily goal is reached, with today's reviews and minutes.
+pub fn goal_event(day: i64, reviews: u64, minutes: u64) -> Event {
+    Event {
+        key: format!("goal:{day}"),
+        title: "Daily goal reached!".into(),
+        body: format!(
+            "{reviews} {} today in {minutes} {}.",
+            if reviews == 1 { "card" } else { "cards" },
+            if minutes == 1 { "minute" } else { "minutes" }
+        ),
     }
 }
 

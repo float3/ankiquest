@@ -72,6 +72,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
     ("announcements_sent", "select id, title, body, groups, recipients, created_at from announcements where sender = ?1 order by id"),
     ("pending_removal", "select requested_at from account_removals where user = ?1"),
+    ("daily_goal", "select mode, value, reached_day from goals where user = ?1"),
 ];
 
 /// Owned tables left out of the download, with why.
@@ -129,6 +130,7 @@ const OWNED: &[(&str, &str)] = &[
     ("freeze_grants", "user = ?1"),
     ("freeze_grant_reloads", "user = ?1"),
     ("sign_in_links", "user = ?1"),
+    ("goals", "user = ?1"),
     ("accounts", "user = ?1"),
 ];
 

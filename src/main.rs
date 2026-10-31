@@ -26,6 +26,7 @@ mod feedback;
 mod freezes;
 mod friend_nudges;
 mod game;
+mod goals;
 mod i18n;
 mod inbox;
 mod notifications;
@@ -208,6 +209,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
         .merge(shares::routes())
+        .merge(goals::routes())
         .merge(conquests::routes())
         .merge(social::routes())
         .merge(privacy::routes())
