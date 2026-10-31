@@ -1,5 +1,7 @@
 "use strict";
 import {friendNudges} from "./friend-nudges";
+import {escape as esc, nativeAccount} from "../common";
+import {failure, send, type SendOptions} from "../http";
 
 /* Payloads from /api/community (src/competition.rs) and the private community APIs. */
 interface Standing { user:string; display:string; xp:number; reviews:number; time_ms:number; new_cards:number; days_active:number; best_streak:number; freezes_used:number; }
@@ -34,8 +36,6 @@ interface NewChallenge { title:string; kind:FormDataEntryValue|null; cooperative
 
 const $ = <T extends HTMLElement = HTMLElement>(id:string) => document.getElementById(id) as T;
 function formField<T extends Element>(form:HTMLFormElement,name:string,type:abstract new()=>T):T { const item=form.elements.namedItem(name);if(item instanceof type)return item;throw new TypeError(`The form has no ${name} field.`); }
-const entities:Record<string,string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
-const esc = (value:unknown) => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
 const number = (value:unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
 const amount = (value:unknown) => Math.max(0, Number(value) || 0);
 const errorMessage = (error:unknown) => error instanceof Error ? error.message : String(error);
@@ -132,7 +132,7 @@ function renderCalendar() {
     const title=period?(winners.length?winners.map(name).join(" & "):aqText("No study recorded")):(key>today?aqText("Upcoming"):aqText("No recorded result"));
     const status=period?(isFinal(period)?period.reconstructed?aqText("Rebuilt"):aqText("Final"):period.status==="provisional"?aqText("Pending"):aqText("Live")):"";
     const label=`${date(key)}: ${title}${status?", "+status:""}${period?.partial?aqText(", partial period"):""}`;
-    cells+=aqHtml`<button type="button" class="day${today===key?aqText(" today"):""}${state.player&&!winners.includes(state.player)?" no-match":""}" data-period="day:${key}" aria-label="${esc(label)}" ${period?"":"disabled"}><span class="date">${day}</span>${winners.length?aqHtml`<span class="day-bottom">${avatar(winners[0])}<span class="winner">${esc(winners.length>1?name(winners[0])+" +"+(winners.length-1):name(winners[0]))}</span></span>`:aqHtml`<span class="winner muted">${key>today?aqText("Upcoming"):period?aqText("No study"):"—"}</span>`}<span class="mini-status">${esc(status)}${period?.partial?aqText(" · Partial"):""}</span></button>`;
+    cells+=aqHtml`<button type="button" class="day${today===key?" today":""}${state.player&&!winners.includes(state.player)?" no-match":""}" data-period="day:${key}" aria-label="${esc(label)}" ${period?"":"disabled"}><span class="date">${day}</span>${winners.length?aqHtml`<span class="day-bottom">${avatar(winners[0])}<span class="winner">${esc(winners.length>1?name(winners[0])+" +"+(winners.length-1):name(winners[0]))}</span></span>`:aqHtml`<span class="winner muted">${key>today?aqText("Upcoming"):period?aqText("No study"):"—"}</span>`}<span class="mini-status">${esc(status)}${period?.partial?aqText(" · Partial"):""}</span></button>`;
   }
   $("view-calendar").innerHTML=aqHtml`<article class="card calendar-card">${toolbar}<div class="calendar" id="calendar-grid" aria-label="Daily winners for ${esc(months()[state.month-1])} ${state.year}">${[aqText("Mon"),aqText("Tue"),aqText("Wed"),aqText("Thu"),aqText("Fri"),aqText("Sat"),aqText("Sun")].map(day=>aqHtml`<div class="weekday" aria-hidden="true">${day}</div>`).join("")}${cells}</div><div class="calendar-note"><span><i class="dot"></i> Click a day for standings</span><span>Pending = waiting for late syncs</span><span>Rebuilt = reconstructed history</span>${state.player?aqHtml`<span>Other winners are dimmed</span>`:""}</div></article>`;
 }
@@ -348,18 +348,17 @@ function renderActivityItem(item:Notice) {
   return aqHtml`<article class="card activity-item${unread ? " unread" : ""}" data-notice="${id}"><div class="card-head"><div><h3>${esc(item.title)}</h3><p><time datetime="${new Date(Number(item.created_at) * 1000).toISOString()}">${esc(new Date(Number(item.created_at) * 1000).toLocaleString(AnkiQuestI18n.language, {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></p></div>${unread ? aqHtml`<span class="chip blue">Unread</span>` : ""}</div>${replyContext(item)}<p class="activity-body">${esc(item.body)}</p><div class="actions">${target ? aqHtml`<button type="button" class="${item.action_required ? "primary" : ""}" data-activity-challenge="${esc(target)}" data-notice-id="${id}">${item.action_required ? aqText("View invitation") : aqText("Open goal")}</button>` : ""}${unread ? aqHtml`<button type="button" data-mark-read="${id}">Mark read</button>` : ""}</div>${answerable ? aqHtml`<form class="activity-reply" data-reply-form="${id}"><label class="field"><span>Reply to ${esc(name(item.sender))}</span><input name="message" maxlength="200" required autocomplete="off" placeholder="Say something kind"></label><div class="actions"><button type="submit">Send reply</button>${quickReply ? aqHtml`<button type="button" data-quick-reply="${id}" data-message="${esc(quickReply)}">${esc(quickReply)}</button>` : ""}</div><p class="status" role="status"></p></form>` : item.replied ? aqHtml`<p class="settings-hint">Reply sent</p>` : ""}</article>`;
 }
 
-async function request<T>(url:string,options:RequestInit={},owner:OwnerSession|null=null):Promise<T> {
-  const response=await fetch(url,{cache:"no-store",...options});
+async function request<T>(url:string,options:SendOptions={},owner:OwnerSession|null=null):Promise<T> {
+  const response=await send(url,options);
   if(owner&&state.session===owner&&(response.status===401||((!options.method||options.method==="GET")&&response.status===403))) {
-    const saved=window.ankiquestSession;
-    if(saved?.user===owner.user&&typeof saved.token==="string"&&saved.token.trim()===owner.token)delete window.ankiquestSession;
+    const saved=nativeAccount();
+    if(saved?.user===owner.user&&saved.token===owner.token)delete window.ankiquestSession;
     state.nativeDisconnected=true;clearPrivate();state.connectionError=aqText("Your personal connection could not be verified. Reconnect to continue.");renderPrivate();
   }
-  await AnkiQuestSite.checkAccess(response,options);
-  if(!response.ok) { let message="";try { const body:{error?:unknown;message?:unknown}|null=await response.json();message=typeof body?.error==="string"?body.error:typeof body?.message==="string"?body.message:""; }catch(_){} const error=Object.assign(new Error(response.status===401?aqText("Your account could not be verified. Connect again with your own token."):response.status===403?aqText("This account does not have access to that action."):message||`The server could not complete this request (${response.status}). Please try again.`),{status:response.status});throw error; }
+  if(!response.ok) { const error=await failure(response);if(response.status===401)error.message=aqText("Your account could not be verified. Connect again with your own token.");else if(response.status===403)error.message=aqText("This account does not have access to that action.");throw error; }
   return response.status===204?null as T:response.json();
 }
-function ownerRequest<T>(path:string,body?:unknown,session:OwnerSession|null=state.session):Promise<T> { if(!session) return Promise.reject(new Error(aqText("Connect your account first.")));return request<T>(path,{method:body===undefined?"GET":"POST",headers:AnkiQuestSite.ownerHeaders(session,body),...(body===undefined?{}:{body:JSON.stringify(body)})},session); }
+function ownerRequest<T>(path:string,body?:unknown,session:OwnerSession|null=state.session):Promise<T> { if(!session) return Promise.reject(new Error(aqText("Connect your account first.")));return request<T>(path,{method:body===undefined?"GET":"POST",session,json:body},session); }
 function privateRequest<T>(path:string,body?:unknown,session:OwnerSession|null=state.session) { return ownerRequest<T>(`/api/community/${path}/${encodeURIComponent(session?.user||"")}`,body,session); }
 async function loadPrivate() {
   if(!state.session) return;
@@ -396,23 +395,21 @@ function clearPrivate() {
 async function disconnect() { state.nativeDisconnected=true;delete window.ankiquestSession;state.disconnecting=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=errorMessage(error);} } finally { state.disconnecting=false; } }
 function connectNativeSession() {
   if(!state.data||state.nativeDisconnected)return false;
-  const saved=window.ankiquestSession;
-  if(typeof saved?.user!=="string"||!saved.user||typeof saved.token!=="string"||!saved.token.trim()) {
+  const candidate=nativeAccount();
+  if(!candidate) {
     if(state.nativeSession)clearPrivate();
     return false;
   }
-  const candidate={user:saved.user,token:saved.token.trim()};
   if(state.session&&(!state.nativeSession||(state.session!.user===candidate.user&&state.session.token===candidate.token)))return true;
   clearPrivate();state.session=candidate;state.nativeSession=true;
   $("connect-button").textContent=name(candidate.user);$("connect-button").className="auth-name";
   loadPrivate();loadActivity();loadFriendAchievements();
   return true;
 }
-addEventListener("ankiquest-auth",()=>{const saved=window.ankiquestSession;nativeAccountCleared=!(typeof saved?.user==="string"&&saved.user&&typeof saved.token==="string"&&saved.token.trim());if(nativeAccountCleared)clearPrivate();else connectNativeSession();});
+addEventListener("ankiquest-auth",()=>{nativeAccountCleared=!nativeAccount();if(nativeAccountCleared)clearPrivate();else connectNativeSession();});
 async function restoreMember() {
   if(state.connecting||nativeAccountCleared||connectNativeSession())return;
-  const saved=window.ankiquestSession;
-  if(typeof saved?.user==="string"&&saved.user&&typeof saved.token==="string"&&saved.token.trim())return;
+  if(nativeAccount())return;
   const epoch=state.authEpoch,session=await AnkiQuestSite.member();
   if(state.connecting||epoch!==state.authEpoch)return;
   if(!session){if(state.session&&!state.session.token)clearPrivate();return;}

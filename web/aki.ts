@@ -1,4 +1,6 @@
 /* Companions are presentation only: never change study rules, rewards or notifications. */
+import {escape} from "./common";
+
 (() => {
   "use strict";
   type Mood = "review" | "celebrate" | "streak" | "freeze";
@@ -6,8 +8,6 @@
   const ankilopePoses: Record<string, string> = {welcome:"welcome", review:"study", celebrate:"celebrate", streak:"study", freeze:"study", winner:"celebrate", face:"face"};
   const choices = new Set<string>(["aki", "ankilope", "none"]);
   let choice = "aki", identity: string | null | undefined = null, identityEpoch = 0;
-  const entities: Record<string, string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
-  const escape = (value: unknown) => String(value).replace(/[&<>"']/g, c => entities[c]);
   const source = (pose: string) => choice === "ankilope" ? `/ankilope/${ankilopePoses[pose] || "welcome"}.png` : `/aki/${pose}.png`;
   const image = (pose = "welcome", extra = "") => {
     pose = poses.has(pose) ? pose : "welcome";

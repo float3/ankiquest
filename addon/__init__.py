@@ -1,3 +1,4 @@
+import html
 import platform
 import tempfile
 import time
@@ -15,7 +16,7 @@ from .client import (
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
-    AccountError,
+    ServerError,
     Client,
     offset_west_min,
     reconcile,
@@ -214,10 +215,15 @@ def announce(rank, profile, inbox, quiet):
     if warning:
         tooltip(warning[0], period=5000)
     for entry in fresh:
-        text = notify.summarize(entry).replace("\n", "<br>")
+        text = notify.notice(entry)
         if notify.answerable(entry):
             text += "<br><i>Tools → ankiquest inbox to reply</i>"
         tooltip(text, period=6000)
+
+
+def failed(template, error):
+    """Errors can quote the server, so they are escaped before the rich-text tooltip."""
+    tooltip(template % html.escape(str(error)))
 
 
 def redraw():
@@ -289,7 +295,7 @@ def open_inbox():
 
 
 def account_error(error):
-    if isinstance(error, AccountError):
+    if isinstance(error, ServerError):
         if error.status == 401:
             return tr("Username or password not recognized.")
         if error.status == 403:
@@ -338,7 +344,7 @@ def open_account():
     refresh_shared_decks()
     refresh(False, resync=True)
     poll(quiet=True)
-    tooltip(tr("Signed in as %s.") % answer["user"])
+    tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
 
 
 def open_settings():
@@ -366,7 +372,7 @@ def test_connection(values):
         try:
             profile = future.result()
         except Exception as e:
-            tooltip("ankiquest: %s" % e)
+            failed("ankiquest: %s", e)
             return
         tooltip(tr("Connected as %s, level %d.") % (values["user"], profile.get("level", 1)))
 
@@ -390,7 +396,7 @@ def open_companion():
         try:
             current = future.result()
         except Exception as error:
-            tooltip("ankiquest: %s" % error)
+            failed("ankiquest: %s", error)
             return
         if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
             return
@@ -402,7 +408,7 @@ def open_companion():
             try:
                 companion = future.result()
             except Exception as error:
-                tooltip("ankiquest: %s" % error)
+                failed("ankiquest: %s", error)
                 return
             if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
                 return
@@ -432,7 +438,7 @@ def open_deck_notifications():
         try:
             settings = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not load your decks (%s)") % e)
+            failed(tr("ankiquest: could not load your decks (%s)"), e)
             return
         choice = ui.deck_dialog(mw, settings, state["companion"])
         if choice is None:
@@ -455,7 +461,7 @@ def save_deck_choice(api, shared, unshared, recipients, nudges, celebrations=Non
         try:
             mw.pm.profile[SHARED_KEY] = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not save your decks (%s)") % e)
+            failed(tr("ankiquest: could not save your decks (%s)"), e)
             return
         tooltip(tr("%d deck shared." if len(shared) == 1 else "%d decks shared.") % len(shared))
 
@@ -498,7 +504,7 @@ def check_updates(quiet=True):
             candidate = future.result()
         except Exception as e:
             if not quiet:
-                tooltip(tr("ankiquest: could not check for updates (%s)") % e)
+                failed(tr("ankiquest: could not check for updates (%s)"), e)
             return
         if updates.newer(candidate, current):
             offer_update(candidate)
@@ -527,7 +533,7 @@ def offer_update(candidate):
         try:
             path = future.result()
         except Exception as e:
-            tooltip(tr("ankiquest: could not download the update (%s)") % e)
+            failed(tr("ankiquest: could not download the update (%s)"), e)
             return
         install_update(path)
 

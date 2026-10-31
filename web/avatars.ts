@@ -1,12 +1,13 @@
 /* Shared profile pictures. Tokens and selected photos live only in the open editor. */
+import {escape as esc, nativeAccount} from "./common";
+import {send} from "./http";
+
 (() => {
   "use strict";
   const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
   let revisions: Record<string, string> = Object.create(null), generation = 0, pending: Promise<void> | null = null, editor: HTMLDialogElement | null = null, closeEditor: (() => void) | null = null, locked = false;
   const failed = new Set<string>();
-  const entities: Record<string, string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
-  const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
   const imageUrl = (user: string, revision: string) => `/api/avatar/${encodeURIComponent(user)}?v=${encodeURIComponent(revision)}`;
   const key = (user: string, revision: string) => JSON.stringify([user, revision]);
 
@@ -49,7 +50,7 @@
     const epoch = generation;
     pending = (async () => {
       try {
-        const response = await fetch("/api/avatars", { cache: "no-store" });
+        const response = await send("/api/avatars");
         if (!response.ok) {
           if ([401, 403, 404].includes(response.status) && epoch === generation) { revisions = Object.create(null); hydrate(); }
           return;
@@ -217,10 +218,10 @@
         const image = deleting ? null : await new Promise<Blob | null>(resolve => canvas!.toBlob(resolve, "image/png"));
         if (!deleting && !image) throw new Error("Could not prepare this picture. Try another JPEG or PNG.");
         if (closed) return;
-        const response = await fetch(`/api/avatar/${encodeURIComponent(user)}`, {
-          method: deleting ? "DELETE" : "POST", signal: controller.signal, credentials: "same-origin",
-          headers: { ...(credential ? { Authorization: "Bearer " + credential } : {}), "X-Ankiquest-CSRF": "1", ...(!deleting ? { "Content-Type": "image/png" } : {}) },
-          ...(!deleting ? { body: image } : {}),
+        const response = await send(`/api/avatar/${encodeURIComponent(user)}`, {
+          method: deleting ? "DELETE" : "POST", signal: controller.signal, gate: false,
+          session: credential ? { user, token: credential } : null,
+          ...(!deleting ? { headers: { "Content-Type": "image/png" }, body: image } : {}),
         });
         if (closed) return;
         if (response.status === 401 || response.status === 403) {
@@ -267,11 +268,6 @@
 
   window.AnkiQuestAvatars = { markup, refresh, open, isOpen: () => !!editor, close: () => closeEditor?.() };
   window.addEventListener("ankiquest:identity", () => closeEditor?.());
-  function nativeAccount() {
-    const session = window.ankiquestSession;
-    return session && typeof session.user === "string" && session.user && typeof session.token === "string" && session.token.trim()
-      ? { user: session.user, token: session.token.trim() } : null;
-  }
   function nativeIdentityKey() {
     const session = nativeAccount();
     return session ? JSON.stringify([session.user, session.token]) : "";

@@ -26,30 +26,41 @@ def rows_to_reviews(rows):
     ]
 
 
-class AccountError(Exception):
-    """The server turned down a sign-in or sign-up. `status` says why; `message` is the server's own words."""
+class ServerError(Exception):
+    """The server answered with an error status. `status` is the HTTP code; `message` is the server's own words, if any."""
 
     def __init__(self, status, message):
-        super().__init__(message)
+        super().__init__(message or "HTTP Error %d" % status)
         self.status = status
         self.message = message
 
 
-def _account(base, path, body):
-    request = urllib.request.Request(
-        base.strip().rstrip("/") + path,
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+def _error_text(error):
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.load(response)
+        return json.load(error).get("error") or ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def open_url(url, data=None, headers=None, method=None, timeout=20):
+    """Opens `url`, turning an error status into a ServerError that carries the server's `{"error": ...}` text."""
+    request = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
+    try:
+        return urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as error:
-        try:
-            message = json.load(error).get("error") or ""
-        except (ValueError, AttributeError):
-            message = ""
-        raise AccountError(error.code, message) from None
+        raise ServerError(error.code, _error_text(error)) from None
+
+
+def request_json(url, body=None, headers=None, timeout=20):
+    """Sends `body` as JSON (a GET when it is None) and returns the decoded answer."""
+    headers = dict(headers or {}, **{"Content-Type": "application/json"})
+    data = None if body is None else json.dumps(body).encode()
+    with open_url(url, data, headers, timeout=timeout) as response:
+        return json.load(response)
+
+
+def _account(base, path, body):
+    return request_json(base.strip().rstrip("/") + path, body)
 
 
 def sign_in(base, user, password, device):
@@ -65,6 +76,14 @@ def sign_up(base, user, password, display, device):
     return _account(base, "/api/accounts", body)
 
 
+COMPANIONS = ("aki", "ankilope", "none")
+
+
+def _companion(answer):
+    choice = answer["companion"]
+    return choice if choice in COMPANIONS else "aki"
+
+
 class Client:
     def __init__(self, url, user, token, language="en"):
         self.base = url.strip().rstrip("/")
@@ -78,16 +97,10 @@ class Client:
         return bool(self.base and self.user and self.token)
 
     def _request(self, path, body=None):
-        headers = {"Content-Type": "application/json", "Accept-Language": self.language}
+        headers = {"Accept-Language": self.language}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
-        request = urllib.request.Request(
-            self.base + path,
-            data=None if body is None else json.dumps(body).encode(),
-            headers=headers,
-        )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.load(response)
+        return request_json(self.base + path, body, headers)
 
     def rank(self, previous):
         """The weekly order, and how this player moved since `previous`."""
@@ -97,24 +110,15 @@ class Client:
         return self._request("/api/profile/" + self.user)
 
     def companion(self):
-        choice = self._request("/api/companion/" + self.user)["companion"]
-        return choice if choice in ("aki", "ankilope", "none") else "aki"
+        return _companion(self._request("/api/companion/" + self.user))
 
     def set_companion(self, companion):
-        if companion not in ("aki", "ankilope", "none"):
+        if companion not in COMPANIONS:
             raise ValueError("Unknown study companion")
-        choice = self._request("/api/companion/" + self.user, {"companion": companion})["companion"]
-        return choice if choice in ("aki", "ankilope", "none") else "aki"
+        return _companion(self._request("/api/companion/" + self.user, {"companion": companion}))
 
     def notifications(self):
         return self._request("/api/notifications/" + self.user)
-
-    def reply(self, notification, message):
-        answer = self._request(
-            "/api/reply/" + self.user,
-            {"notification": notification, "message": message},
-        )
-        return answer["sent_to"]
 
     def deck_settings(self):
         return self._request("/api/decks/" + self.user)
@@ -132,7 +136,7 @@ class Client:
         return self._request("/api/decks/" + self.user, body)
 
     def shared_decks(self):
-        settings = self._request("/api/decks/" + self.user)
+        settings = self.deck_settings()
         return sorted(deck["id"] for deck in settings["decks"] if deck["enabled"])
 
     def upload(self, reviews, rollover_hour, silent, deleted=(), decks=None, clock_offset=None, catalog=False):
