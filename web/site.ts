@@ -1,5 +1,7 @@
 import "./i18n";
 import "./aki";
+import {escape, nativeAccount} from "./common";
+import {ownerHeaders, send, type SendOptions} from "./http";
 
 /* Shared navigation, presentation components, and the browser access gate. */
 (() => {
@@ -8,8 +10,6 @@ import "./aki";
 
   const embedded = new URLSearchParams(location.search).get("embed") === "1";
   document.documentElement.classList.toggle("embedded", embedded);
-  const entities: Record<string, string> = {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
-  const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, char => entities[char]);
   const href = (path: string, hash = "") => `${path}${embedded ? (path.includes("?") ? "&" : "?") + "embed=1" : ""}${hash}`;
   const avatar = (user: string, display = user) => {
     if (window.AnkiQuestAvatars) return AnkiQuestAvatars!.markup(user, display);
@@ -45,21 +45,12 @@ import "./aki";
     const identity = memberUser(await status());
     return identity && (!user || identity === user) ? {user: identity} : null;
   }
-  const ownerHeaders = (session: OwnerSession | null | undefined, body?: unknown): Record<string, string> => ({
-    ...(session?.token ? {Authorization: "Bearer " + session.token} : {}),
-    ...(body === undefined ? {} : {"Content-Type": "application/json", "X-Ankiquest-CSRF": "1"}),
-  });
   // Sign-in and logout both mutate the same cookie. Keep their responses in order.
   let connectionEpoch = 0, connectionTail: Promise<unknown> = Promise.resolve();
   const serializeConnection = <T>(operation: () => Promise<T>) => {
     const result = connectionTail.then(operation, operation);
     connectionTail = result.catch(() => {});
     return result;
-  };
-  const nativeAccount = () => {
-    const value = window.ankiquestSession;
-    return typeof value?.user === "string" && value.user && typeof value.token === "string" && value.token.trim()
-      ? {user: value.user, token: value.token.trim()} : null;
   };
   const nativeKey = (value: OwnerSession | null) => value ? JSON.stringify([value.user, value.token]) : "";
   // Only thrown after a request, which may finish before translations load.
@@ -177,9 +168,8 @@ import "./aki";
       }
     }
   }
-  async function readJSON<T = unknown>(url: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(url, {cache: "no-store", ...options});
-    await checkAccess(response, options);
+  async function readJSON<T = unknown>(url: string, options: SendOptions = {}): Promise<T> {
+    const response = await send(url, options);
     if (!response.ok) throw new Error(`The server could not load this page (${response.status}).`);
     return response.json();
   }

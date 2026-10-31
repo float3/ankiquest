@@ -2,6 +2,7 @@
    The catalogs and the lookup live in the ankiquest-i18n crate, which the server
    also uses, loaded here as WebAssembly. Until it has loaded, `t` and `html`
    return English; pages wait for `ready` before their first render. */
+import {nativeAccount} from "./common.ts";
 
 interface Exports {
   memory: WebAssembly.Memory;
@@ -159,11 +160,7 @@ const savedLanguages = new Set<string>();
 let cookieUser: string | null = null;
 async function saveLanguage(): Promise<void> {
   await ready;
-  const native = window.ankiquestSession;
-  const session: {user: string; token?: string} | null =
-    native && typeof native.user === "string" && native.user && typeof native.token === "string" && native.token
-      ? {user: native.user, token: native.token}
-      : cookieUser ? {user: cookieUser} : null;
+  const session: {user: string; token?: string} | null = nativeAccount() ?? (cookieUser ? {user: cookieUser} : null);
   if (!session?.user) return;
   const key = JSON.stringify([session.user, language]);
   if (savedLanguages.has(key)) return;
