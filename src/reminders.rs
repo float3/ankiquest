@@ -1,9 +1,18 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
+use crate::access::authorized;
+use crate::app::App;
 use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
 use crate::notifications::{Notification, Outgoing};
+use crate::reminders;
 use crate::store::{Error, Store};
+use crate::web_util::store_error;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub use crate::competition::WeeklyRecap as Recap;
 
@@ -640,10 +649,48 @@ pub fn tick(
     Ok(())
 }
 
+async fn get_reminders(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<reminders::Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    reminders::settings(&app.store.lock().unwrap(), &user)
+        .map(Json)
+        .map_err(store_error)
+}
+
+async fn set_reminders(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(settings): Json<reminders::Settings>,
+) -> Result<Json<reminders::Settings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if !settings.valid() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    reminders::save_settings(&mut app.store.lock().unwrap(), &user, &settings)
+        .map_err(store_error)?;
+    Ok(Json(settings))
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new().route(
+        "/api/community/reminders/{user}",
+        get(get_reminders).post(set_reminders),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game::{self, FreezePolicy, HistoryDay, Review};
+    use crate::test_support::*;
 
     const DATE: i64 = 20_000;
     fn at(hour: i64) -> i64 {
@@ -1486,5 +1533,81 @@ mod tests {
         assert_eq!(guard(&done), DeliveryGuard::Cancel);
         assert_eq!(next_milestone(&done), None);
         cleanup(store, path);
+    }
+
+    #[tokio::test]
+    async fn community_reminder_preferences_require_owner_auth_and_validate_before_saving() {
+        let (app, path) = fixture();
+        assert_eq!(
+            get_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                HeaderMap::new()
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get_reminders(State(app.clone()), UrlPath("cerro".into()), headers("hill"))
+                .await
+                .err()
+                .unwrap(),
+            StatusCode::UNAUTHORIZED
+        );
+        let prefs = get_reminders(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!prefs.urgent_streak);
+        let mut enabled = prefs.clone();
+        enabled.urgent_streak = true;
+        let _ = set_reminders(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(enabled.clone()),
+        )
+        .await
+        .unwrap();
+        let mut invalid = enabled.clone();
+        invalid.quiet_start = 24;
+        assert_eq!(
+            set_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(invalid)
+            )
+            .await
+            .err()
+            .unwrap(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            get_reminders(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro")
+            )
+            .await
+            .unwrap()
+            .0,
+            enabled
+        );
+        assert!(
+            !get_reminders(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+                .await
+                .unwrap()
+                .0
+                .urgent_streak
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 }

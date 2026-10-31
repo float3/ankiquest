@@ -156,36 +156,6 @@ async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>,
         .map_err(store_error)
 }
 
-async fn get_reminders(
-    State(app): State<Arc<App>>,
-    UrlPath(user): UrlPath<String>,
-    headers: HeaderMap,
-) -> Result<Json<reminders::Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    reminders::settings(&app.store.lock().unwrap(), &user)
-        .map(Json)
-        .map_err(store_error)
-}
-
-async fn set_reminders(
-    State(app): State<Arc<App>>,
-    UrlPath(user): UrlPath<String>,
-    headers: HeaderMap,
-    Json(settings): Json<reminders::Settings>,
-) -> Result<Json<reminders::Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    if !settings.valid() {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    reminders::save_settings(&mut app.store.lock().unwrap(), &user, &settings)
-        .map_err(store_error)?;
-    Ok(Json(settings))
-}
-
 #[derive(Serialize)]
 struct ChallengeList {
     challenges: Vec<challenges::Challenge>,
@@ -487,6 +457,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(privacy::routes())
         .merge(dev::routes())
         .merge(oauth::routes())
+        .merge(reminders::routes())
         .merge(decks::routes())
         .merge(subscriptions::routes())
         .merge(deck_copies::routes())
@@ -529,10 +500,6 @@ fn router(app: Arc<App>) -> Router {
         )
         .route("/api/winners", get(winners))
         .route("/api/community", get(community_dashboard))
-        .route(
-            "/api/community/reminders/{user}",
-            get(get_reminders).post(set_reminders),
-        )
         .route(
             "/api/community/challenges/{user}",
             get(get_challenges).post(create_challenge),
@@ -718,82 +685,6 @@ mod tests {
             .unwrap();
         assert_eq!(app.store.lock().unwrap().language("cerro").unwrap(), "en");
         assert_eq!(app.store.lock().unwrap().language("hill").unwrap(), "en");
-    }
-
-    #[tokio::test]
-    async fn community_reminder_preferences_require_owner_auth_and_validate_before_saving() {
-        let (app, path) = fixture();
-        assert_eq!(
-            get_reminders(
-                State(app.clone()),
-                UrlPath("cerro".into()),
-                HeaderMap::new()
-            )
-            .await
-            .err()
-            .unwrap(),
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            get_reminders(State(app.clone()), UrlPath("cerro".into()), headers("hill"))
-                .await
-                .err()
-                .unwrap(),
-            StatusCode::UNAUTHORIZED
-        );
-        let prefs = get_reminders(
-            State(app.clone()),
-            UrlPath("cerro".into()),
-            headers("cerro"),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert!(!prefs.urgent_streak);
-        let mut enabled = prefs.clone();
-        enabled.urgent_streak = true;
-        let _ = set_reminders(
-            State(app.clone()),
-            UrlPath("cerro".into()),
-            headers("cerro"),
-            Json(enabled.clone()),
-        )
-        .await
-        .unwrap();
-        let mut invalid = enabled.clone();
-        invalid.quiet_start = 24;
-        assert_eq!(
-            set_reminders(
-                State(app.clone()),
-                UrlPath("cerro".into()),
-                headers("cerro"),
-                Json(invalid)
-            )
-            .await
-            .err()
-            .unwrap(),
-            StatusCode::BAD_REQUEST
-        );
-        assert_eq!(
-            get_reminders(
-                State(app.clone()),
-                UrlPath("cerro".into()),
-                headers("cerro")
-            )
-            .await
-            .unwrap()
-            .0,
-            enabled
-        );
-        assert!(
-            !get_reminders(State(app.clone()), UrlPath("hill".into()), headers("hill"))
-                .await
-                .unwrap()
-                .0
-                .urgent_streak
-        );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[tokio::test]
