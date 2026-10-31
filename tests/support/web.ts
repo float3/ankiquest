@@ -1,7 +1,7 @@
 // The web pages as the server serves them, for tests that run them without a server:
 // scripts bundled from web/ the way build.rs bundles them, pages with their inline
 // scripts filled in, and the translation module.
-import {buildSync, transformSync} from "esbuild";
+import {buildSync} from "esbuild";
 import {execFileSync} from "node:child_process";
 import fs from "node:fs";
 import {createRequire} from "node:module";
@@ -37,16 +37,26 @@ export function script(entry: string): string {
 
 /**
  * The top of a page script, up to (not including) `end`, as plain JavaScript for a
- * classic <script>: its top-level functions and constants become page globals, so
- * tests can call the real renderers without starting the page.
+ * classic <script>: its imports are bundled in, and its top-level functions and
+ * constants become page globals, so tests can call the real renderers without
+ * starting the page.
  */
 export function prefix(entry: string, end: string): string {
-  const source = fs.readFileSync(path.join(root, "web", `${entry}.ts`), "utf8");
+  const file = path.join(root, "web", `${entry}.ts`);
+  const source = fs.readFileSync(file, "utf8");
   const index = source.indexOf(end);
   if (index < 0) throw new Error(`web/${entry}.ts no longer contains ${JSON.stringify(end)}`);
-  const code = transformSync(source.slice(0, index), {loader: "ts", target: "es2022", charset: "utf8"}).code;
-  // `export {}` only marks the file as a module for the type checker.
-  return code.replace(/^export\s*\{\s*\};?$/gm, "");
+  const result = buildSync({
+    stdin: {contents: source.slice(0, index), loader: "ts", resolveDir: path.dirname(file), sourcefile: file},
+    bundle: true,
+    format: "esm",
+    treeShaking: false,
+    target: "es2022",
+    charset: "utf8",
+    write: false,
+    logLevel: "warning",
+  });
+  return result.outputFiles[0]!.text;
 }
 
 /** A page from static/ with each `<script data-entry>` placeholder replaced by its code. */
