@@ -314,6 +314,7 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::app::load_player;
+    use crate::inbox::get_notifications;
     use crate::set_decks;
     use crate::test_support::*;
 
@@ -509,7 +510,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+            get_notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
                 .await
                 .unwrap()
                 .0

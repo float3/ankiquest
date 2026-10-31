@@ -112,8 +112,8 @@ fn display_of(config: &Config, user: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inbox::{ReplyRequest, get_notifications, reply};
     use crate::test_support::*;
-    use crate::{ReplyRequest, reply};
 
     fn words(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|part| (*part).to_string()).collect()
@@ -187,7 +187,7 @@ mod tests {
         };
         send_message(&config, &note("hill", Some("cerro"))).unwrap();
 
-        let inbox = notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+        let inbox = get_notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
             .await
             .unwrap()
             .0;
@@ -214,12 +214,13 @@ mod tests {
         );
 
         send_message(&config, &note("hill", None)).unwrap();
-        let anonymous = notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
-            .await
-            .unwrap()
-            .0
-            .pop()
-            .unwrap();
+        let anonymous =
+            get_notifications(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+                .await
+                .unwrap()
+                .0
+                .pop()
+                .unwrap();
         assert_eq!(anonymous.title, "ankiquest");
         assert!(anonymous.sender.is_empty(), "nobody to answer");
 
