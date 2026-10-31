@@ -9,11 +9,11 @@ import {failure, refused, request as call, send} from "./http";
   type Policy = "private" | "ask" | "auto";
   type GoalMode = "off" | "cards" | "minutes" | "backlog";
   type Measured = Exclude<GoalMode, "off">;
-  interface Goal { mode: GoalMode; value?: number | null }
+  interface Goal { mode: GoalMode; value?: number | null; since?: number | null; chosen?: boolean }
   interface GoalProgress extends Goal { progress?: number | null; reached?: boolean }
   interface Sharing { policies: Record<string, Policy>; daily_cap: number }
   interface Win { id: number; kind: string; created_at: number; title: string; body: string; policy: Policy; shared_with_friends: boolean; link: {url: string; image: string} | null }
-  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[]; goal?: GoalProgress | null }
+  interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[]; day_ends_at?: number; goal?: GoalProgress | null }
   interface StudyDay { date: string; reviews: number; time_ms: number; xp: number; new_cards: number; streak: number; frozen: boolean }
   interface StudySession { started_at: number; ended_at: number; reviews: number; time_ms: number; new_cards: number }
   interface StudyHistory { year: number; years: number[]; days: StudyDay[]; last_review_at: number | null; last_received_at: number | null; latest_session: StudySession | null }
@@ -56,7 +56,8 @@ import {failure, refused, request as call, send} from "./http";
   let reminders: [ReminderKey, string][] = [];
   let moments: [string, string][] = [], policies: [Policy, string][] = [], goalModes: [GoalMode, string][] = [];
   const momentDefaults: Record<string, Policy> = {daily_goal:"ask", streak_secured:"private", streak:"ask", level:"ask", achievement:"ask", record:"ask", quest:"private", conquered:"ask", place:"ask", challenge:"ask"};
-  const goalLimits: Record<Measured, {min: number; max: number; fallback: number}> = {cards:{min:1,max:5000,fallback:100}, minutes:{min:1,max:600,fallback:20}, backlog:{min:1,max:100,fallback:100}};
+  const goalLimits: Record<Measured, {min: number; max: number; fallback: number}> = {cards:{min:1,max:5000,fallback:100}, minutes:{min:1,max:600,fallback:20}, backlog:{min:1,max:365,fallback:30}};
+  const backlogPresets = [7, 14, 30, 60];
   const winPage = 10;
   const cards = new Map<number, Promise<string>>();
   const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null, wins:null, winsError:"", winsMore:false, winsLoading:false, winStatus:{}};
@@ -84,7 +85,7 @@ import {failure, refused, request as call, send} from "./http";
       ["challenge",tr("Challenges completed")],
     ];
     policies = [["private",tr("Only me")], ["ask",tr("Ask me")], ["auto",tr("Tell friends automatically")]];
-    goalModes = [["off",tr("No goal")], ["cards",tr("Cards reviewed")], ["minutes",tr("Minutes studied")], ["backlog",tr("Backlog cleared (%)")]];
+    goalModes = [["backlog",tr("Clear my backlog in N days")], ["cards",tr("Cards per day")], ["minutes",tr("Minutes per day")], ["off",tr("No daily goal")]];
     $("personal-title").textContent = titles[page];
     $("personal-intro").textContent = intros[page];
     document.title = titles[page] + " · AnkiQuest";
@@ -257,17 +258,28 @@ import {failure, refused, request as call, send} from "./http";
     $("personal-content").innerHTML = html`<section class="personal-lead"><div class="eyebrow">${tr("Your Anki day")}</div><h2>${profile ? tr`Hello, ${esc(profile.display)}.` : tr("A fresh page for today.")}</h2><p>${lead}</p><div class="personal-actions">${link("/community#challenges",tr("See friend goals"),true)}${link("/history",tr("View study history"))}<a class="button-link" href="https://ankiweb.net/decks" target="_blank" rel="noopener noreferrer">${tr("Study in AnkiWeb ↗")}</a></div>${freshness()}</section><div class="kpis">${site.kpi(tr("Reviews today"),number(today.reviews),tr("Synced from Anki"),"blue")}${site.kpi(tr("Today's XP"),number(today.xp),tr("Every card counts"),"gold")}${site.kpi(tr("Current streak"),number(profile?.streak || 0),streakNote,"green")}${site.kpi(tr("Level"),number(profile?.level || 1),tr("Keep moving forward"))}</div>${goalMeter()}<div class="grid"><article class="card"><div class="card-head"><div><h2>${tr("Today's quests")}</h2><p>${tr("Three small wins to aim for.")}</p></div></div>${quests.length ? html`<div class="stack">${quests.map(quest).join("")}</div>` : html`<p class="personal-empty">${tr("Upload some reviews to see your quests.")}</p>`}</article>${activeGoals()}</div><article class="card personal-wins" id="today-wins">${winsBody()}</article>${recap()}`;
     loadCards();
   }
+  function ankiToday(profile: Profile | null | undefined) {
+    const offset = new Date().getTimezoneOffset() * 60000;
+    return profile?.day_ends_at ? Math.floor((profile.day_ends_at - offset) / 86400000) - 1 : Math.floor((Date.now() - offset) / 86400000);
+  }
+  function planDay(goal: Goal, today: number) {
+    const days = Math.max(1, Number(goal.value) || 1), since = Number(goal.since);
+    if (!Number.isFinite(since)) return {day: 1, days};
+    const elapsed = today - since;
+    return {day: elapsed < 0 ? 1 : (elapsed % days) + 1, days};
+  }
   function goalMeter() {
     const goal = state.profile?.goal;
     if (!goal) return "";
     const change = link("/settings#daily-goal", goal.mode === "off" ? tr("Set a daily goal") : tr("Change goal"));
     if (goal.mode === "off") return html`<article class="card personal-goal" id="today-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("No daily goal for now.")}</p></div></div><div class="personal-actions">${change}</div></article>`;
     const value = Math.max(1, Number(goal.value) || 1), progress = goal.progress == null ? null : Math.max(0, Number(goal.progress) || 0);
-    const reached = !!goal.reached || (progress != null && progress >= value);
-    const target = goal.mode === "cards" ? tr`${number(value)} cards a day` : goal.mode === "minutes" ? tr`${number(value)} minutes a day` : tr`${number(value)}% of today's due cards`;
-    const detail = goal.mode === "cards" ? tr`${number(progress)} of ${number(value)} cards` : goal.mode === "minutes" ? tr`${number(progress)} of ${number(value)} minutes`
-      : reached ? tr("Your Anki app reported that you cleared it.") : tr("Your Anki app tells AnkiQuest when you clear it.");
-    const meter = progress == null ? html`<progress max="1" value="${reached ? 1 : 0}" aria-label="${tr("Daily goal")}"></progress>` : html`<progress max="${value}" value="${Math.min(progress, value)}" aria-label="${tr("Daily goal")}"></progress>`;
+    const reached = !!goal.reached || (goal.mode !== "backlog" && progress != null && progress >= value);
+    const plan = goal.mode === "backlog" ? planDay(goal, ankiToday(state.profile)) : null;
+    const target = goal.mode === "cards" ? tr`${number(value)} cards a day` : goal.mode === "minutes" ? tr`${number(value)} minutes a day` : tr`Clear the backlog in ${number(value)} days`;
+    const detail = plan ? `${tr`Day ${number(plan.day)} of ${number(plan.days)}`} · ${reached ? tr("Today's share is done.") : tr("Your Anki app tells AnkiQuest when today's share is done.")}`
+      : goal.mode === "cards" ? tr`${number(progress)} of ${number(value)} cards` : tr`${number(progress)} of ${number(value)} minutes`;
+    const meter = plan ? html`<progress max="${plan.days}" value="${plan.day - (reached ? 0 : 1)}" aria-label="${tr("Daily goal")}"></progress>` : html`<progress max="${value}" value="${Math.min(progress ?? 0, value)}" aria-label="${tr("Daily goal")}"></progress>`;
     return html`<article class="card personal-goal${reached ? " reached" : ""}" id="today-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${esc(target)}</p></div><span class="chip ${reached ? "green" : ""}">${reached ? tr("Goal reached") : tr("In progress")}</span></div>${meter}<p class="personal-goal-detail">${esc(detail)}</p><div class="personal-actions">${change}</div></article>`;
   }
   function forgetWins() {
@@ -519,17 +531,31 @@ import {failure, refused, request as call, send} from "./http";
     return goal?.mode === mode && Number.isInteger(value) && value >= limits.min && value <= limits.max ? value : limits.fallback;
   }
   function goalLabel(mode: GoalMode) {
-    return mode === "minutes" ? tr("Minutes each day") : mode === "backlog" ? tr("Percent of today's due cards") : tr("Cards each day");
+    return mode === "minutes" ? tr("Minutes each day") : mode === "backlog" ? tr("Days to clear the backlog") : tr("Cards each day");
   }
   function goalHint(mode: GoalMode) {
     if (mode === "off") return tr("No daily goal. Your streak and quests still count.");
-    if (mode === "backlog") return tr("Only the Anki app knows how many cards are due, so it measures this goal and tells AnkiQuest when you reach it.");
+    if (mode === "backlog") return tr("The Anki app works out each day's share from your backlog and shows how long each choice takes. This page can't see your collection, so open the goal in the app to compare.");
     return tr("AnkiQuest checks this goal as your reviews upload.");
   }
+  function goalDate(day: number) {
+    return new Intl.DateTimeFormat(AnkiQuestI18n.language,{dateStyle:"medium",timeZone:"UTC"}).format(new Date(day * 86400000));
+  }
+  function goalPresets(mode: GoalMode, value: number) {
+    return html`<div class="goal-presets" id="goal-presets" role="group" aria-label="${tr("Days to clear the backlog")}" ${mode === "backlog" ? "" : "hidden"}>${backlogPresets.map(days => html`<button type="button" data-goal-days="${days}" aria-pressed="${mode === "backlog" && value === days}">${tr`${number(days)} days`}</button>`).join("")}</div>`;
+  }
+  function goalPlan(goal: Goal) {
+    if (goal.mode === "off" || !goal.chosen || !Number.isFinite(Number(goal.since)) || goal.since == null) return "";
+    return html`<div class="goal-plan"><p class="settings-hint" id="goal-since">${tr`Plan started ${goalDate(Number(goal.since))}`}</p><button type="button" id="goal-restart">${tr("Start over")}</button></div>`;
+  }
   function goalCard(goal: Goal | null | undefined) {
-    const mode: GoalMode = goal && goal.mode in goalLimits ? goal.mode : goal?.mode === "off" ? "off" : "cards";
-    const measured: Measured = mode === "off" ? "cards" : mode, limits = goalLimits[measured];
-    return html`<article class="card" id="daily-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("One target for each Anki day, the same on every device.")}</p></div></div>${goal ? html`<form id="goal-form" novalidate><div class="goal-grid"><label class="field"><span>${tr("Goal")}</span><select name="mode" id="goal-mode">${goalModes.map(([value, label]) => html`<option value="${value}" ${value === mode ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><label class="field" id="goal-value-field" ${mode === "off" ? "hidden" : ""}><span id="goal-value-label">${esc(goalLabel(measured))}</span><input name="value" id="goal-value" type="number" inputmode="numeric" step="1" min="${limits.min}" max="${limits.max}" value="${goalValue(measured, goal)}"></label></div><p class="settings-hint" id="goal-hint">${esc(goalHint(mode))}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save goal")}</button></div><p class="status" role="status"></p></form>` : settingError("goal")}</article>`;
+    const mode: GoalMode = goal && goal.mode in goalLimits ? goal.mode : goal?.mode === "off" ? "off" : "backlog";
+    const measured: Measured = mode === "off" ? "backlog" : mode, limits = goalLimits[measured], value = goalValue(measured, goal);
+    return html`<article class="card" id="daily-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("One target for each Anki day, the same on every device.")}</p></div></div>${goal ? html`<form id="goal-form" novalidate><div class="goal-grid"><label class="field"><span>${tr("Goal")}</span><select name="mode" id="goal-mode">${goalModes.map(([option, label]) => html`<option value="${option}" ${option === mode ? "selected" : ""}>${esc(label)}</option>`).join("")}</select></label><label class="field" id="goal-value-field" ${mode === "off" ? "hidden" : ""}><span id="goal-value-label">${esc(goalLabel(measured))}</span><input name="value" id="goal-value" type="number" inputmode="numeric" step="1" min="${limits.min}" max="${limits.max}" value="${value}"></label></div>${goalPresets(mode, value)}<p class="settings-hint" id="goal-hint">${esc(goalHint(mode))}</p>${goalPlan(goal)}<div class="setting-actions"><button class="primary" type="submit">${tr("Save goal")}</button></div><p class="status" role="status"></p></form>` : settingError("goal")}</article>`;
+  }
+  function markGoalPreset() {
+    const value = $<HTMLInputElement>("goal-value").value.trim();
+    document.querySelectorAll<HTMLElement>("[data-goal-days]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.goalDays === value)));
   }
   function goalBody(form: HTMLFormElement): Goal | string {
     const mode = (form.elements.namedItem("mode") as HTMLSelectElement).value as GoalMode;
@@ -689,9 +715,10 @@ import {failure, refused, request as call, send} from "./http";
     if (!state.session || page!=="settings") return;
     const session=state.session;
     if (target.id==="goal-mode") {
-      const mode=target.value as GoalMode, measured: Measured=mode==="off"?"cards":mode, limits=goalLimits[measured], input=$<HTMLInputElement>("goal-value");
+      const mode=target.value as GoalMode, measured: Measured=mode==="off"?"backlog":mode, limits=goalLimits[measured], input=$<HTMLInputElement>("goal-value");
       $("goal-value-field").hidden=mode==="off";$("goal-value-label").textContent=goalLabel(measured);$("goal-hint").textContent=goalHint(mode);
       input.min=String(limits.min);input.max=String(limits.max);input.value=String(goalValue(measured,state.settings.goal));
+      $("goal-presets").hidden=mode!=="backlog";markGoalPreset();
       return;
     }
     if (target.id==="freeze-toggle") {
@@ -705,6 +732,9 @@ import {failure, refused, request as call, send} from "./http";
       try {await request(route,{enabled:target.checked},session);if(state.session!==session)return;state.settings.nudges=await owner<Settings["nudges"]>("/api/friend-nudges",undefined,session);if(state.session!==session)return;renderSettings("nudges");$("nudge-status").textContent=tr("Saved across your devices.");}
       catch(cause){if(state.session===session){target.checked=!target.checked;target.disabled=false;status.className="status error";status.textContent=(cause as Error).message;}}
     }
+  });
+  document.addEventListener("input", event => {
+    if ((event.target as Element).id === "goal-value") markGoalPreset();
   });
   document.addEventListener("click", async event => {
     const day=(event.target as Element).closest<HTMLElement>("[data-day]");
@@ -728,6 +758,12 @@ import {failure, refused, request as call, send} from "./http";
       if (await social({action:"join",invite:inviteCode},[target as HTMLButtonElement])) location.assign(site.href("/friends"));
     }
     if(day && page==="history") {state.selected=day.dataset.day!;document.querySelectorAll("[data-day]").forEach(button=>button.setAttribute("aria-pressed",String(button===day)));$("day-detail").outerHTML=dayDetail();$("day-detail").focus();}
+    const preset=target.closest<HTMLButtonElement>("[data-goal-days]");
+    if(preset && page==="settings") {$<HTMLInputElement>("goal-value").value=preset.dataset.goalDays!;markGoalPreset();}
+    if(target.id==="goal-restart" && state.session && page==="settings") {
+      const saved=state.settings.goal!, form=$<HTMLFormElement>("goal-form");
+      submitForm(form,"/api/goal",{mode:saved.mode,value:saved.value,restart:true},"goal","PUT");
+    }
     if(target.id==="personal-export") downloadData(target as HTMLButtonElement);
     const winButton=target.closest<HTMLButtonElement>("[data-win-action]");
     if(winButton && page==="today") winAction(winButton);

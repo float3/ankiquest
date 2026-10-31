@@ -37,7 +37,7 @@ async function personal(t: TestContext, options: {width?: number; theme?: 'light
     profile: {user: 'alice', display: 'Alice', today: {reviews: 64, xp: 300}, streak: 5, level: 3, quests: [], goal: {mode: 'cards', value: 100, progress: 64, reached: false} as Record<string, unknown>},
     wins: [win(30, {title: 'Goal <img src=x onerror=alert(1)>'}), ...Array.from({length: 9}, (_, index) => win(29 - index)), win(5), win(4, {shared_with_friends: true, link: {url: `${origin}/w/old`, image: `${origin}/w/old.png`}})],
     sharing: {policies: {daily_goal: 'ask', streak_secured: 'private', streak: 'ask', level: 'auto', achievement: 'ask', record: 'ask', quest: 'private', conquered: 'ask', place: 'ask', challenge: 'ask'}, daily_cap: 3} as Record<string, unknown>,
-    goal: {mode: 'cards', value: 100} as Record<string, unknown>,
+    goal: {mode: 'cards', value: 100, since: 20390, chosen: true} as Record<string, unknown>,
     recipients: 2,
     rejectSharing: false,
   };
@@ -73,7 +73,11 @@ async function personal(t: TestContext, options: {width?: number; theme?: 'light
       return route.fulfill({json: data.sharing});
     }
     if (pathname === '/api/goal/alice') {
-      if (method === 'PUT') data.goal = request.postDataJSON() as Record<string, unknown>;
+      if (method === 'PUT') {
+        const {restart, ...body} = request.postDataJSON() as Record<string, unknown>;
+        const changed = restart || body.mode !== data.goal.mode || (body.value !== undefined && body.value !== data.goal.value);
+        data.goal = {...data.goal, ...body, since: changed ? 20400 : data.goal.since, chosen: true};
+      }
       return route.fulfill({json: data.goal});
     }
     if (pathname === '/api/companion/alice') return route.fulfill({json: {companion: 'aki'}});
@@ -117,12 +121,14 @@ test('sharing settings save every moment policy and the daily cap', async t => {
   await page.locator('#sharing-form .status.error', {hasText: 'daily_cap must be 1 to 10'}).waitFor();
 });
 
-test('the daily goal validates each mode and explains backlog', async t => {
-  const {page, calls} = await personal(t);
+test('the daily goal validates each mode and plans the backlog in days', async t => {
+  const {page, calls, data} = await personal(t);
   await page.goto(`${origin}/settings#daily-goal`);
   const form = page.locator('#goal-form');
   await form.waitFor();
+  assert.deepEqual(await page.locator('#goal-mode option').allTextContents(), ['Clear my backlog in N days', 'Cards per day', 'Minutes per day', 'No daily goal']);
   assert.equal(await page.locator('#goal-value').inputValue(), '100');
+  assert(await page.locator('#goal-presets').isHidden());
   await page.locator('#goal-mode').selectOption('minutes');
   assert.equal(await page.locator('#goal-value').inputValue(), '20');
   assert.equal(await page.locator('#goal-value').getAttribute('max'), '600');
@@ -138,21 +144,57 @@ test('the daily goal validates each mode and explains backlog', async t => {
   await page.waitForFunction(() => document.querySelector('#goal-form .status')?.textContent?.includes('Saved'));
   assert.deepEqual(calls.findLast(call => call.path === '/api/goal/alice')!.body, {mode: 'minutes', value: 30});
   await page.locator('#goal-mode').selectOption('backlog');
-  assert.match((await page.locator('#goal-hint').textContent())!, /Anki app/);
-  assert.equal(await page.locator('#goal-value').getAttribute('max'), '100');
-  await page.locator('#goal-value').fill('101');
-  await page.locator('#goal-form button[type="submit"]').click();
-  await page.locator('#goal-form .status.error', {hasText: 'from 1 to 100'}).waitFor();
+  assert.match((await page.locator('#goal-hint').textContent())!, /Anki app works out each day's share/);
+  assert.equal(await page.locator('#goal-value-label').textContent(), 'Days to clear the backlog');
+  assert.equal(await page.locator('#goal-value').inputValue(), '30');
+  assert.equal(await page.locator('#goal-value').getAttribute('max'), '365');
+  assert.deepEqual(await page.locator('#goal-presets button').allTextContents(), ['7 days', '14 days', '30 days', '60 days']);
+  assert.equal(await page.locator('[data-goal-days="30"]').getAttribute('aria-pressed'), 'true');
+  await page.locator('[data-goal-days="14"]').click();
+  assert.equal(await page.locator('#goal-value').inputValue(), '14');
+  assert.equal(await page.locator('[data-goal-days="14"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('[data-goal-days="30"]').getAttribute('aria-pressed'), 'false');
+  await page.locator('#goal-value').fill('366');
+  await form.locator('button[type="submit"]').click();
+  await form.locator('.status.error', {hasText: 'Choose a whole number from 1 to 365.'}).waitFor();
+  await page.locator('#goal-value').fill('45');
+  assert.equal(await page.locator('#goal-presets [aria-pressed="true"]').count(), 0);
+  await form.locator('button[type="submit"]').click();
+  await page.waitForFunction(() => document.querySelector('#goal-form .status')?.textContent?.includes('Saved'));
+  assert.deepEqual(calls.findLast(call => call.path === '/api/goal/alice')!.body, {mode: 'backlog', value: 45});
+  assert.equal(await page.locator('#goal-value').inputValue(), '45');
+  const started = new Intl.DateTimeFormat('en-US', {dateStyle: 'medium', timeZone: 'UTC'}).format(new Date(20400 * 86400000));
+  assert.equal(await page.locator('#goal-since').textContent(), `Plan started ${started}`);
+  data.goal.since = 20380;
+  await page.locator('#goal-restart').click();
+  await page.waitForFunction(() => document.querySelector('#goal-form .status')?.textContent?.includes('Saved'));
+  const restart = calls.findLast(call => call.path === '/api/goal/alice')!;
+  assert.equal(restart.method, 'PUT');
+  assert.deepEqual(restart.body, {mode: 'backlog', value: 45, restart: true});
+  assert.equal(await page.locator('#goal-since').textContent(), `Plan started ${started}`);
   await page.locator('#goal-mode').selectOption('off');
   assert(await page.locator('#goal-value-field').isHidden());
+  assert(await page.locator('#goal-presets').isHidden());
   await page.locator('#goal-form button[type="submit"]').click();
   await page.waitForFunction(() => document.querySelector('#goal-form .status')?.textContent?.includes('Saved'));
   const put = calls.findLast(call => call.path === '/api/goal/alice')!;
   assert.equal(put.method, 'PUT');
   assert.deepEqual(put.body, {mode: 'off'});
+  assert.equal(await page.locator('#goal-since').count(), 0);
 });
 
-test('Today shows the goal meter and reached backlog goals', async t => {
+test('a first visit offers the default backlog goal without a plan date', async t => {
+  const {page, data} = await personal(t);
+  data.goal = {mode: 'backlog', value: 30, since: 20400, chosen: false};
+  await page.goto(`${origin}/settings#daily-goal`);
+  await page.locator('#goal-form').waitFor();
+  assert.equal(await page.locator('#goal-mode').inputValue(), 'backlog');
+  assert.equal(await page.locator('#goal-value').inputValue(), '30');
+  assert(await page.locator('#goal-presets').isVisible());
+  assert.equal(await page.locator('#goal-since').count(), 0);
+});
+
+test('Today shows the goal meter and the backlog plan', async t => {
   const f = await personal(t);
   await f.page.goto(`${origin}/today`);
   const goal = f.page.locator('#today-goal');
@@ -161,11 +203,22 @@ test('Today shows the goal meter and reached backlog goals', async t => {
   assert.equal(await goal.locator('progress').getAttribute('max'), '100');
   assert.match((await goal.textContent())!, /64 of 100 cards/);
   assert.match((await goal.textContent())!, /In progress/);
-  f.data.profile.goal = {mode: 'backlog', value: 80, progress: null, reached: true};
+  const offset = await f.page.evaluate(() => new Date().getTimezoneOffset() * 60000);
+  const today = 20400;
+  Object.assign(f.data.profile, {day_ends_at: (today + 1) * 86400000 + 4 * 3600000 + offset});
+  f.data.profile.goal = {mode: 'backlog', value: 30, since: today - 4, progress: null, reached: false};
+  await f.page.locator('#personal-refresh').click();
+  await goal.filter({hasText: 'Day 5 of 30'}).waitFor();
+  assert.match((await goal.textContent())!, /Clear the backlog in 30 days/);
+  assert.match((await goal.textContent())!, /In progress/);
+  assert.equal(await goal.locator('progress').getAttribute('max'), '30');
+  assert.equal(await goal.locator('progress').getAttribute('value'), '4');
+  f.data.profile.goal = {mode: 'backlog', value: 7, since: today - 9, progress: null, reached: true};
   await f.page.locator('#personal-refresh').click();
   await goal.filter({hasText: 'Goal reached'}).waitFor();
-  assert.match((await goal.textContent())!, /80% of today's due cards/);
-  assert.equal(await goal.locator('progress').getAttribute('value'), '1');
+  assert.match((await goal.textContent())!, /Day 3 of 7/);
+  assert.match((await goal.textContent())!, /Today's share is done/);
+  assert.equal(await goal.locator('progress').getAttribute('value'), '3');
 });
 
 test('wins share with friends, make and remove links, download and paginate', async t => {

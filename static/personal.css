@@ -100,4 +100,9 @@ button.danger{border-color:var(--fire);color:var(--fire)}
 .sharing-cap select{width:100%;max-width:220px}
 .goal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .goal-grid select,.goal-grid input{width:100%;min-width:0}
+.goal-presets{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.goal-presets button{flex:1 1 0;min-width:64px}
+.goal-presets button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);font-weight:600}
+.goal-plan{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}
+.goal-plan .settings-hint{margin:0}
 @media(max-width:420px){.win-item{grid-template-columns:72px minmax(0,1fr);padding:12px}.win-thumb{grid-row:auto;width:72px;height:72px}.win-actions{grid-column:1/-1}.win-actions button{flex:1 1 auto}.win-link{grid-template-columns:1fr}.goal-grid{grid-template-columns:1fr}.sharing-choice{flex:1 1 auto}}
