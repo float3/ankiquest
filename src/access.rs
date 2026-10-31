@@ -102,6 +102,15 @@ impl Access {
             .flatten()
     }
 
+    /// Ends every session signed in as `user`, so a later account with the same name starts signed out.
+    pub(crate) fn revoke_member(&self, user: &str) {
+        self.sessions
+            .lock()
+            .unwrap()
+            .expires
+            .retain(|_, session| session.member.as_deref() != Some(user));
+    }
+
     pub(crate) fn throttled(&self, client: IpAddr, now: i64) -> bool {
         let mut sessions = self.sessions.lock().unwrap();
         sessions.failures.retain(|_, attempts| {
@@ -167,12 +176,13 @@ impl Access {
     }
 }
 
+/// Compares digests, so neither the contents nor the length of a secret leak through timing.
 fn constant_eq(expected: &str, given: &str) -> bool {
+    use sha2::{Digest, Sha256};
     !expected.is_empty()
-        && expected.len() == given.len()
-        && expected
-            .bytes()
-            .zip(given.bytes())
+        && Sha256::digest(expected)
+            .iter()
+            .zip(Sha256::digest(given).iter())
             .fold(0, |acc, (a, b)| acc | (a ^ b))
             == 0
 }
@@ -618,6 +628,25 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 mod tests {
     use super::*;
     use crate::Week;
+
+    #[test]
+    fn revoking_a_member_ends_only_their_sessions() {
+        let access = Access::default();
+        let headers = HeaderMap::new();
+        let ana = access.create_session(&headers, Some("ana".into()), 0).unwrap();
+        let bo = access.create_session(&headers, Some("bo".into()), 0).unwrap();
+        access.revoke_member("ana");
+        let sessions = access.sessions.lock().unwrap();
+        assert!(!sessions.expires.contains_key(&ana));
+        assert!(sessions.expires.contains_key(&bo));
+    }
+
+    #[test]
+    fn secrets_of_different_lengths_never_match() {
+        assert!(constant_eq("secret", "secret"));
+        assert!(!constant_eq("secret", "secre"));
+        assert!(!constant_eq("", ""));
+    }
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use std::path::PathBuf;

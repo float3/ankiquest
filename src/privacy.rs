@@ -76,7 +76,7 @@ const OWNED: &[(&str, &str)] = &[
     ("review_syncs", "user = ?1"),
     (
         "seen",
-        "user = ?1 or key like 'friend-nudge:%:' || ?1 or key like 'conquest:' || ?1 || ':%'",
+        "user = ?1 or key glob 'friend-nudge:*:' || ?1 or key glob 'conquest:' || ?1 || ':*'",
     ),
     ("languages", "user = ?1"),
     ("companion_preferences", "user = ?1"),
@@ -226,6 +226,14 @@ pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<()> {
     transaction.commit()
 }
 
+/// Drops a forgotten account from memory and signs it out everywhere.
+fn unload(app: &App, user: &str) {
+    app.accounts.remove(user);
+    app.players.write().unwrap().remove(user);
+    app.forget_standing(user);
+    app.access.revoke_member(user);
+}
+
 /// Removes the accounts an admin asked to remove with `admin remove-account`.
 pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> {
     let users: Vec<String> = conn
@@ -234,9 +242,7 @@ pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> 
         .collect::<rusqlite::Result<_>>()?;
     for user in users {
         forget(conn, &user)?;
-        app.accounts.remove(&user);
-        app.players.write().unwrap().remove(&user);
-        app.forget_standing(&user);
+        unload(app, &user);
         log_info!("an account was removed, as an admin asked");
     }
     Ok(())
@@ -308,7 +314,8 @@ async fn account(
     }
 }
 
-/// Deletes the account. The password is asked for again, so a borrowed device cannot do it.
+/// Deletes the account. The password is asked for again, or for an account without one,
+/// the username is typed out.
 async fn delete(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -365,9 +372,7 @@ async fn delete(
             "Your account could not be deleted. Please try again.",
         );
     }
-    app.accounts.remove(&user);
-    app.players.write().unwrap().remove(&user);
-    app.forget_standing(&user);
+    unload(&app, &user);
     log_info!("an account was deleted");
     StatusCode::NO_CONTENT.into_response()
 }
@@ -837,6 +842,28 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn forgetting_a_name_with_an_underscore_keeps_lookalike_names() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("create table seen (user text, key text)").unwrap();
+        conn.execute_batch(
+            "insert into seen values ('x', 'conquest:a_b:1'), ('x', 'conquest:axb:1'),
+                                     ('x', 'friend-nudge:1:a_b'), ('x', 'friend-nudge:1:axb')",
+        )
+        .unwrap();
+        let (_, clause) = OWNED.iter().find(|(table, _)| *table == "seen").unwrap();
+        conn.execute(&format!("delete from seen where {clause}"), ["a_b"])
+            .unwrap();
+        let left: Vec<String> = conn
+            .prepare("select key from seen order by key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["conquest:axb:1", "friend-nudge:1:axb"]);
     }
 
     #[test]

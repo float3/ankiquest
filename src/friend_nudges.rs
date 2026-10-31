@@ -120,16 +120,17 @@ async fn nudge(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
+    let mut store = app.store.lock().unwrap();
     if request.recipient == user
         || !app.is_user(&request.recipient)
         || !app
-            .connected(&app.store.lock().unwrap().conn, &user, &request.recipient)
+            .connected(&store.conn, &user, &request.recipient)
             .map_err(store_error)?
     {
         return Err(StatusCode::BAD_REQUEST);
     }
     let result = send(
-        &mut app.store.lock().unwrap(),
+        &mut store,
         &user,
         &app.display(&user),
         &request.recipient,

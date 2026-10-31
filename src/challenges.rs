@@ -346,8 +346,7 @@ pub fn act(store: &mut Store, user: &str, id: i64, action: &str, now: i64) -> Re
         where recipient=?1 and challenge_id=?2 and kind='challenge_invite'",
         params![user, id, now],
     )?;
-    crate::weekly_challenges::cancel_stale_invites(&tx, now)?;
-    cancel_stale_deferred_invites(&tx, now)?;
+    cancel_stale_invites(&tx, now)?;
     tx.commit()?;
     Ok(())
 }
@@ -406,7 +405,7 @@ pub(crate) fn notice(
             from,
             heading,
             body,
-            now.div_euclid(DAY_MS),
+            crate::store::clock_in(conn, to)?.day(now),
             now,
             kind,
             id
@@ -424,12 +423,14 @@ fn deferred_goal(conn: &Connection, id: i64) -> rusqlite::Result<Option<(bool, i
     .optional()
 }
 
-fn cancel_stale_deferred_invites(conn: &Connection, now: i64) -> rusqlite::Result<()> {
+/// Stops pushing invitations to challenges that were cancelled, ended, or already started.
+pub fn cancel_stale_invites(conn: &Connection, now: i64) -> rusqlite::Result<()> {
     conn.execute(
         "update notifications set push_cancelled=1 where kind='challenge_invite'
-         and challenge_id in (select d.challenge from community_deferred_goals d
-         join community_challenges c on c.id=d.challenge
-         where d.started=1 or c.cancelled=1 or c.end_at<=?1)",
+         and challenge_id in (select c.id from community_challenges c
+         left join community_weekly_goals w on w.challenge=c.id
+         left join community_deferred_goals d on d.challenge=c.id
+         where c.cancelled=1 or c.end_at<=?1 or w.started=1 or d.started=1)",
         [now],
     )?;
     Ok(())
@@ -438,8 +439,7 @@ fn cancel_stale_deferred_invites(conn: &Connection, now: i64) -> rusqlite::Resul
 /// Progress is derived from reviews, so completion events are reconciled after
 /// review uploads/polls and before personal challenge or Activity reads.
 pub fn refresh(store: &mut Store, players: &[Participant], now: i64) -> Result<(), crate::Error> {
-    crate::weekly_challenges::cancel_stale_invites(&store.conn, now)?;
-    cancel_stale_deferred_invites(&store.conn, now)?;
+    cancel_stale_invites(&store.conn, now)?;
     let creators = store
         .conn
         .prepare(

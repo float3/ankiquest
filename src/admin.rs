@@ -599,11 +599,12 @@ mod tests {
         );
         assert!(store.granted_freezes("cerro").unwrap().is_empty());
         assert_eq!(
-            crate::freezes::take_grant_reloads(&store.conn).unwrap(),
+            crate::freezes::grant_reloads(&store.conn).unwrap(),
             ["hill"]
         );
+        crate::freezes::grant_reloaded(&store.conn, "hill").unwrap();
         assert!(
-            crate::freezes::take_grant_reloads(&store.conn)
+            crate::freezes::grant_reloads(&store.conn)
                 .unwrap()
                 .is_empty()
         );

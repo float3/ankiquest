@@ -97,7 +97,8 @@ impl Store {
             .into());
         }
         let previous: HashSet<_> = self.unsubscribed_senders(recipient)?.into_iter().collect();
-        let next: HashSet<_> = settings.unsubscribed_senders.iter().cloned().collect();
+        let mut next: HashSet<_> = settings.unsubscribed_senders.iter().cloned().collect();
+        next.extend(self.incoming_settings(recipient)?.muted_senders);
         let now = crate::now_ms();
         let resume_days: HashMap<_, _> = previous
             .difference(&next)
@@ -150,8 +151,7 @@ impl Store {
                     on conflict (user) do update set enabled=excluded.enabled",
             params![recipient, settings.enabled],
         )?;
-        // The new editor includes existing mutes in the unsubscribe selection.
-        // Old clients can still edit mutes, but cannot change subscriptions.
+        // Mutes carry over into the unsubscribe selection, whichever client saved it.
         tx.execute(
             "delete from incoming_muted_senders where recipient=?1",
             [recipient],
@@ -176,6 +176,25 @@ mod tests {
             enabled,
             unsubscribed_senders: senders.iter().map(|s| (*s).into()).collect(),
         }
+    }
+
+    #[test]
+    fn saving_subscriptions_keeps_an_earlier_mute() {
+        let (mut store, _path) = temporary_store();
+        share(&mut store, "1", &["hill"]);
+        store
+            .set_incoming_settings(
+                "hill",
+                &crate::decks::IncomingSettings {
+                    enabled: true,
+                    muted_senders: vec!["cerro".into()],
+                },
+            )
+            .unwrap();
+        store
+            .set_deck_subscriptions("hill", &settings(true, &[]))
+            .unwrap();
+        assert_eq!(store.unsubscribed_senders("hill").unwrap(), ["cerro"]);
     }
 
     fn snapshot(id: &str, remaining: u64, day: i64) -> Snapshot {

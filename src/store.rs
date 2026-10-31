@@ -46,6 +46,23 @@ fn config_number(conn: &Connection, key: &str) -> Option<i64> {
     serde_json::from_slice::<f64>(&raw).ok().map(|n| n as i64)
 }
 
+/// The player's current clock, or the default for someone who never uploaded.
+pub fn clock_in(conn: &Connection, user: &str) -> rusqlite::Result<Clock> {
+    let clock = conn
+        .query_row(
+            "select offset_west_min, rollover_hour from clocks where user = ?1",
+            [user],
+            |r| {
+                Ok(Clock {
+                    offset_west_min: r.get(0)?,
+                    rollover_hour: r.get(1)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(clock.unwrap_or_default())
+}
+
 impl Store {
     pub fn open(state_dir: &Path) -> Result<Self, Error> {
         fs::create_dir_all(state_dir)?;
@@ -156,20 +173,7 @@ impl Store {
     }
 
     pub fn clock(&self, user: &str) -> Result<Clock, Error> {
-        let clock = self
-            .conn
-            .query_row(
-                "select offset_west_min, rollover_hour from clocks where user = ?1",
-                [user],
-                |r| {
-                    Ok(Clock {
-                        offset_west_min: r.get(0)?,
-                        rollover_hour: r.get(1)?,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(clock.unwrap_or_default())
+        Ok(clock_in(&self.conn, user)?)
     }
 
     /// Every clock the player has kept, so each review reads against the one it
@@ -461,6 +465,16 @@ mod tests {
             history,
             "an unchanged clock does not record another move"
         );
+
+        store
+            .upsert_at("hill", &[], &[], berlin, 1_791_100_000_000)
+            .unwrap();
+        assert_eq!(
+            store.clock_history("hill").unwrap(),
+            history,
+            "a clock read before the newest change is stale"
+        );
+        assert_eq!(store.clock("hill").unwrap(), california);
     }
 
     #[test]

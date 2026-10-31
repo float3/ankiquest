@@ -35,16 +35,18 @@ pub fn grant(
     Ok(changed)
 }
 
-/// Players whose granted days changed since the last call.
-pub fn take_grant_reloads(conn: &Connection) -> Result<Vec<String>, Error> {
-    let tx = conn.unchecked_transaction()?;
-    let users = tx
+/// Players whose granted days changed and are not yet reloaded.
+pub fn grant_reloads(conn: &Connection) -> Result<Vec<String>, Error> {
+    Ok(conn
         .prepare("select user from freeze_grant_reloads")?
         .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    tx.execute("delete from freeze_grant_reloads", [])?;
-    tx.commit()?;
-    Ok(users)
+        .collect::<Result<_, _>>()?)
+}
+
+/// Marks a player's granted days as loaded, once their reload succeeded.
+pub fn grant_reloaded(conn: &Connection, user: &str) -> Result<(), Error> {
+    conn.execute("delete from freeze_grant_reloads where user = ?1", [user])?;
+    Ok(())
 }
 
 pub fn initialize(conn: &Connection) -> Result<(), Error> {
