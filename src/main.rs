@@ -181,6 +181,30 @@ impl Config {
 }
 
 impl App {
+    /// Rereads `user`'s reviews and settings into the cached player.
+    fn reload_player(&self, store: &Store, user: &str) -> Result<(), Error> {
+        let player = load_player(store, user)?;
+        self.players
+            .write()
+            .unwrap()
+            .insert(user.to_string(), player);
+        Ok(())
+    }
+
+    fn recipient(&self, user: String) -> decks::Recipient {
+        decks::Recipient {
+            display: self.display(&user),
+            user,
+        }
+    }
+
+    /// `users` as recipients, ordered by display name and then user name.
+    fn sorted_recipients(&self, users: impl IntoIterator<Item = String>) -> Vec<decks::Recipient> {
+        let mut recipients: Vec<_> = users.into_iter().map(|user| self.recipient(user)).collect();
+        recipients.sort_by(|a, b| a.display.cmp(&b.display).then_with(|| a.user.cmp(&b.user)));
+        recipients
+    }
+
     fn display(&self, user: &str) -> String {
         self.config
             .users
@@ -535,7 +559,7 @@ async fn study_history(
         (year, player.and_then(latest_study_session))
     };
     let year = query.year.unwrap_or(current_year);
-    if !(1970..=2100).contains(&year) {
+    if !valid_year(year) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let profile = app.profile(&user);
@@ -607,10 +631,7 @@ async fn get_freezes(
     }
     freeze_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
-        .map_err(|e| {
-            log_error!(user: user, "streak freeze settings for {user} failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+        .map_err(failed_for("streak freeze settings for", &user))
 }
 
 async fn set_freezes(
@@ -622,10 +643,7 @@ async fn set_freezes(
     if !authorized(&app, &user, &headers) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let store_error = |e: Error| {
-        log_error!(user: user, "streak freeze settings for {user} failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    };
+    let store_error = failed_for("streak freeze settings for", &user);
     let mut store = app.store.lock().unwrap();
     store
         .set_freezes_enabled(&user, update.enabled, now_ms())
@@ -634,8 +652,7 @@ async fn set_freezes(
     // also called while the database lock is held by uploads and imports.
     let known = app.players.read().unwrap().contains_key(&user);
     if known {
-        let player = load_player(&store, &user).map_err(store_error)?;
-        app.players.write().unwrap().insert(user.clone(), player);
+        app.reload_player(&store, &user).map_err(store_error)?;
     }
     freeze_settings(&app, &store, &user)
         .map(Json)
@@ -784,10 +801,7 @@ async fn upload(
         return Err(StatusCode::BAD_REQUEST);
     }
     let reviews: Vec<Review> = upload.reviews.into_iter().filter(|r| r.kind < 4).collect();
-    let store_error = |e: Error| {
-        log_error!(user: user, "upload for {user} failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    };
+    let store_error = failed_for("upload for", &user);
     let mut store = app.store.lock().unwrap();
     let silent = upload.silent || !store.is_known(&user).map_err(store_error)?;
     let before = if silent { None } else { app.profile(&user) };
@@ -810,14 +824,11 @@ async fn upload(
             store.prune_decks(&user, decks).map_err(store_error)?;
         }
     }
-    let player = load_player(&store, &user).map_err(store_error)?;
-    app.players.write().unwrap().insert(user.clone(), player);
+    app.reload_player(&store, &user).map_err(store_error)?;
     challenges::refresh(&mut store, &app.participants(), now_ms()).map_err(store_error)?;
     let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
     if silent {
-        for event in &profile.events {
-            store.mark_seen(&user, &event.key).map_err(store_error)?;
-        }
+        mark_events_seen(&store, &user, &profile).map_err(store_error)?;
     }
     let mut feedback = feedback::feedback(before.as_ref(), &profile, &announced);
     let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
@@ -831,41 +842,25 @@ async fn upload(
 }
 
 fn deck_settings(app: &App, store: &Store, user: &str) -> Result<decks::Settings, Error> {
-    let mut users: BTreeSet<String> = app.config.users.keys().cloned().collect();
-    users.extend(app.accounts.users());
-    let ntfy_enabled = app
-        .config
-        .ntfy
-        .as_deref()
-        .is_some_and(|base| !base.trim().is_empty());
     let unsubscribed = store.unsubscribed_recipients(user)?;
     let circle = app.circle(&store.conn, user)?;
-    users.retain(|candidate| {
-        candidate != user
-            && circle.contains(candidate)
-            && !unsubscribed.contains(candidate)
-            && (app.accounts.contains(candidate)
-                || app.config.users.get(candidate).is_some_and(|config| {
-                    config
-                        .token
-                        .as_deref()
-                        .is_some_and(|token| !token.is_empty())
-                        || (ntfy_enabled
-                            && config
-                                .ntfy_topic
-                                .as_deref()
-                                .is_some_and(|topic| !topic.trim().is_empty()))
-                }))
-    });
+    let pushable = app
+        .config
+        .users
+        .keys()
+        .filter(|candidate| push_destination(&app.config, candidate).is_some())
+        .cloned();
+    let users: BTreeSet<String> = app
+        .members()
+        .into_iter()
+        .chain(pushable)
+        .filter(|candidate| {
+            candidate != user && circle.contains(candidate) && !unsubscribed.contains(candidate)
+        })
+        .collect();
     Ok(decks::Settings {
         decks: store.decks(user)?,
-        recipients: users
-            .into_iter()
-            .map(|user| decks::Recipient {
-                display: app.display(&user),
-                user,
-            })
-            .collect(),
+        recipients: users.into_iter().map(|user| app.recipient(user)).collect(),
         nudges: store.nudges_enabled(user)?,
         celebrations: store.celebrations_enabled(user)?,
     })
@@ -881,10 +876,7 @@ async fn get_decks(
     }
     deck_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
-        .map_err(|e| {
-            log_error!(user: user, "deck settings for {user} failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })
+        .map_err(failed_for("deck settings for", &user))
 }
 
 #[derive(Deserialize)]
@@ -915,14 +907,7 @@ async fn deck_copy_inbox(
             app.reachable(&store, &user).map_err(store_error)?,
         )
     };
-    let mut friends: Vec<_> = reachable
-        .into_iter()
-        .map(|id| decks::Recipient {
-            display: app.display(&id),
-            user: id,
-        })
-        .collect();
-    friends.sort_by(|a, b| a.display.cmp(&b.display));
+    let friends = app.sorted_recipients(reachable);
     Ok(Json(CopyInbox {
         offers,
         friends,
@@ -1015,10 +1000,7 @@ async fn set_decks(
     if update.decks.len() > decks::MAX_DECKS {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
-    let store_error = |e: Error| {
-        log_error!(user: user, "deck settings for {user} failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    };
+    let store_error = failed_for("deck settings for", &user);
     let mut store = app.store.lock().unwrap();
     let current = deck_settings(&app, &store, &user).map_err(store_error)?;
     if !decks::valid_preferences(&update.decks, &current.decks, &current.recipients) {
@@ -1045,6 +1027,19 @@ fn store_error(error: impl std::fmt::Display) -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
+/// Years the history and community pages can show.
+fn valid_year(year: i32) -> bool {
+    (1970..=2100).contains(&year)
+}
+
+/// Like [`store_error`], attributed to `user`: logs "{what} {user} failed: ...".
+fn failed_for<'a>(what: &'a str, user: &'a str) -> impl Fn(Error) -> StatusCode + Copy + 'a {
+    move |e| {
+        log_error!(user: user, "{what} {user} failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct IncomingPreferences {
     #[serde(flatten)]
@@ -1068,14 +1063,7 @@ fn incoming_preferences(
     let unsubscribed_senders = store.unsubscribed_senders(user)?;
     users.extend(unsubscribed_senders.iter().cloned());
     users.remove(user);
-    let mut senders: Vec<_> = users
-        .into_iter()
-        .map(|user| decks::Recipient {
-            display: app.display(&user),
-            user,
-        })
-        .collect();
-    senders.sort_by(|a, b| a.display.cmp(&b.display).then_with(|| a.user.cmp(&b.user)));
+    let senders = app.sorted_recipients(users);
     Ok(IncomingPreferences {
         settings: store.incoming_settings(user)?,
         senders,
@@ -1204,6 +1192,11 @@ struct ActivityQuery {
     unread_only: Option<bool>,
 }
 
+/// A page size of 1 to 200 that starts before a positive notification id, if any.
+fn valid_page(limit: u32, before: Option<i64>) -> bool {
+    (1..=200).contains(&limit) && before.is_none_or(|id| id > 0)
+}
+
 async fn activity(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
@@ -1215,10 +1208,7 @@ async fn activity(
     }
     let days = query.days.unwrap_or(decks::ACTIVITY_DAYS);
     let limit = query.limit.unwrap_or(100);
-    if !matches!(days, 30 | 90)
-        || !(1..=200).contains(&limit)
-        || query.before.is_some_and(|id| id <= 0)
-    {
+    if !matches!(days, 30 | 90) || !valid_page(limit, query.before) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut store = app.store.lock().unwrap();
@@ -1298,7 +1288,7 @@ async fn sent_activity(
         return Err(StatusCode::UNAUTHORIZED);
     }
     let limit = query.limit.unwrap_or(100);
-    if !(1..=200).contains(&limit) || query.before.is_some_and(|id| id <= 0) {
+    if !valid_page(limit, query.before) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let store = app.store.lock().unwrap();
@@ -1432,10 +1422,7 @@ async fn reply(
             message,
             now_ms(),
         )
-        .map_err(|e| {
-            log_error!(user: user, "reply from {user} failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(failed_for("reply from", &user))?
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(ReplyResponse {
         sent_to: app.display(&sender),
@@ -1524,7 +1511,7 @@ async fn community_dashboard(
     let date = app.week.competition_date(now);
     let year = query.year.unwrap_or(date.year());
     let month = query.month.unwrap_or(date.month());
-    if !(1970..=2100).contains(&year) || !(1..=12).contains(&month) {
+    if !valid_year(year) || !(1..=12).contains(&month) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut store = app.store.lock().unwrap();
@@ -1635,15 +1622,7 @@ fn challenge_list(
     user: &str,
     players: &[competition::Participant],
 ) -> Result<ChallengeList, challenges::Error> {
-    let mut recipients: Vec<_> = app
-        .reachable(store, user)?
-        .into_iter()
-        .map(|name| decks::Recipient {
-            display: app.display(&name),
-            user: name,
-        })
-        .collect();
-    recipients.sort_by(|a, b| a.display.cmp(&b.display).then_with(|| a.user.cmp(&b.user)));
+    let recipients = app.sorted_recipients(app.reachable(store, user)?);
     Ok(ChallengeList {
         challenges: challenges::list(store, user, players, now_ms())?,
         recipients,
@@ -1810,6 +1789,14 @@ fn push(
     Ok(())
 }
 
+/// Marks every event `profile` shows as seen, so none of them is announced later.
+fn mark_events_seen(store: &Store, user: &str, profile: &Profile) -> Result<(), Error> {
+    for event in &profile.events {
+        store.mark_seen(user, &event.key)?;
+    }
+    Ok(())
+}
+
 fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
     Ok(Player {
         reviews: Arc::new(store.reviews(user)?),
@@ -1860,13 +1847,10 @@ fn import(app: &App, store: &mut Store, base: &Path) -> Result<(), Error> {
         let result = (|| -> Result<(), Error> {
             let first_import = !store.is_known(&user)?;
             if store.ingest(base, &user)? {
-                let player = load_player(store, &user)?;
-                app.players.write().unwrap().insert(user.clone(), player);
+                app.reload_player(store, &user)?;
             }
             if first_import && let Some(profile) = app.profile(&user) {
-                for event in &profile.events {
-                    store.mark_seen(&user, &event.key)?;
-                }
+                mark_events_seen(store, &user, &profile)?;
             }
             Ok(())
         })();
@@ -1921,8 +1905,7 @@ fn tick(app: &App) -> Result<(), Error> {
             privacy::carry_out_removals(app, &store.conn)?;
             for user in freezes::grant_reloads(&store.conn)? {
                 if app.players.read().unwrap().contains_key(&user) {
-                    let player = load_player(&store, &user)?;
-                    app.players.write().unwrap().insert(user.clone(), player);
+                    app.reload_player(&store, &user)?;
                 }
                 freezes::grant_reloaded(&store.conn, &user)?;
             }
