@@ -6,7 +6,8 @@ use crate::config::Config;
 use crate::game::{Clock, Profile};
 use crate::store::{Error, Store};
 use crate::{
-    admin, challenges, competition, freezes, game, i18n, notifications, privacy, reminders, social,
+    admin, challenges, competition, freezes, game, goals, i18n, notifications, privacy, reminders,
+    shares, social, wins,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -197,7 +198,16 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
         // One player at a time, so requests can take the database in between.
         let mut store = app.store.lock().unwrap();
         let push_enabled = push_destination(&app.config, user).is_some();
-        store.queue_events(user, &profile.events, profile.day, now_ms(), push_enabled)?;
+        let mut events = profile.events.clone();
+        events.extend(goals::event(&store.conn, user, profile)?);
+        store.queue_moments(
+            user,
+            &events,
+            profile.day,
+            now_ms(),
+            push_enabled,
+            &wins::stats(profile),
+        )?;
         if store.nudges_enabled(user)? {
             let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
                 .map(|other| (other.display.clone(), other.week_xp));
@@ -219,10 +229,54 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
         }
         if let Some(clock) = clocks.get(user.as_str()) {
             let recap = competition::weekly_recap(&store, user, &app.week, now)?;
+            let place = recap
+                .as_ref()
+                .map(|recap| place_win(&store.conn, user, profile, recap, now))
+                .transpose()?
+                .flatten();
             reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
+            if let Some((win, topic, since)) = place {
+                wins::attach_recap(&store.conn, user, win, &topic, since)?;
+            }
         }
+        shares::share_automatically(app, &mut store, user, now_ms())?;
     }
     deliver_notifications(app, PUSH_BUDGET)
+}
+
+/// The win for a top-three place in last week's finished competition, made once, with the
+/// recap topic and the week's end so the recap that announces it can point to it.
+fn place_win(
+    conn: &rusqlite::Connection,
+    user: &str,
+    profile: &Profile,
+    recap: &competition::WeeklyRecap,
+    now: i64,
+) -> Result<Option<(i64, String, i64)>, Error> {
+    let Some(rank) = recap.rank.filter(|rank| (1..=3).contains(rank)) else {
+        return Ok(None);
+    };
+    if recap.week_end > now || now >= recap.valid_until {
+        return Ok(None);
+    }
+    let key = format!("place:{}:{rank}", recap.week_start.div_euclid(game::DAY_MS));
+    let mut stats = wins::stats(profile);
+    stats["place"] = rank.into();
+    stats["week_xp"] = recap.xp.into();
+    wins::create(
+        conn,
+        user,
+        &key,
+        profile.day,
+        now,
+        &format!("#{rank} on the weekly board"),
+        &format!(
+            "{} XP over {} study days last week.",
+            recap.xp, recap.days_studied
+        ),
+        &stats,
+    )?;
+    Ok(wins::id_of(conn, user, &key)?.map(|win| (win, format!("place:{rank}"), recap.week_end)))
 }
 
 /// Whoever in the player's circle is closest above them this week, for "just out of reach" nudges.
@@ -492,6 +546,75 @@ mod tests {
             String::from_utf8(request).unwrap()
         });
         (address, server)
+    }
+
+    #[test]
+    fn a_tick_turns_moments_into_wins_and_sends_automatic_ones_as_one_digest() {
+        let (app, path) = fixture();
+        with_reviews(&app, "hill", 1);
+        tick(&app).unwrap();
+        {
+            let store = app.store.lock().unwrap();
+            wins::update_sharing(
+                &store.conn,
+                "hill",
+                wins::SharingUpdate {
+                    policies: [
+                        ("daily_goal".to_string(), "auto".to_string()),
+                        ("streak_secured".to_string(), "auto".to_string()),
+                    ]
+                    .into(),
+                    daily_cap: None,
+                },
+            )
+            .unwrap();
+            store
+                .conn
+                .execute(
+                    "insert into goals (user, mode, value) values ('hill', 'cards', 3)",
+                    [],
+                )
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "update seen set key = 'history' where key glob 'secured:*'",
+                    [],
+                )
+                .unwrap();
+        }
+        with_reviews(&app, "hill", 4);
+        tick(&app).unwrap();
+        tick(&app).unwrap();
+        let store = app.store.lock().unwrap();
+        let kinds: Vec<String> = store
+            .conn
+            .prepare("select kind from wins where user = 'hill' order by id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(kinds, ["streak_secured", "daily_goal"]);
+        for friend in ["cerro", "friend"] {
+            let shares: Vec<_> = store
+                .notifications(friend, now_ms())
+                .unwrap()
+                .into_iter()
+                .filter(|n| n.kind == "share")
+                .collect();
+            assert_eq!(shares.len(), 1, "{friend}: {shares:?}");
+            assert_eq!(shares[0].title, "🎉 Hill: 2 wins");
+            assert_eq!(shares[0].body, "Streak secured! · Daily goal reached!");
+        }
+        let own = store.notifications("hill", now_ms()).unwrap();
+        assert!(
+            own.iter()
+                .all(|n| n.kind != "celebration" || n.win.is_some())
+        );
+        drop(store);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

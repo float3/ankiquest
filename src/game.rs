@@ -1659,6 +1659,13 @@ pub fn compute_with_rules(
             body: format!("You have studied {streak} days in a row."),
         });
     }
+    if today_counts {
+        events.push(Event {
+            key: format!("secured:{today}"),
+            title: "Streak secured!".into(),
+            body: format!("Today counts toward your {streak}-day streak."),
+        });
+    }
 
     let all_conquests = conquests(reviews, now_ms);
     events.extend(
@@ -3241,6 +3248,22 @@ mod tests {
         assert_eq!(heat, p.xp_total);
         assert!(p.xp_total > 0);
         assert_eq!(p.week_xp, p.xp_total);
+    }
+
+    #[test]
+    fn a_day_that_counts_secures_the_streak_once_per_day() {
+        let reviews: Vec<Review> = reviews_on(1, 5, 0);
+        let p = compute("a", "a", &reviews, &utc(), &Week::default(), at(1));
+        let secured = p.events.iter().find(|e| e.key == "secured:1").unwrap();
+        assert_eq!(secured.title, "Streak secured!");
+        assert_eq!(secured.body, "Today counts toward your 1-day streak.");
+        let later = compute("a", "a", &reviews, &utc(), &Week::default(), at(2));
+        assert!(!later.events.iter().any(|e| e.key.starts_with("secured:")));
+        let goal = goal_event(1, 1, 12);
+        assert_eq!(
+            (goal.key.as_str(), goal.body.as_str()),
+            ("goal:1", "1 card today in 12 minutes.")
+        );
     }
 
     #[test]

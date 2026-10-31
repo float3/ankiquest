@@ -42,6 +42,7 @@ mod subscriptions;
 mod test_support;
 mod web_util;
 mod weekly_challenges;
+mod wins;
 mod worker;
 
 use access::authorized;
@@ -209,6 +210,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(avatars::routes())
         .merge(friend_nudges::routes())
         .merge(shares::routes())
+        .merge(wins::routes())
         .merge(goals::routes())
         .merge(conquests::routes())
         .merge(social::routes())

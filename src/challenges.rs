@@ -368,14 +368,14 @@ pub(crate) fn notice(
     title: &str,
     kind: &str,
     now: i64,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<Option<Sent>> {
     let key = format!("challenge:{id}:{kind}:{from}");
     if conn.execute(
         "insert or ignore into seen(user,key) values(?1,?2)",
         params![to, key],
     )? == 0
     {
-        return Ok(());
+        return Ok(None);
     }
     let (heading, body) = if crate::weekly_challenges::started(conn, id)?.is_some() {
         match kind {
@@ -419,6 +419,59 @@ pub(crate) fn notice(
             id
         ],
     )?;
+    Ok(Some(Sent {
+        id: conn.last_insert_rowid(),
+        title: heading,
+        body,
+    }))
+}
+
+/// A notice [`notice`] just wrote.
+pub(crate) struct Sent {
+    pub(crate) id: i64,
+    pub(crate) title: &'static str,
+    pub(crate) body: String,
+}
+
+/// Keeps a finished challenge as `member`'s win, with how their study stood when it was noticed.
+fn challenge_win(
+    conn: &Connection,
+    member: &str,
+    challenge: i64,
+    sent: &Sent,
+    players: &[Participant],
+    now: i64,
+) -> rusqlite::Result<()> {
+    let stats = players
+        .iter()
+        .find(|player| player.user == member)
+        .map_or_else(
+            || serde_json::json!({}),
+            |player| {
+                crate::wins::stats(&crate::game::compute_with_history(
+                    &player.user,
+                    &player.display,
+                    &player.reviews,
+                    &player.clock_history,
+                    &crate::game::Week::default(),
+                    now,
+                    &player.freeze_policy,
+                ))
+            },
+        );
+    let day = crate::store::clock_in(conn, member)?.day(now);
+    if let Some(win) = crate::wins::create(
+        conn,
+        member,
+        &format!("challenge:{challenge}"),
+        day,
+        now,
+        sent.title,
+        &sent.body,
+        &stats,
+    )? {
+        crate::wins::attach(conn, sent.id, win)?;
+    }
     Ok(())
 }
 
@@ -474,7 +527,7 @@ pub fn refresh(store: &mut Store, players: &[Participant], now: i64) -> Result<(
             .iter()
             .filter(|member| member.status == "accepted")
         {
-            notice(
+            if let Some(sent) = notice(
                 &tx,
                 &member.user,
                 "",
@@ -482,7 +535,9 @@ pub fn refresh(store: &mut Store, players: &[Participant], now: i64) -> Result<(
                 &challenge.title,
                 "challenge_complete",
                 now,
-            )?;
+            )? {
+                challenge_win(&tx, &member.user, challenge.id, &sent, players, now)?;
+            }
         }
     }
     tx.commit()?;
@@ -945,16 +1000,29 @@ mod tests {
         let mut store = Store::open(&path).unwrap();
         refresh(&mut store, &players, 200).unwrap();
         for user in ["owner", "friend"] {
+            let complete: Vec<_> = store
+                .notifications(user, 200)
+                .unwrap()
+                .into_iter()
+                .filter(|n| n.kind == "challenge_complete")
+                .collect();
+            assert_eq!(complete.len(), 1);
+            let win = crate::wins::win(&store.conn, user, complete[0].win.unwrap()).unwrap();
             assert_eq!(
-                store
-                    .notifications(user, 200)
-                    .unwrap()
-                    .iter()
-                    .filter(|n| n.kind == "challenge_complete")
-                    .count(),
-                1
+                (win.kind.as_str(), win.key.clone()),
+                ("challenge", format!("challenge:{id}"))
             );
+            assert_eq!(win.title, complete[0].title);
+            assert!(win.stats["level"].is_u64());
         }
+        assert_eq!(
+            store
+                .conn
+                .query_row("select count(*) from wins", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2,
+            "one win per member, however often completion is reconciled"
+        );
         assert!(store.notifications("outsider", 200).unwrap().is_empty());
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
