@@ -88,6 +88,8 @@ pub struct GoalView {
     pub mode: String,
     pub value: Option<u32>,
     pub since: i64,
+    /// The player's current Anki day, to count the plan's days against `since`.
+    pub day: i64,
     /// Reviews or minutes so far; `null` for `off` and `backlog`.
     pub progress: Option<u64>,
     pub reached: bool,
@@ -140,6 +142,7 @@ pub fn view(conn: &Connection, user: &str, profile: &Profile) -> rusqlite::Resul
         mode: setting.mode,
         value: setting.value,
         since: setting.since,
+        day: profile.day,
         progress,
         reached,
     })

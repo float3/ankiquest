@@ -109,7 +109,7 @@ when the mode is `backlog` and `d` is the player's current Anki day. Otherwise i
 `GET /api/profile/{user}` (owner view) gains `goal`:
 
 ```json
-{ "mode": "cards", "value": 100, "since": 20391, "progress": 64, "reached": false }
+{ "mode": "cards", "value": 100, "since": 20391, "day": 20395, "progress": 64, "reached": false }
 ```
 
 `progress` is reviews or minutes so far. For `backlog` it is `null`, and `reached` reflects a
