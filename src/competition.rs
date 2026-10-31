@@ -3,7 +3,7 @@
 //! keeps its existing scoring; this archive freezes each result after a late-sync
 //! grace period and never rewrites a finalized winner.
 
-use crate::game::{self, ClockHistory, FreezePolicy, Week};
+use crate::game::{self, ClockHistory, DAY_MS, FreezePolicy, Week};
 use crate::store::{Error, Store};
 use chrono::{Datelike, Duration, NaiveDate};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-const GRACE_MS: i64 = 86_400_000;
+const GRACE_MS: i64 = DAY_MS;
 
 pub struct Participant {
     pub user: String,
@@ -125,7 +125,8 @@ fn date(value: &str) -> Result<NaiveDate, Error> {
     Ok(NaiveDate::parse_from_str(value, "%Y-%m-%d")?)
 }
 
-fn monday(day: NaiveDate) -> NaiveDate {
+/// The Monday starting the week that contains `day`.
+pub(crate) fn monday(day: NaiveDate) -> NaiveDate {
     day - Duration::days(i64::from(day.weekday().num_days_from_monday()))
 }
 

@@ -1,6 +1,6 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
 use crate::decks::{Notification, Outgoing};
-use crate::game::{Clock, MAX_FREEZES, Profile, Week};
+use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
 use crate::store::{Error, Store};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub use crate::competition::WeeklyRecap as Recap;
 
 const HOUR: i64 = 3_600_000;
-const DAY: i64 = 24 * HOUR;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -211,17 +210,17 @@ fn baseline(store: &Store, user: &str, kind: &str, enabled: bool, now: i64) -> R
 
 fn local_midnight(clock: &Clock, now: i64) -> i64 {
     let offset = clock.offset_west_min * 60_000;
-    (now - offset).div_euclid(DAY) * DAY + offset
+    (now - offset).div_euclid(DAY_MS) * DAY_MS + offset
 }
 
 fn deadline(clock: &Clock, now: i64) -> i64 {
-    (clock.day(now) + 1) * DAY + clock.rollover_hour * HOUR + clock.offset_west_min * 60_000
+    (clock.day(now) + 1) * DAY_MS + clock.rollover_hour * HOUR + clock.offset_west_min * 60_000
 }
 
 /// Place the preferred wall-clock hour inside the current Anki day. Hours
 /// before rollover belong to its final morning, rather than its opening day.
 fn reminder_due(prefs: &Settings, clock: &Clock, now: i64) -> bool {
-    let day_start = deadline(clock, now) - DAY;
+    let day_start = deadline(clock, now) - DAY_MS;
     let scheduled =
         day_start + (i64::from(prefs.reminder_hour) - clock.rollover_hour).rem_euclid(24) * HOUR;
     now >= scheduled
@@ -245,7 +244,7 @@ fn deadline_window(prefs: &Settings, clock: &Clock, now: i64, cutoff: i64) -> bo
     }
     let mut quiet_at = local_midnight(clock, now) + i64::from(prefs.quiet_start) * HOUR;
     if quiet_at <= now {
-        quiet_at += DAY;
+        quiet_at += DAY_MS;
     }
     let quiet_length =
         (i64::from(prefs.quiet_end) - i64::from(prefs.quiet_start)).rem_euclid(24) * HOUR;
@@ -276,7 +275,7 @@ fn used_budget(store: &Store, user: &str, clock: &Clock, now: i64) -> Result<u8,
     let count: i64 = store.conn.query_row(
         "select count(*) from notifications where recipient = ?1
          and kind glob 'reminder_*' and created_at >= ?2 and created_at < ?3",
-        params![user, start, start + DAY],
+        params![user, start, start + DAY_MS],
         |row| row.get(0),
     )?;
     Ok(count.min(255) as u8)
@@ -476,9 +475,9 @@ pub fn tick(
     if prefs.freeze_used
         && let Some(frozen) = profile.history.iter().rev().find(|item| {
             item.frozen
-                && item.at + DAY > freeze_since
-                && item.at + DAY <= now_ms
-                && now_ms - (item.at + DAY) < 2 * DAY
+                && item.at + DAY_MS > freeze_since
+                && item.at + DAY_MS <= now_ms
+                && now_ms - (item.at + DAY_MS) < 2 * DAY_MS
         })
     {
         candidates.push(Candidate {
@@ -648,7 +647,7 @@ mod tests {
 
     const DATE: i64 = 20_000;
     fn at(hour: i64) -> i64 {
-        DATE * DAY + hour * HOUR
+        DATE * DAY_MS + hour * HOUR
     }
 
     fn store() -> (Store, std::path::PathBuf) {
@@ -668,7 +667,7 @@ mod tests {
             "hill",
             "Hill",
             &[Review {
-                id: now - DAY,
+                id: now - DAY_MS,
                 cid: 1,
                 last_ivl: 1,
                 ivl: None,
@@ -1050,12 +1049,12 @@ mod tests {
         super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
-        let now = end + DAY + HOUR;
+        let now = end + DAY_MS + HOUR;
         let p = profile(&clock, now);
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,
@@ -1091,12 +1090,12 @@ mod tests {
             ..Settings::default()
         };
         super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
-        let now = end + DAY + HOUR;
+        let now = end + DAY_MS + HOUR;
         let p = profile(&clock, now);
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,
@@ -1305,7 +1304,7 @@ mod tests {
         let clock = Clock::default();
         let mut p = profile(&clock, at(20));
         p.history.push(HistoryDay {
-            at: at(4) - DAY,
+            at: at(4) - DAY_MS,
             date: game::date_string(DATE - 1),
             xp: 0,
             reviews: 0,
@@ -1370,8 +1369,8 @@ mod tests {
         save_settings(&mut store, "hill", &prefs).unwrap();
         let mut p = profile(&clock, at(20));
         let historical = Recap {
-            week_start: end - 14 * DAY,
-            week_end: end - 7 * DAY,
+            week_start: end - 14 * DAY_MS,
+            week_end: end - 7 * DAY_MS,
             valid_until: end,
             days_studied: 6,
             xp: 800,
@@ -1403,9 +1402,9 @@ mod tests {
             "reminder_weekly_closing"
         );
         let recap = Recap {
-            week_start: end - 7 * DAY,
+            week_start: end - 7 * DAY_MS,
             week_end: end,
-            valid_until: end + 7 * DAY,
+            valid_until: end + 7 * DAY_MS,
             days_studied: 5,
             xp: 500,
             daily_wins: 2,

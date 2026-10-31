@@ -1,11 +1,10 @@
 //! Private, opt-in challenges and cooperative goals. Reviews count only after joining.
 use crate::competition::Participant;
+use crate::game::DAY_MS;
 use crate::store::Store;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-
-const DAY_MS: i64 = 86_400_000;
 
 #[derive(Debug)]
 pub enum Error {

@@ -524,7 +524,7 @@ async fn study_history(
         let players = app.players.read().unwrap();
         let player = players.get(&user);
         let day = player.map_or_else(
-            || now_ms().div_euclid(86_400_000),
+            || now_ms().div_euclid(game::DAY_MS),
             |player| player.clock.day(now_ms()),
         );
         let year = game::date_string(day)

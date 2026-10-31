@@ -1,5 +1,6 @@
 //! Private, time-limited Anki deck packages shared with selected players.
 
+use crate::game::DAY_MS;
 use crate::store::Error;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -8,7 +9,7 @@ use std::collections::HashSet;
 pub const MAX_BYTES: usize = 25 * 1024 * 1024;
 pub const MAX_RECIPIENTS: usize = 20;
 const MAX_ACTIVE: i64 = 10;
-const RETENTION_MS: i64 = 30 * 86_400_000;
+const RETENTION_MS: i64 = 30 * DAY_MS;
 
 #[derive(Debug, Serialize)]
 pub struct Offer {

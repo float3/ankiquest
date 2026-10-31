@@ -1,4 +1,4 @@
-use crate::game::{Clock, Event};
+use crate::game::{Clock, DAY_MS, Event};
 use crate::store::{Error, Store, has_column};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 pub const MAX_DECKS: usize = 2000;
 const MAX_RECIPIENTS: usize = 100;
-const INBOX_AGE_MS: i64 = 7 * 86_400_000;
+const INBOX_AGE_MS: i64 = 7 * DAY_MS;
 pub const ACTIVITY_DAYS: u32 = 90;
-const ACTIVITY_AGE_MS: i64 = ACTIVITY_DAYS as i64 * 86_400_000;
+const ACTIVITY_AGE_MS: i64 = ACTIVITY_DAYS as i64 * DAY_MS;
 const PUSH_LEASE_MS: i64 = 60_000;
 const MAX_SEPARATE_PUSHES: usize = 3;
 pub const MAX_MESSAGE: usize = 200;
@@ -829,7 +829,7 @@ impl Store {
             category,
             unread_only,
         } = options;
-        let cutoff = now_ms - i64::from(days) * 86_400_000;
+        let cutoff = now_ms - i64::from(days) * DAY_MS;
         let category = category.map(ActivityCategory::as_str);
         let mut stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n

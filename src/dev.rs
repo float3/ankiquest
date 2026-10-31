@@ -3,7 +3,7 @@
 //! counts across players, never anything about one player's cards.
 
 use crate::decks::{Outgoing, insert_notification, valid_message};
-use crate::game::Review;
+use crate::game::{DAY_MS, Review};
 use crate::store::{Error, Store};
 use crate::{App, access, now_ms, store_error};
 use axum::extract::{Path, State};
@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-const DAY_MS: i64 = 86_400_000;
 /// Days of history the statistics cover, today included.
 pub const DAYS: i64 = 30;
 /// How long a new account has to be before it counts towards retention.
