@@ -58,9 +58,7 @@ fn notification_win(store: &Store, user: &str, id: i64) -> Result<Option<Win>, E
 
 fn muted(store: &Store, recipient: &str, sender: &str) -> Result<bool, Error> {
     Ok(store.conn.query_row(
-        "select exists(select 1 from (select recipient, sender from incoming_muted_senders
-                       union all select recipient, sender from sender_unsubscriptions)
-                       where recipient = ?1 and sender = ?2)",
+        &format!("select {}", crate::decks::sender_muted_sql("?1", "?2")),
         params![recipient, sender],
         |r| r.get(0),
     )?)

@@ -50,10 +50,42 @@ const ACTIVITY_CATEGORY_SQL: &str = "case
     when n.kind in ('completion','conquest') then 'deck_completions'
     else 'study_updates' end";
 
-const ACTION_REQUIRED_SQL: &str = "exists(select 1 from community_members m
+macro_rules! action_required_sql {
+    () => {
+        "exists(select 1 from community_members m
     join community_challenges c on c.id=m.challenge where c.id=n.challenge_id
     and n.kind='challenge_invite' and m.user=n.recipient and m.status='invited'
-    and c.cancelled=0 and c.end_at>?2)";
+    and c.cancelled=0 and c.end_at>?2)"
+    };
+}
+
+const ACTION_REQUIRED_SQL: &str = action_required_sql!();
+
+/// A nudge row of `notifications` that its recipient still wants pushed.
+const NUDGE_ALLOWED_SQL: &str = "((sender = '' and exists (select 1 from player_settings
+                         where user = notifications.recipient and nudges = 1))
+    or (sender != '' and exists (select 1 from player_settings
+                         where user = notifications.recipient and friend_nudges = 1)
+        and not exists (select 1 from friend_nudge_muted_senders
+                         where recipient = notifications.recipient and sender = notifications.sender)))";
+
+/// Whether `recipient` muted or unsubscribed from `sender`; both are SQL expressions.
+pub(crate) fn sender_muted_sql(recipient: &str, sender: &str) -> String {
+    format!(
+        "exists (select 1 from (select recipient,sender from incoming_muted_senders
+                         union all select recipient,sender from sender_unsubscriptions)
+                         where recipient = {recipient} and sender = {sender})"
+    )
+}
+
+/// Whether `recipient` still hears deck completions from `sender`; both are SQL expressions.
+fn completion_allowed_sql(recipient: &str, sender: &str) -> String {
+    format!(
+        "not exists (select 1 from incoming_settings where user = {recipient} and enabled = 0)
+         and not {}",
+        sender_muted_sql(recipient, sender)
+    )
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -198,12 +230,12 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
 }
 
 // Read and actionable are independent: reading an invitation does not answer it.
-const NOTICE_COLUMNS: &str =
+const NOTICE_COLUMNS: &str = concat!(
     "n.id,n.title,n.body,n.day,n.created_at / 1000,n.sender,n.replied,n.kind,
- n.read_at / 1000,n.challenge_id,exists(select 1 from community_members m
- join community_challenges c on c.id=m.challenge where c.id=n.challenge_id
- and n.kind='challenge_invite' and m.user=n.recipient and m.status='invited'
- and c.cancelled=0 and c.end_at>?2),n.reply_to_title,n.reply_to_body,n.topic";
+ n.read_at / 1000,n.challenge_id,",
+    action_required_sql!(),
+    ",n.reply_to_title,n.reply_to_body,n.topic"
+);
 
 /// A completion that was just announced, echoed back so the client can say so locally.
 #[derive(Debug, Serialize)]
@@ -394,14 +426,11 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
     // Older servers left nudges queued after opt-out. Retain their inbox history
     // without resuming those pushes when the player next enables nudges.
     conn.execute(
-        "update notifications set push_cancelled = 1
-         where pushed = 0 and push_cancelled = 0 and kind = 'nudge'
-         and ((sender = '' and not exists (select 1 from player_settings
-                         where user = notifications.recipient and nudges = 1))
-           or (sender != '' and (not exists (select 1 from player_settings
-                         where user = notifications.recipient and friend_nudges = 1)
-               or exists (select 1 from friend_nudge_muted_senders
-                         where recipient = notifications.recipient and sender = notifications.sender))))",
+        &format!(
+            "update notifications set push_cancelled = 1
+             where pushed = 0 and push_cancelled = 0 and kind = 'nudge'
+             and not {NUDGE_ALLOWED_SQL}"
+        ),
         [],
     )?;
     Ok(())
@@ -424,9 +453,7 @@ pub(crate) fn insert_notification(
     // producer uses this insertion helper instead of record_decks.
     let cancelled = message.kind == "completion"
         && !conn.query_row(
-            "select not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-             and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions) where recipient = ?1 and sender = ?2)",
+            &format!("select {}", completion_allowed_sql("?1", "?2")),
             params![message.to, message.from],
             |r| r.get::<_, bool>(0),
         )?;
@@ -663,17 +690,14 @@ impl Store {
                 continue;
             }
             let recipients: HashSet<String> = tx
-                .prepare(
+                .prepare(&format!(
                     "select recipient from deck_recipients
                      where owner = ?1 and deck_id = ?2 and recipient != ?1
                      and not exists (select 1 from subscription_baselines b
                                      where b.sender=?1 and b.deck_id=?2 and b.recipient=deck_recipients.recipient and b.day=?3)
-                     and not exists (select 1 from incoming_settings
-                                     where user = deck_recipients.recipient and enabled = 0)
-                     and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                     where recipient = deck_recipients.recipient and sender = ?1)",
-                )?
+                     and {}",
+                    completion_allowed_sql("deck_recipients.recipient", "?1")
+                ))?
                 .query_map(params![user, deck.id, today], |r| r.get(0))?
                 .collect::<Result<_, _>>()?;
             candidates.push((deck, recipients));
@@ -770,12 +794,9 @@ impl Store {
             "select {NOTICE_COLUMNS} from notifications n where n.id in (
                  select id from notifications where recipient=?1 and push_only=0
                  and created_at>=?3
-                 and (kind != 'completion' or (completion_cancelled = 0
-                     and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                     and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                     where recipient = ?1 and sender = notifications.sender)))
-                 order by id desc limit 500) order by n.id"
+                 and (kind != 'completion' or (completion_cancelled = 0 and {}))
+                 order by id desc limit 500) order by n.id",
+            completion_allowed_sql("?1", "notifications.sender")
         ))?;
         Ok(stmt
             .query_map(params![user, now_ms, now_ms - INBOX_AGE_MS], notification)?
@@ -822,15 +843,12 @@ impl Store {
         let mut stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n
             where n.recipient=?1 and n.push_only=0 and n.created_at>=?3 and (?4 is null or n.id<?4)
-            and (n.kind != 'completion' or (n.completion_cancelled = 0
-                and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                where recipient = ?1 and sender = n.sender)))
+            and (n.kind != 'completion' or (n.completion_cancelled = 0 and {}))
             and (?6 is null or (?6='needs_action' and {ACTION_REQUIRED_SQL})
                 or (?6!='needs_action' and ({ACTIVITY_CATEGORY_SQL})=?6))
             and (?7=0 or n.read_at is null)
-            order by n.id desc limit ?5"
+            order by n.id desc limit ?5",
+            completion_allowed_sql("?1", "n.sender")
         ))?;
         let mut items = stmt
             .query_map(
@@ -862,16 +880,12 @@ impl Store {
             .query_map(params![user, now_ms, cutoff], notification)?
             .collect::<Result<Vec<_>, _>>()?;
         let (unread_count, action_count, latest_id) = self.conn.query_row(
-            "select coalesce(sum(n.read_at is null),0),coalesce(sum(exists(
-              select 1 from community_members m join community_challenges c on c.id=m.challenge
-              where c.id=n.challenge_id and n.kind='challenge_invite' and m.user=n.recipient
-              and m.status='invited' and c.cancelled=0 and c.end_at>?2)),0),max(n.id)
-             from notifications n where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
-             and (n.kind != 'completion' or (n.completion_cancelled = 0
-                 and not exists (select 1 from incoming_settings where user = ?1 and enabled = 0)
-                 and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                 where recipient = ?1 and sender = n.sender)))",
+            &format!(
+                "select coalesce(sum(n.read_at is null),0),coalesce(sum({ACTION_REQUIRED_SQL}),0),max(n.id)
+                 from notifications n where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
+                 and (n.kind != 'completion' or (n.completion_cancelled = 0 and {}))",
+                completion_allowed_sql("?1", "n.sender")
+            ),
             params![user, now_ms, cutoff],
             |r| {
                 Ok((
@@ -1261,50 +1275,25 @@ impl Store {
     pub fn take_deck_deliveries(&mut self, now_ms: i64) -> Result<Vec<Delivery>, Error> {
         let tx = self.conn.transaction()?;
         let deliveries = {
-            let mut stmt = tx.prepare(
+            let mut stmt = tx.prepare(&format!(
                 "with ready as (
                      select *, row_number() over (partition by recipient order by retry_at, id) as turn
                      from notifications where pushed = 0 and push_cancelled = 0 and retry_at <= ?1
-                     and (kind != 'completion' or (completion_cancelled = 0
-                         and not exists (select 1 from incoming_settings
-                                         where user = notifications.recipient and enabled = 0)
-                         and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                         where recipient = notifications.recipient
-                                         and sender = notifications.sender)))
+                     and (kind != 'completion' or (completion_cancelled = 0 and {}))
                        and created_at >= ?2
                  ), attempted as (
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select ready.recipient, id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, reply_to_title, reply_to_body, topic
+                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
-            )?;
+                completion_allowed_sql("notifications.recipient", "notifications.sender")
+            ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
-                    user: r.get(0)?,
-                    notification: Notification {
-                        id: r.get(1)?,
-                        title: r.get(2)?,
-                        body: r.get(3)?,
-                        day: r.get(4)?,
-                        created_at: r.get(5)?,
-                        sender: r.get(6)?,
-                        replied: r.get(7)?,
-                        kind: r.get(8)?,
-                        read_at: r.get(9)?,
-                        challenge_id: r.get(10)?,
-                        route: r
-                            .get::<_, Option<i64>>(10)?
-                            .map(|id| format!("/community#challenge-{id}")),
-                        action_required: false,
-                        reply_to: r
-                            .get::<_, Option<String>>(11)?
-                            .zip(r.get::<_, Option<String>>(12)?)
-                            .map(|(title, body)| ReplyContext { title, body }),
-                        topic: r.get(13)?,
-                    },
+                    user: r.get(14)?,
+                    notification: notification(r)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?
@@ -1317,21 +1306,13 @@ impl Store {
     /// after a minute, while unattempted messages stay available to the next tick.
     pub fn begin_push(&mut self, id: i64, now_ms: i64) -> Result<bool, Error> {
         Ok(self.conn.execute(
-            "update notifications set retry_at = ?2, push_attempts = min(push_attempts + 1, 31)
-             where id = ?1 and pushed = 0 and push_cancelled = 0 and retry_at <= ?3 and created_at>=?4
-             and (kind != 'completion' or (completion_cancelled = 0
-                 and not exists (select 1 from incoming_settings
-                                 where user = notifications.recipient and enabled = 0)
-                 and not exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
-                                 where recipient = notifications.recipient
-                                 and sender = notifications.sender)))
-             and (kind != 'nudge' or (sender = '' and exists (select 1 from player_settings
-                                            where user = notifications.recipient and nudges = 1))
-                 or (sender != '' and exists (select 1 from player_settings
-                                            where user = notifications.recipient and friend_nudges = 1)
-                     and not exists (select 1 from friend_nudge_muted_senders
-                                     where recipient = notifications.recipient and sender = notifications.sender)))",
+            &format!(
+                "update notifications set retry_at = ?2, push_attempts = min(push_attempts + 1, 31)
+                 where id = ?1 and pushed = 0 and push_cancelled = 0 and retry_at <= ?3 and created_at>=?4
+                 and (kind != 'completion' or (completion_cancelled = 0 and {}))
+                 and (kind != 'nudge' or {NUDGE_ALLOWED_SQL})",
+                completion_allowed_sql("notifications.recipient", "notifications.sender")
+            ),
             params![id, now_ms + PUSH_LEASE_MS, now_ms, now_ms - INBOX_AGE_MS],
         )? > 0)
     }
