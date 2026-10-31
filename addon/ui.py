@@ -162,8 +162,9 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     return result
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None):
-    """Everything the phone keeps in its ankiquest preference screen."""
+def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None):
+    """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
+    a section and return what to run once the dialog is saved."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("ankiquest")
     layout = QVBoxLayout(dialog)
@@ -211,10 +212,13 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
     upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
+    finish = extra(dialog, layout) if extra else None
     layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
 
     if not dialog.exec():
         return None
+    if finish:
+        finish()
     return _values(url, user, token, rank, hours, channel)
 
 
