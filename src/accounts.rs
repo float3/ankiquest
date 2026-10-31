@@ -281,7 +281,7 @@ pub(crate) fn refuse(status: StatusCode, message: &str) -> Response {
 }
 
 fn internal(error: Error) -> Response {
-    eprintln!("accounts: {error}");
+    log_error!("accounts: {error}");
     refuse(
         StatusCode::INTERNAL_SERVER_ERROR,
         "The account could not be saved. Please try again.",
@@ -449,7 +449,7 @@ pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
         );
     };
     let hash = token_hash(token);
-    if app.accounts.tokens.write().unwrap().remove(&hash).is_none() {
+    if !app.accounts.tokens.read().unwrap().contains_key(&hash) {
         return refuse(StatusCode::UNAUTHORIZED, "Token not recognized.");
     }
     if let Err(error) = app
@@ -457,10 +457,11 @@ pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
         .lock()
         .unwrap()
         .conn
-        .execute("delete from account_tokens where token_hash = ?1", [hash])
+        .execute("delete from account_tokens where token_hash = ?1", [&hash])
     {
         return internal(error.into());
     }
+    app.accounts.tokens.write().unwrap().remove(&hash);
     StatusCode::NO_CONTENT.into_response()
 }
 

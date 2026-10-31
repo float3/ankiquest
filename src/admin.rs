@@ -311,7 +311,8 @@ fn parse_age(value: &str) -> Result<Option<i64>, Error> {
         return Ok(None);
     }
     let invalid = || format!("--since takes a number with m, h or d, or all; not {value}");
-    let (number, unit) = value.split_at(value.len().saturating_sub(1));
+    let split = value.char_indices().last().map_or(0, |(at, _)| at);
+    let (number, unit) = value.split_at(split);
     let number: i64 = number.parse().map_err(|_| invalid())?;
     let unit = match unit {
         "m" => 60_000,
@@ -319,7 +320,7 @@ fn parse_age(value: &str) -> Result<Option<i64>, Error> {
         "d" => DAY_MS,
         _ => return Err(invalid().into()),
     };
-    Ok(Some(number * unit))
+    Ok(Some(number.checked_mul(unit).ok_or_else(invalid)?))
 }
 
 pub fn run(
@@ -444,7 +445,7 @@ fn logs(conn: &Connection, filter: &LogFilter, now_ms: i64) -> Result<String, Er
              order by id desc limit ?4
          ) order by id",
     )?;
-    let since = filter.since_ms.map_or(i64::MIN, |age| now_ms - age);
+    let since = filter.since_ms.map_or(i64::MIN, |age| now_ms.saturating_sub(age));
     let rows = stmt.query_map(
         params![since, filter.level, filter.user, filter.limit],
         |r| {
