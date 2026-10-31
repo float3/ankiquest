@@ -395,11 +395,11 @@ pub(crate) fn spawn(app: Arc<App>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FreezeUpdate;
     use crate::accounts;
     use crate::app::load_player;
+    use crate::freezes::FreezeUpdate;
+    use crate::freezes::set_freezes;
     use crate::set_decks;
-    use crate::set_freezes;
     use crate::test_support::*;
 
     fn queued_message(app: &App, user: &str) -> i64 {
