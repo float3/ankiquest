@@ -1,13 +1,18 @@
-//! Fixtures shared by the handler tests of several modules.
+//! Fixtures shared by the handler tests of several modules, and what those tests use.
 
-use crate::app::{App, Player, next_revision, now_ms};
-use crate::config::Config;
-use crate::game::{self, Clock, ClockHistory, Review, Week};
-use crate::{access, decks};
-use axum::http::{HeaderMap, header};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+pub(crate) use crate::app::{App, Player, next_revision, now_ms};
+pub(crate) use crate::config::Config;
+pub(crate) use crate::game::{self, Clock, ClockHistory, Review, Week};
+pub(crate) use crate::store::Store;
+pub(crate) use crate::{access, decks, notifications};
+pub(crate) use axum::Json;
+pub(crate) use axum::body::Bytes;
+pub(crate) use axum::extract::{Path as UrlPath, Query, State};
+pub(crate) use axum::http::{HeaderMap, StatusCode, header};
+pub(crate) use std::collections::HashMap;
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::sync::{Arc, Mutex, RwLock};
+pub(crate) use std::time::Duration;
 
 pub(crate) fn fixture() -> (Arc<App>, PathBuf) {
     let (store, path) = decks::tests::temporary_store();
