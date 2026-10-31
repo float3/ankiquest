@@ -26,6 +26,7 @@ from aqt.qt import Qt
 from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
+from .today_ui import settings_section
 
 
 def _enum(owner, group, name):
@@ -193,6 +194,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
     layout.addWidget(_row(QLabel(tr("Update channel")), channel))
+    today_values = settings_section(layout, config)
 
     if on_account is not None:
         account = QPushButton(tr("Sign in or create account…"))
@@ -215,7 +217,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
 
     if not dialog.exec():
         return None
-    return _values(url, user, token, rank, hours, channel)
+    return dict(_values(url, user, token, rank, hours, channel), **today_values())
 
 
 def _values(url, user, token, rank, hours, channel):

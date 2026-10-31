@@ -1,5 +1,6 @@
 import html
 import platform
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction
 from aqt.utils import openLink, tooltip
 
-from . import board, notify, ui, updates, web
+from . import board, home, notify, ui, updates, web
 from .language import tr
 from .client import (
     MAX_PENDING,
@@ -52,7 +53,7 @@ state = {
     "conquest": None,
 }
 
-mw.addonManager.setWebExports(__name__, r"(aki|ankilope)_face\.png")
+mw.addonManager.setWebExports(__name__, r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png")
 
 
 def config():
@@ -241,7 +242,7 @@ def on_deck_browser(deck_browser, content):
     waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
-    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot)
+    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))
 
 
 def on_js_message(handled, message, context):
@@ -579,3 +580,4 @@ gui_hooks.sync_did_finish.append(on_sync)
 gui_hooks.profile_did_open.append(on_profile_open)
 gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
+home.install(sys.modules[__name__])
