@@ -34,7 +34,7 @@ async function personal(t: TestContext, options: {width?: number; theme?: 'light
   });
   const calls: Call[] = [];
   const data = {
-    profile: {user: 'alice', display: 'Alice', today: {reviews: 64, xp: 300}, streak: 5, level: 3, quests: [], goal: {mode: 'cards', value: 100, progress: 64, reached: false} as Record<string, unknown>},
+    profile: {user: 'alice', display: 'Alice', today: {reviews: 64, xp: 300}, streak: 5, level: 3, quests: [], goal: {mode: 'cards', value: 100, since: 20390, day: 20395, progress: 64, reached: false} as Record<string, unknown>},
     wins: [win(30, {title: 'Goal <img src=x onerror=alert(1)>'}), ...Array.from({length: 9}, (_, index) => win(29 - index)), win(5), win(4, {shared_with_friends: true, link: {url: `${origin}/w/old`, image: `${origin}/w/old.png`}})],
     sharing: {policies: {daily_goal: 'ask', streak_secured: 'private', streak: 'ask', level: 'auto', achievement: 'ask', record: 'ask', quest: 'private', conquered: 'ask', place: 'ask', challenge: 'ask'}, daily_cap: 3} as Record<string, unknown>,
     goal: {mode: 'cards', value: 100, since: 20390, chosen: true} as Record<string, unknown>,
@@ -194,7 +194,7 @@ test('a first visit offers the default backlog goal without a plan date', async 
   assert.equal(await page.locator('#goal-since').count(), 0);
 });
 
-test('Today shows the goal meter and the backlog plan', async t => {
+test('Today shows the goal meter and guesses the plan day on older servers', async t => {
   const f = await personal(t);
   await f.page.goto(`${origin}/today`);
   const goal = f.page.locator('#today-goal');
@@ -219,6 +219,17 @@ test('Today shows the goal meter and the backlog plan', async t => {
   assert.match((await goal.textContent())!, /Day 3 of 7/);
   assert.match((await goal.textContent())!, /Today's share is done/);
   assert.equal(await goal.locator('progress').getAttribute('value'), '3');
+});
+
+test('Today counts the plan from the day the server sends, not the guess', async t => {
+  const f = await personal(t);
+  const offset = await f.page.evaluate(() => new Date().getTimezoneOffset() * 60000);
+  Object.assign(f.data.profile, {day_ends_at: (20400 + 1) * 86400000 + 4 * 3600000 + offset});
+  f.data.profile.goal = {mode: 'backlog', value: 30, since: 20400, day: 20410, progress: null, reached: false};
+  await f.page.goto(`${origin}/today`);
+  const goal = f.page.locator('#today-goal');
+  await goal.filter({hasText: 'Day 11 of 30'}).waitFor();
+  assert.equal(await goal.locator('progress').getAttribute('value'), '10');
 });
 
 test('wins share with friends, make and remove links, download and paginate', async t => {

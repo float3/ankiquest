@@ -10,7 +10,7 @@ import {failure, refused, request as call, send} from "./http";
   type GoalMode = "off" | "cards" | "minutes" | "backlog";
   type Measured = Exclude<GoalMode, "off">;
   interface Goal { mode: GoalMode; value?: number | null; since?: number | null; chosen?: boolean }
-  interface GoalProgress extends Goal { progress?: number | null; reached?: boolean }
+  interface GoalProgress extends Goal { progress?: number | null; reached?: boolean; day?: number | null }
   interface Sharing { policies: Record<string, Policy>; daily_cap: number }
   interface Win { id: number; kind: string; created_at: number; title: string; body: string; policy: Policy; shared_with_friends: boolean; link: {url: string; image: string} | null }
   interface Profile { user: string; display: string; level: number; streak: number; today: {reviews: number; xp: number; minutes?: number; streak_minutes?: number}; quests: Quest[]; day_ends_at?: number; goal?: GoalProgress | null }
@@ -275,7 +275,7 @@ import {failure, refused, request as call, send} from "./http";
     if (goal.mode === "off") return html`<article class="card personal-goal" id="today-goal"><div class="card-head"><div><h2>${tr("Daily goal")}</h2><p>${tr("No daily goal for now.")}</p></div></div><div class="personal-actions">${change}</div></article>`;
     const value = Math.max(1, Number(goal.value) || 1), progress = goal.progress == null ? null : Math.max(0, Number(goal.progress) || 0);
     const reached = !!goal.reached || (goal.mode !== "backlog" && progress != null && progress >= value);
-    const plan = goal.mode === "backlog" ? planDay(goal, ankiToday(state.profile)) : null;
+    const plan = goal.mode === "backlog" ? planDay(goal, Number.isFinite(Number(goal.day)) && goal.day != null ? Number(goal.day) : ankiToday(state.profile)) : null;
     const target = goal.mode === "cards" ? tr`${number(value)} cards a day` : goal.mode === "minutes" ? tr`${number(value)} minutes a day` : tr`Clear the backlog in ${number(value)} days`;
     const detail = plan ? `${tr`Day ${number(plan.day)} of ${number(plan.days)}`} · ${reached ? tr("Today's share is done.") : tr("Your Anki app tells AnkiQuest when today's share is done.")}`
       : goal.mode === "cards" ? tr`${number(progress)} of ${number(value)} cards` : tr`${number(progress)} of ${number(value)} minutes`;
