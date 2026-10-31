@@ -141,6 +141,7 @@ impl Store {
         crate::weekly_challenges::initialize(&conn)?;
         crate::admin::initialize(&conn)?;
         crate::dev::initialize(&conn)?;
+        crate::wins::initialize(&conn)?;
         Ok(Self {
             conn,
             scratch,

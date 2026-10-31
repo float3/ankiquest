@@ -114,7 +114,7 @@ pub fn notice(notice: &mut crate::feedback::Notice, language: &str) {
     notice.body = system_text(&notice.body, language);
 }
 
-fn system_text(value: &str, language: &str) -> String {
+pub(crate) fn system_text(value: &str, language: &str) -> String {
     let language = normalize(language);
     if language == "en" {
         return value.into();

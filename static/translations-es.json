@@ -1237,5 +1237,9 @@
   "{0} of {1} minutes today. A little more can start your next streak.": "{0} de {1} minutos hoy. Un poco más puede iniciar tu próxima racha.",
   "{0} of {1} minutes today. Your {2}-day streak is still waiting.": "{0} de {1} minutos hoy. Tu racha de {2} días te espera.",
   "{0} of {1} minutes today": "{0} de {1} minutos hoy",
-  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Tu racha de {0} días te espera: {1} de {2} minutos hoy."
+  "Your {0} day streak is waiting: {1} of {2} minutes today.": "Tu racha de {0} días te espera: {1} de {2} minutos hoy.",
+  "{0} day streak": "Racha de {0} días",
+  "{0} cards": "{0} tarjetas",
+  "Study with {0} on AnkiQuest": "Estudia con {0} en AnkiQuest",
+  "Join AnkiQuest": "Únete a AnkiQuest"
 }

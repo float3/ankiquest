@@ -18,10 +18,12 @@ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 chrono-tz = "0.10.4"
 getrandom = "0.4"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+resvg = { version = "0.49", default-features = false, features = ["text"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
+skrifa = "0.44"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 ureq = "3"
 
