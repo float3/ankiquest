@@ -28,6 +28,13 @@ ureq = "3"
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 
+# Password hashing is slow unoptimised, and the account tests hash a lot.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 # The translation module for the web pages, built by build.rs.
 [profile.wasm]
 inherits = "release"

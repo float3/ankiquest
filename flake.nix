@@ -27,6 +27,7 @@
           version = "0.1.0";
           src = lib.cleanSource self;
           cargoLock.lockFile = ./Cargo.lock;
+          doCheck = false;
           meta.mainProgram = "ankiquest";
         }
         // webBuild pkgs);

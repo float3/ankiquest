@@ -26,7 +26,9 @@ async function visit(browser: Browser, access: Record<string, unknown>) {
   const result = {
     welcome: await page.locator('.welcome').count(),
     signIn: await page.locator('.site-signin').isVisible(),
-    signUp: await page.locator('.welcome a.primary').getAttribute('href').catch(() => null),
+    signUp: await page.locator('.welcome a.primary').count()
+      ? await page.locator('.welcome a.primary').getAttribute('href')
+      : null,
     errors,
   };
   await context.close();
