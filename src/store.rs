@@ -46,6 +46,15 @@ fn config_number(conn: &Connection, key: &str) -> Option<i64> {
     serde_json::from_slice::<f64>(&raw).ok().map(|n| n as i64)
 }
 
+/// Whether `table` already has `column`, for migrations that add one.
+pub(crate) fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "select exists (select 1 from pragma_table_info(?1) where name = ?2)",
+        [table, column],
+        |r| r.get(0),
+    )
+}
+
 /// The player's current clock, or the default for someone who never uploaded.
 pub fn clock_in(conn: &Connection, user: &str) -> rusqlite::Result<Clock> {
     let clock = conn
@@ -105,12 +114,7 @@ impl Store {
                  received_at integer not null
              ) without rowid;",
         )?;
-        let has_ivl: bool = conn.query_row(
-            "select exists (select 1 from pragma_table_info('reviews') where name = 'ivl')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !has_ivl {
+        if !has_column(&conn, "reviews", "ivl")? {
             conn.execute_batch("alter table reviews add column ivl integer")?;
         }
         // Players recorded before clocks had a history keep the only clock we
@@ -139,7 +143,6 @@ impl Store {
         crate::weekly_challenges::initialize(&conn)?;
         crate::admin::initialize(&conn)?;
         crate::dev::initialize(&conn)?;
-        conn.execute_batch("create table if not exists community_refresh (id integer primary key, refreshed_at integer not null);")?;
         Ok(Self {
             conn,
             scratch,
@@ -227,6 +230,14 @@ impl Store {
             [user, key],
         )?;
         Ok(changed > 0)
+    }
+
+    pub(crate) fn is_seen(&self, user: &str, key: &str) -> Result<bool, Error> {
+        Ok(self.conn.query_row(
+            "select exists (select 1 from seen where user = ?1 and key = ?2)",
+            [user, key],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn ingest(&mut self, sync_base: &Path, user: &str) -> Result<bool, Error> {

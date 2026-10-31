@@ -2,7 +2,7 @@
 //! and the `ankiquest admin` command that reads and changes them while the
 //! service runs. The service picks up overrides on its next poll.
 
-use crate::game::{ReviewWeighting, StreakChange, StreakRule};
+use crate::game::{DAY_MS, ReviewWeighting, StreakChange, StreakRule};
 use crate::store::{Error, Store};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags, params, types::ValueRef};
@@ -10,7 +10,6 @@ use std::path::Path;
 use std::sync::Mutex;
 
 pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 90;
-const DAY_MS: i64 = 86_400_000;
 /// Entries waiting for the next flush. Past this, only stderr gets them.
 const MAX_PENDING: usize = 10_000;
 
@@ -73,7 +72,7 @@ pub fn record(level: &'static str, user: Option<&str>, message: String) {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     if pending.len() < MAX_PENDING {
         pending.push(Entry {
-            at: crate::now_ms(),
+            at: crate::app::now_ms(),
             level,
             user: user.map(str::to_string),
             message,

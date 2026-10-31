@@ -1,7 +1,11 @@
 //! Private site access is deliberately separate from each player's write permission.
 //! A master session unlocks shared pages; a member session owns exactly one player.
 //! Browser mutations also pass the same-origin/custom-header CSRF gate.
-use crate::{App, Config, Error, now_ms};
+use crate::config::Config;
+use crate::web_util::{
+    bearer, hex, hex_cookie, json_error, normalize_user, random_bytes, set_cookie,
+};
+use crate::{Error, app::App, app::now_ms};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
@@ -147,9 +151,7 @@ impl Access {
         member: Option<String>,
         now: i64,
     ) -> Result<String, Error> {
-        let mut random = [0u8; 32];
-        getrandom::fill(&mut random).map_err(|_| "session randomness unavailable")?;
-        let token: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let token = hex(&random_bytes("session randomness unavailable")?);
         let mut sessions = self.sessions.lock().unwrap();
         sessions.expires.retain(|_, session| session.expires > now);
         // Rotate an existing browser session when signing in again.
@@ -185,14 +187,6 @@ fn constant_eq(expected: &str, given: &str) -> bool {
             .zip(Sha256::digest(given).iter())
             .fold(0, |acc, (a, b)| acc | (a ^ b))
             == 0
-}
-
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
 }
 
 fn member_token(app: &App, given: &str) -> bool {
@@ -267,30 +261,8 @@ fn authenticated(app: &App, headers: &HeaderMap) -> bool {
         || app.access.authenticated(headers, now_ms())
 }
 
-// A duplicate cookie is ambiguous (for example, a sibling subdomain's cookie),
-// so never choose one based on header or path ordering.
 fn session_cookie(headers: &HeaderMap) -> Option<&str> {
-    let mut found = None;
-    for header in headers.get_all(header::COOKIE) {
-        for cookie in header.to_str().ok()?.split(';') {
-            if let Some((name, value)) = cookie.trim().split_once('=')
-                && name == COOKIE
-            {
-                if found.is_some()
-                    || value.len() != 64
-                    || !value.bytes().all(|b| b.is_ascii_hexdigit())
-                {
-                    return None;
-                }
-                found = Some(value);
-            }
-        }
-    }
-    found
-}
-
-fn error(status: StatusCode, message: &str) -> Response {
-    (status, Json(serde_json::json!({"error": message}))).into_response()
+    hex_cookie(headers, COOKIE)
 }
 
 fn public_path(path: &str) -> bool {
@@ -333,7 +305,7 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
         && !authenticated(&app, request.headers())
     {
         if path.starts_with("/api/") || !matches!(*request.method(), Method::GET | Method::HEAD) {
-            error(
+            json_error(
                 StatusCode::UNAUTHORIZED,
                 "Sign in to access this private community.",
             )
@@ -352,7 +324,7 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
         && !bearer(request.headers()).is_some_and(|given| member_token(&app, given))
         && (!csrf(request.headers()) || !same_origin(&app, request.headers()))
     {
-        error(
+        json_error(
             StatusCode::FORBIDDEN,
             "Send changes from this site with the request header.",
         )
@@ -412,17 +384,7 @@ fn csrf(headers: &HeaderMap) -> bool {
 }
 
 fn cookie(app: &App, value: &str, max_age: i64) -> HeaderValue {
-    let secure = app
-        .config
-        .public_url
-        .as_deref()
-        .is_some_and(|url| url.starts_with("https://"));
-    format!(
-        "{COOKIE}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
-        if secure { "; Secure" } else { "" }
-    )
-    .parse()
-    .unwrap()
+    set_cookie(app, COOKIE, "/", value, max_age)
 }
 
 /// A new browser session for `user`, the one a password sign-in sets, as its cookie.
@@ -484,22 +446,22 @@ pub(crate) async fn session(
     body: Bytes,
 ) -> Response {
     if !same_origin(&app, &headers) {
-        return error(StatusCode::FORBIDDEN, "Sign in from this site.");
+        return json_error(StatusCode::FORBIDDEN, "Sign in from this site.");
     }
     let valid_token = bearer(&headers).is_some_and(|given| member_token(&app, given));
     let mut owner = bearer(&headers).and_then(|given| token_owner(&app, given));
     if bearer(&headers).is_some() && !valid_token {
-        return error(StatusCode::UNAUTHORIZED, "Token not recognized.");
+        return json_error(StatusCode::UNAUTHORIZED, "Token not recognized.");
     }
     // A password attacker cannot lock configured apps out of session bootstrap.
     if !valid_token {
         if !csrf(&headers) {
-            return error(StatusCode::FORBIDDEN, "Missing sign-in request header.");
+            return json_error(StatusCode::FORBIDDEN, "Missing sign-in request header.");
         }
         let now = now_ms();
         let client = client_ip(&app.config, &headers, peer);
         if app.access.throttled(client, now) {
-            let mut response = error(
+            let mut response = json_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "Too many attempts. Try again in one minute.",
             );
@@ -514,10 +476,10 @@ pub(crate) async fn session(
             user: Some(user),
         }) = &credential
         {
-            let user = user.trim().to_ascii_lowercase();
+            let user = normalize_user(user);
             if !crate::accounts::password_matches(&app, &user, password).await {
                 app.access.failure(client, now);
-                return error(
+                return json_error(
                     StatusCode::UNAUTHORIZED,
                     "Username or password not recognized.",
                 );
@@ -528,7 +490,7 @@ pub(crate) async fn session(
                     [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
                 )
                     .into_response(),
-                Err(_) => error(
+                Err(_) => json_error(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Unable to create a session.",
                 ),
@@ -545,7 +507,7 @@ pub(crate) async fn session(
         });
         if !valid {
             app.access.failure(client, now);
-            return error(
+            return json_error(
                 StatusCode::UNAUTHORIZED,
                 "Password or token not recognized.",
             );
@@ -568,7 +530,7 @@ pub(crate) async fn session(
             [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
         )
             .into_response(),
-        Err(_) => error(
+        Err(_) => json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Unable to create a session.",
         ),
@@ -577,7 +539,7 @@ pub(crate) async fn session(
 
 pub(crate) async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     if !csrf(&headers) || !same_origin(&app, &headers) {
-        return error(StatusCode::FORBIDDEN, "Sign out from this site.");
+        return json_error(StatusCode::FORBIDDEN, "Sign out from this site.");
     }
     if let Some(session) = session_cookie(&headers) {
         app.access.sessions.lock().unwrap().expires.remove(session);
@@ -627,7 +589,7 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Week;
+    use crate::game::Week;
 
     #[test]
     fn revoking_a_member_ends_only_their_sessions() {
@@ -989,7 +951,7 @@ mod tests {
             let mut send = |to| {
                 store
                     .send(
-                        &crate::decks::Outgoing {
+                        &crate::notifications::Outgoing {
                             to,
                             from: "",
                             title: "Hello",
@@ -1080,7 +1042,7 @@ mod tests {
             let mut send = |to, from, kind| {
                 store
                     .send(
-                        &crate::decks::Outgoing {
+                        &crate::notifications::Outgoing {
                             to,
                             from,
                             title: "Hello",

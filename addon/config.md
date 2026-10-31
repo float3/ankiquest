@@ -27,3 +27,9 @@ with a server set, the block under the deck list is a Today panel: your companio
 - `deck_status`: mark decks in the deck list as done today, learning later today, or ready
 - `session_summary`: show a recap with your reviews, time and cards left when you leave a study session
 - `goal_celebrations`: once a day, celebrate when today counts for your streak and when you reach your daily goal; that popup replaces the recap for that session
+
+to give friends a copy of a deck, open **Tools → ankiquest: send a deck to friends…**, pick the deck and the friends. they get an independent `.apkg` with cards, notes, media and deck options, never your review history; copies over 25 MB are refused, so use Anki's normal export for those. decks friends send you wait under **Tools → ankiquest: decks offered to me…** (the number shows how many) for 30 days, where **Import** opens Anki's usual import dialog and **Dismiss** removes the offer.
+
+the settings window also switches streak protection on or off, turns all deck completion alerts you receive on or off, unsubscribes you from specific people (people you muted before show as unsubscribed), and shows when reviews were last uploaded. these choices live on the server and apply across your devices.
+
+**Ctrl+Shift+K** opens the ankiquest website window. with a server and player but no token, reviews are only previewed: you still see the XP feedback if the server shows that player publicly, and nothing is stored.

@@ -21,4 +21,4 @@ class LanguageTests(unittest.TestCase):
         self.assertIn("Clasificación", board.html({"level": 4, "streak": 3}, 2, 1, spanish))
         self.assertIn("Puesto 2 esta semana", board.html({}, 2, 0, spanish))
         self.assertEqual("Conectado como Friends::{0}, nivel 2.", spanish("Connected as %s, level %d.") % ("Friends::{0}", 2))
-        self.assertEqual("Friends", language.tr("Friends", "fr"))
+        self.assertEqual("Friends", language.tr("Friends", "ja"))
