@@ -8,6 +8,7 @@ from aqt.qt import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPixmap,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -20,8 +21,10 @@ from .language import tr
 from .ui import _enum
 
 SHORTCUT = "Ctrl+Shift+M"
+THUMBNAIL = 180
+KEPT_PICTURES = 40
 
-state = {"dialog": None}
+state = {"dialog": None, "pictures": {}}
 
 
 def _plain(text, bold=False, muted=False):
@@ -147,14 +150,17 @@ def _row(entry, context):
     frame = QFrame()
     frame.setFrameShape(_enum(QFrame, "Shape", "StyledPanel"))
     layout = QVBoxLayout(frame)
-    layout.addWidget(_plain(entry.get("title") or "", bold=True))
+    title, body = inbox.headline(entry)
+    layout.addWidget(_plain(title, bold=True))
     meta = _plain(_meta(entry, context.legacy), muted=True)
     layout.addWidget(meta)
     original = entry.get("reply_to") or {}
     if original.get("body"):
         layout.addWidget(_plain(tr("In reply to: %s") % original["body"], muted=True))
-    if entry.get("body"):
-        layout.addWidget(_plain(entry["body"]))
+    if body:
+        layout.addWidget(_plain(body))
+    if entry.get("image") and entry.get("sender"):
+        layout.addWidget(_thumbnail(share.absolute(context.api.base, entry["image"]), context))
     status = _plain("")
     buttons = QHBoxLayout()
     panel = None
@@ -181,6 +187,8 @@ def _row(entry, context):
         share_button = QPushButton(tr("Share"))
         share_button.clicked.connect(lambda: _share(entry, context, status))
         buttons.addWidget(share_button)
+    if "cheer" in found:
+        buttons.addWidget(_cheer_button(entry, context, status))
     website = QPushButton(tr("Open on the website"))
 
     def opened():
@@ -199,6 +207,78 @@ def _row(entry, context):
         layout.addWidget(panel)
     layout.addWidget(status)
     return frame
+
+
+def _cheer_button(entry, context, status):
+    button = QPushButton(tr("🎉 Cheered") if entry.get("reacted") else tr("🎉 Cheer"))
+    button.setEnabled(not entry.get("reacted"))
+
+    def cheered(future):
+        try:
+            future.result()
+        except Exception as error:
+            button.setEnabled(True)
+            status.setText(tr("Could not send your cheer (%s).") % inbox.error_text(error))
+            return
+        entry["reacted"] = True
+        button.setText(tr("🎉 Cheered"))
+        status.setText(tr("You cheered %s on.") % entry.get("sender", ""))
+
+    def cheer():
+        if not context.owned(status):
+            return
+        button.setEnabled(False)
+        context.run(lambda: inbox.react(context.api, entry["id"]), cheered)
+
+    button.clicked.connect(cheer)
+    return button
+
+
+def _keep_picture(url, png):
+    pictures = state["pictures"]
+    pictures[url] = png
+    while len(pictures) > KEPT_PICTURES:
+        pictures.pop(next(iter(pictures)))
+
+
+def _show_picture(label, png):
+    pixmap = QPixmap()
+    if not pixmap.loadFromData(png, "PNG"):
+        label.setVisible(False)
+        return
+    label.setPixmap(pixmap.scaled(
+        THUMBNAIL, THUMBNAIL,
+        _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
+        _enum(Qt, "TransformationMode", "SmoothTransformation"),
+    ))
+
+
+def _thumbnail(url, context):
+    """The friend's card, fetched in the background and kept for the next time the inbox opens."""
+    label = QLabel()
+    label.setFixedSize(THUMBNAIL, THUMBNAIL)
+    known = state["pictures"].get(url)
+    if known is not None:
+        _show_picture(label, known)
+        return label
+
+    def fetched(future):
+        try:
+            png = future.result()
+        except Exception as error:
+            print("ankiquest card picture:", error)
+            png = None
+        try:
+            if png is None:
+                label.setVisible(False)
+                return
+            _keep_picture(url, png)
+            _show_picture(label, png)
+        except RuntimeError:
+            return
+
+    context.run(lambda: share.download_image(url), fetched)
+    return label
 
 
 def _share(entry, context, status):

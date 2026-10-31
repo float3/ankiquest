@@ -1,36 +1,44 @@
-"""Passing a win on: what the server is asked, what the player is told, and the square card's layout.
+"""Passing a win on: what the server is asked, what the player is told, and fetching the
+server's card picture.
 
-Plain Python, so the tests load it without Anki; share_ui.py does the drawing."""
+Plain Python, so the tests load it without Anki; share_ui.py shows it."""
 
-CARD_SIZE = 1080
-MARGIN = 80
-ART_TOP = 90
-ART_SIDE = 520
-ART_GAP = 40
-TITLE_GAP = 24
-FOOTER_TOP = CARD_SIZE - 110
-FOOTER_GAP = 30
-MAX_LINES = 4
-TITLE_PX = 72
-BODY_PX = 44
-FOOTER_PX = 36
-FOOTER = "AnkiQuest"
-ELLIPSIS = "…"
-COLORS = {"background": "#FBF8F0", "text": "#20384A", "muted": "#5B6C76", "primary": "#245FAB"}
+import urllib.parse
+import urllib.request
+
+MAX_IMAGE = 4 * 1024 * 1024
+IMAGE_TIMEOUT = 15
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def win_id(entry):
+    value = (entry or {}).get("win")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def win_from_entry(entry):
-    """A shareable inbox row as a win."""
-    return {"title": entry.get("title") or "", "body": entry.get("body") or "", "notification": int(entry["id"]), "place": None}
+    """A shareable inbox row as a win; `win` is the server's win id when the row has one."""
+    return {
+        "title": entry.get("title") or "", "body": entry.get("body") or "",
+        "notification": int(entry["id"]), "place": None, "win": win_id(entry),
+    }
 
 
 def win_from_place(change, place):
     """A climb into the top three, announced by the rank poll."""
-    return {"title": change.get("title") or "", "body": change.get("body") or "", "notification": None, "place": place}
+    return {"title": change.get("title") or "", "body": change.get("body") or "", "notification": None, "place": place, "win": None}
+
+
+def has_card(win):
+    """Wins the server knows by id have a card picture and a link; older rows travel as text."""
+    return win_id(win) is not None
 
 
 def request_body(win):
-    """`POST /api/share/{user}` takes one of the player's own notifications or a place from 1 to 3."""
+    """`POST /api/share/{user}` shares a win by id, or else one of the player's own notifications
+    or a place from 1 to 3."""
+    if has_card(win):
+        return {"win": win["win"], "to": "friends"}
     if win.get("notification"):
         return {"notification": int(win["notification"])}
     place = win.get("place")
@@ -43,6 +51,44 @@ def send(api, win):
     """Shares with the player's friends and answers how many got it now."""
     answer = api._request("/api/share/" + api.user, request_body(win))
     return int((answer or {}).get("recipients") or 0)
+
+
+def absolute(base, url):
+    """The server may answer with paths; they are relative to the server the add-on talks to."""
+    return urllib.parse.urljoin(base.rstrip("/") + "/", url or "")
+
+
+def link(api, win):
+    """The win's public link, its card picture and the server's invitation text."""
+    answer = api._request("/api/share/" + api.user, {"win": win["win"], "to": "link"}) or {}
+    return {
+        "url": absolute(api.base, answer.get("url")),
+        "image": absolute(api.base, answer.get("image")),
+        "text": answer.get("text") or "",
+    }
+
+
+def _web_url(url):
+    return urllib.parse.urlsplit(url or "").scheme in ("http", "https")
+
+
+def download_image(url, limit=MAX_IMAGE, timeout=IMAGE_TIMEOUT, opener=urllib.request.urlopen):
+    """A card picture's PNG bytes. Card pictures are public, so no token travels with the request."""
+    if not _web_url(url):
+        raise ValueError("not a web address")
+    with opener(urllib.request.Request(url, headers={"Accept": "image/png"}), timeout=timeout) as response:
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("the picture is too large")
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError("not a PNG picture")
+    return data
+
+
+def card(api, win):
+    """The link with the picture's bytes; call off the main thread."""
+    found = link(api, win)
+    return dict(found, png=download_image(found["image"]))
 
 
 def climbed_to(previous, order, me):
@@ -67,7 +113,7 @@ def sent_text(recipients, translate=lambda value: value):
 
 
 def invitation(win, server, translate=lambda value: value):
-    """The words that travel with the card."""
+    """The words that travel with a win the server has no card for."""
     if server:
         return translate("%s: %s\nStudy with me on AnkiQuest: %s") % (win["title"], win["body"], server)
     return translate("%s: %s\nI study with AnkiQuest.") % (win["title"], win["body"])
@@ -78,69 +124,3 @@ def art_file(companion):
     if companion == "none":
         return None
     return "ankilope_face.png" if companion == "ankilope" else "aki_face.png"
-
-
-def card_layout(art):
-    """Where everything goes on the square card, as on the phone: art on top, then title and body."""
-    width = CARD_SIZE - 2 * MARGIN
-    top = ART_TOP
-    art_rect = None
-    if art:
-        art_rect = ((CARD_SIZE - ART_SIDE) // 2, ART_TOP, ART_SIDE, ART_SIDE)
-        top += ART_SIDE + ART_GAP
-    return {
-        "art": art_rect,
-        "left": MARGIN,
-        "width": width,
-        "title_top": top,
-        "footer_top": FOOTER_TOP,
-    }
-
-
-def lines_that_fit(top, line_height):
-    """How many lines fit between `top` and the footer, never more than MAX_LINES."""
-    room = FOOTER_TOP - FOOTER_GAP - top
-    return max(0, min(MAX_LINES, int(room // line_height))) if line_height > 0 else 0
-
-
-def _split_word(word, width, measure):
-    pieces, current = [], ""
-    for character in word:
-        if current and measure(current + character) > width:
-            pieces.append(current)
-            current = character
-        else:
-            current += character
-    return pieces + ([current] if current else [])
-
-
-def _ellipsized(line, width, measure):
-    while line and measure(line + ELLIPSIS) > width:
-        line = line[:-1]
-    return line.rstrip() + ELLIPSIS
-
-
-def wrap(text, width, measure, max_lines):
-    """`text` broken into lines no wider than `width` by `measure`; the last line ends in an
-    ellipsis when it had to be cut."""
-    lines = []
-    for paragraph in (text or "").split("\n"):
-        current = ""
-        for word in paragraph.split():
-            candidate = current + " " + word if current else word
-            if measure(candidate) <= width:
-                current = candidate
-                continue
-            if current:
-                lines.append(current)
-            pieces = _split_word(word, width, measure)
-            lines.extend(pieces[:-1])
-            current = pieces[-1] if pieces else ""
-        if current:
-            lines.append(current)
-    if max_lines <= 0:
-        return []
-    if len(lines) > max_lines:
-        lines = lines[:max_lines]
-        lines[-1] = _ellipsized(lines[-1], width, measure)
-    return lines

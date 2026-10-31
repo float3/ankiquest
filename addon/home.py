@@ -1,17 +1,20 @@
-"""Connects the Today panel, deck list badges, goals and session recaps to Anki."""
+"""Connects the Today panel, deck list badges, the daily goal and session recaps to Anki."""
 
 import time
 from pathlib import Path
 
 from aqt import gui_hooks, mw
 
-from . import goals, moods, today, today_ui
+from . import goal_ui, goals, moods, today, today_ui
 from .board import PAGES
 from .client import offset_west_min
-from .deck_completion import deck_snapshots
+from .deck_completion import deck_snapshots, study_day
 from .language import tr
 
 GOAL_KEY = "ankiquestDayGoal"
+PLAN_KEY = "ankiquestServerGoal"
+REACHED_KEY = "ankiquestGoalReported"
+SETUP_SHOWN = "goal_setup_shown"
 STREAK_MINUTES_KEY = "ankiquestStreakMinutes"
 CELEBRATED_KEY = "ankiquestGoalCelebrated"
 PERIOD_KEY = "ankiquestBoardPeriod"
@@ -28,6 +31,9 @@ local = {
     "session": None,
     "timer": None,
     "days": None,
+    "restarted": None,
+    "reporting": False,
+    "goal_loading": False,
 }
 
 
@@ -76,21 +82,184 @@ def days_for(deck_browser=None):
     return tree, days
 
 
+def server_day():
+    """Today as the server counts Anki days: days since the epoch, starting at the rollover hour."""
+    rollover = int(mw.col.get_config("rollover", 4)) if mw.col is not None else 4
+    return study_day(now_ms(), offset_west_min(), rollover)
+
+
+def owner(api):
+    return [api.base, api.user]
+
+
+def current_plan(day):
+    """The server's goal: from the latest profile, else as last remembered for this account."""
+    api = addon().client()
+    view = (moods.current(addon().state["profile"], now_ms()) or {}).get("goal")
+    found, record = goals.remembered_plan(view, mw.pm.profile.get(PLAN_KEY), owner(api), day)
+    if record is not None:
+        mw.pm.profile[PLAN_KEY] = record
+    return found
+
+
+def remember_plan(answer):
+    """Keeps a `/api/goal` answer, and puts it in the profile so the panel shows it before the next poll."""
+    api = addon().client()
+    found, record = goals.remembered_plan(answer, mw.pm.profile.get(PLAN_KEY), owner(api), server_day())
+    if record is None:
+        return found
+    mw.pm.profile[PLAN_KEY] = record
+    profile = addon().state["profile"]
+    if isinstance(profile, dict):
+        profile["goal"] = {"mode": found.mode, "value": found.value, "since": found.since, "progress": None, "reached": False}
+    return found
+
+
 def goal_status(tree=None):
     """Today's goal status; the first reading each day fixes the goal."""
     api = addon().client()
     minutes, kept = goals.remembered_streak_minutes(
-        addon().state["profile"], mw.pm.profile.get(STREAK_MINUTES_KEY), [api.base, api.user],
+        addon().state["profile"], mw.pm.profile.get(STREAK_MINUTES_KEY), owner(api),
     )
     mw.pm.profile[STREAK_MINUTES_KEY] = kept
+    day = server_day()
+    found = current_plan(day)
     load = goals.load(mw.col, tree)
-    status, record = goals.status(load, goals.settings(addon().config()), mw.pm.profile.get(GOAL_KEY), minutes)
+    profile = moods.current(addon().state["profile"], now_ms())
+    status, record, restart = goals.status(load, found, day, mw.pm.profile.get(GOAL_KEY), minutes, profile)
     mw.pm.profile[GOAL_KEY] = record
+    if restart:
+        restart_plan(api, found, day)
+    report_reached(api, status, day)
     return status
 
 
+def restart_plan(api, found, day):
+    """The backlog plan ran out: it starts again from today, once."""
+    if not api.configured or local["restarted"] == [owner(api), day]:
+        return
+    local["restarted"] = [owner(api), day]
+
+    def done(future):
+        try:
+            answer = future.result()
+        except Exception as e:
+            print("ankiquest goal restart:", e)
+            return
+        if owner(addon().client()) == owner(api):
+            remember_plan(answer)
+
+    mw.taskman.run_in_background(lambda: goals.put(api, goals.BACKLOG, found.value, restart=True), done)
+
+
+def report_reached(api, status, day):
+    """Tells the server, once a day, that a backlog goal is reached; it judges the other goals itself."""
+    if not api.configured or local["reporting"]:
+        return
+    if not goals.to_report(status, owner(api), day, mw.pm.profile.get(REACHED_KEY)):
+        return
+    local["reporting"] = True
+
+    def done(future):
+        local["reporting"] = False
+        try:
+            future.result()
+        except Exception as e:
+            if getattr(e, "status", None) != 409:
+                print("ankiquest goal reached:", e)
+                return
+        mw.pm.profile[REACHED_KEY] = {"account": owner(api), "day": day}
+
+    mw.taskman.run_in_background(lambda: goals.report_reached(api, day), done)
+
+
+def sync_goal(prompt=False):
+    """Reads the server's goal, moves an older add-on's local goal there if none was chosen yet,
+    and with `prompt` asks for a goal once per account while none is chosen."""
+    api = addon().client()
+    if not api.configured or local["goal_loading"]:
+        return
+    local["goal_loading"] = True
+    legacy = goals.legacy_goal(addon().config())
+
+    def work():
+        answer = goals.fetch(api)
+        if legacy and not answer.get("chosen"):
+            answer = goals.put(api, legacy["mode"], legacy.get("value"))
+        return answer
+
+    def done(future):
+        local["goal_loading"] = False
+        try:
+            answer = future.result()
+        except Exception as e:
+            print("ankiquest goal:", e)
+            return
+        if account(addon().client()) != account(api):
+            return
+        addon().drop_config(goals.LEGACY_KEYS)
+        remember_plan(answer)
+        addon().redraw()
+        if prompt:
+            setup_prompt(api, answer)
+
+    mw.taskman.run_in_background(work, done)
+
+
+def setup_prompt(api, answer):
+    """Opens the goal dialog once per account while the player has not chosen a goal.
+    Closing it without saving counts as shown."""
+    if not isinstance(answer, dict) or answer.get("chosen"):
+        return
+    key = "%s %s" % (api.base, api.name)
+    shown = list(addon().config().get(SETUP_SHOWN) or [])
+    if key in shown:
+        return
+    addon().save_config({SETUP_SHOWN: shown + [key]})
+    open_goal_dialog()
+
+
+def collection_forecast():
+    if mw.col is None:
+        return None
+    try:
+        return goals.forecast(mw.col)
+    except Exception as e:
+        print("ankiquest goal forecast:", e)
+        return None
+
+
+def open_goal_dialog():
+    """The daily goal dialog, saved to the server."""
+    api = addon().client()
+    if not api.configured:
+        addon().tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        return
+    answer = goal_ui.goal_dialog(mw, current_plan(server_day()), collection_forecast())
+    if answer is None:
+        return
+    mode, value = answer
+
+    def done(future):
+        try:
+            saved = future.result()
+        except Exception as e:
+            addon().failed(tr("Could not save your daily goal (%s)."), e)
+            return
+        if owner(addon().client()) != owner(api):
+            return
+        remember_plan(saved)
+        addon().redraw()
+        addon().tooltip(tr("Daily goal saved."))
+
+    mw.taskman.run_in_background(lambda: goals.put(api, mode, value), done)
+
+
 def goal_view(status):
-    view = {"minimum": goals.minimum_text(status, tr), "minimum_meter": None, "daily": None, "backlog": None}
+    view = {
+        "minimum": goals.minimum_text(status, tr), "minimum_meter": None, "daily": None, "backlog": None,
+        "action": tr("Set a daily goal") if status.goal is None else tr("Change goal"),
+    }
     if status.streak_minutes > 0 and not status.minimum_done:
         view["minimum_meter"] = (status.minutes, status.streak_minutes)
     if status.goal is None:
@@ -100,10 +269,7 @@ def goal_view(status):
     else:
         view["daily"] = tr("Daily goal: %s") % goals.progress_text(status, tr)
     view["daily_meter"] = (status.progress, status.goal.target)
-    if status.mode == goals.BACKLOG and status.goal.backlog > 0:
-        view["backlog"] = tr(
-            "Today’s due cards plus %d of your %d overdue cards (%d%% a day), so the backlog shrinks without taking over your day."
-        ) % (status.goal.backlog_share, status.goal.backlog, status.backlog_percent)
+    view["backlog"] = goals.backlog_text(status, tr)
     return view
 
 
@@ -203,6 +369,9 @@ def on_js_message(handled, message, context):
         deck = message.rsplit(":", 1)[1]
         if deck.isdigit():
             open_deck(int(deck))
+        return (True, None)
+    if message == "ankiquest:goal":
+        open_goal_dialog()
         return (True, None)
     if message.startswith("ankiquest:period:"):
         mw.pm.profile[PERIOD_KEY] = today.period(message.rsplit(":", 1)[1])
@@ -307,6 +476,7 @@ def on_profile_open():
         except TypeError:
             local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, True)
     refresh_board()
+    sync_goal(prompt=True)
 
 
 def install(module):

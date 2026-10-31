@@ -65,6 +65,8 @@ background:var(--aq-green);color:#fff;font-family:inherit;font-weight:800;font-s
 box-shadow:0 4px 0 var(--aq-green-dark)}
 #ankiquest .aq-button:hover{filter:brightness(1.05)}
 #ankiquest .aq-button:active{transform:translateY(4px);box-shadow:none}
+#ankiquest .aq-goal-edit{margin-top:8px;padding:4px 12px;border:2px solid var(--aq-track);border-radius:999px;cursor:pointer;background:transparent;color:var(--aq-blue);font-family:inherit;font-weight:800;font-size:12px}
+#ankiquest .aq-goal-edit:hover{background:var(--aq-soft)}
 #ankiquest .aq-goal{margin-bottom:12px}
 #ankiquest .aq-goal:last-child{margin-bottom:0}
 #ankiquest .aq-row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:800}
@@ -265,6 +267,8 @@ def goal_card(today, translate):
         body += goal_line(goal["daily"], goal["daily_meter"])
     if goal.get("backlog"):
         body += "<div class=aq-note>%s</div>" % escape(goal["backlog"])
+    if goal.get("action"):
+        body += "<button class=aq-goal-edit onclick=\"pycmd('ankiquest:goal');return false\">%s</button>" % escape(goal["action"])
     return card(translate("Today’s goal"), body)
 
 

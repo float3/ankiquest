@@ -9,6 +9,8 @@ MAX_MESSAGE = 200
 READ_BATCH = 200
 SHAREABLE = ("celebration", "challenge_complete", "reminder_weekly_recap")
 CHEERED = ("completion", "share", "conquest")
+THANKED = ("reaction",)
+REACTABLE = ("share", "completion")
 CHALLENGE_ROUTE = re.compile(r"^/community#challenge-([1-9]\d*)$")
 ACTIVITY_PATH = "/community#activity"
 
@@ -39,7 +41,8 @@ def clean_reply(text):
 
 def reply_choices(kind, translate=lambda value: value):
     """The one-tap answers for a notification kind, the quick one first, as the phone offers them."""
-    group = "cheer" if (kind or "completion") in CHEERED else kind
+    kind = kind or "completion"
+    group = "cheer" if kind in CHEERED else "reply" if kind in THANKED else kind
     return [translate(choice) for choice in QUICK.get(group, ())]
 
 
@@ -62,6 +65,20 @@ def shareable(entry):
     return entry.get("kind") in SHAREABLE and not entry.get("sender") and int(entry.get("id") or 0) > 0
 
 
+def cheerable(entry):
+    """A friend's shared win or finished deck, which can get a 🎉 back."""
+    return entry.get("kind") in REACTABLE and bool(entry.get("sender")) and int(entry.get("id") or 0) > 0
+
+
+def headline(entry):
+    """A row's title, and the body still to show under it. A cheer reads as one line:
+    "🎉 X cheered: “Level 5!”"."""
+    title, body = entry.get("title") or "", entry.get("body") or ""
+    if entry.get("kind") == "reaction" and body:
+        return "%s: %s" % (title, body), ""
+    return title, body
+
+
 def unread(entry, legacy=False):
     return not legacy and not entry.get("read_at")
 
@@ -73,6 +90,8 @@ def actions(entry, legacy=False):
         found.append("reply")
     if shareable(entry):
         found.append("share")
+    if cheerable(entry):
+        found.append("cheer")
     found.append("open")
     if unread(entry, legacy):
         found.append("read")
@@ -140,6 +159,12 @@ def reply(api, notification, message):
         raise ValueError("empty reply")
     answer = api._request("/api/reply/" + api.user, body)
     return (answer or {}).get("sent_to") or ""
+
+
+def react(api, notification):
+    """Cheers a row with 🎉; answers whether it had been cheered already."""
+    answer = api._request("/api/react/" + api.user, {"notification": int(notification)})
+    return bool((answer or {}).get("already"))
 
 
 def error_text(error):
