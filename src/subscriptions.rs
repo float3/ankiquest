@@ -99,7 +99,7 @@ impl Store {
         let previous: HashSet<_> = self.unsubscribed_senders(recipient)?.into_iter().collect();
         let mut next: HashSet<_> = settings.unsubscribed_senders.iter().cloned().collect();
         next.extend(self.incoming_settings(recipient)?.muted_senders);
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         let resume_days: HashMap<_, _> = previous
             .difference(&next)
             .map(|sender| Ok((sender.clone(), self.clock(sender)?.day(now))))
@@ -209,7 +209,7 @@ mod tests {
     }
 
     fn share(store: &mut Store, id: &str, recipients: &[&str]) {
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         store
             .record_decks(
                 "cerro",
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn unsubscribe_cancels_selected_and_future_pushes_without_affecting_other_messages() {
         let (mut store, path) = temporary_store();
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         let old = notice(&mut store, "hill", "cerro", "completion", now);
         let retry = notice(&mut store, "hill", "cerro", "completion", now);
         assert!(store.begin_push(retry, now).unwrap());
@@ -371,7 +371,7 @@ mod tests {
         let (mut store, path) = temporary_store();
         share(&mut store, "shared", &["hill"]);
         share(&mut store, "private", &["friend"]);
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         let day = Clock::default().day(now);
         store
             .set_deck_subscriptions("hill", &settings(true, &["cerro"]))
@@ -440,7 +440,7 @@ mod tests {
             .set_deck_subscriptions("hill", &settings(true, &["cerro"]))
             .unwrap();
         share(&mut store, "edited", &["friend", "another"]);
-        let day = Clock::default().day(crate::now_ms());
+        let day = Clock::default().day(crate::app::now_ms());
         store
             .prune_decks(
                 "cerro",
@@ -467,7 +467,7 @@ mod tests {
         for id in ["old", "in_progress", "tomorrow"] {
             share(&mut store, id, &["hill", "friend"]);
         }
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         let day = Clock::default().day(now);
         store
             .set_deck_subscriptions("hill", &settings(true, &["cerro"]))
@@ -608,7 +608,13 @@ mod tests {
     fn failed_unsubscribe_rolls_back_deck_selections_and_alert_preferences() {
         let (mut store, path) = temporary_store();
         share(&mut store, "1", &["hill"]);
-        notice(&mut store, "hill", "cerro", "completion", crate::now_ms());
+        notice(
+            &mut store,
+            "hill",
+            "cerro",
+            "completion",
+            crate::app::now_ms(),
+        );
         store.conn.execute_batch("create trigger fail_cancel before update on notifications begin select raise(abort,'failed'); end;").unwrap();
         assert!(
             store

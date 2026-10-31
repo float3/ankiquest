@@ -949,7 +949,7 @@ mod tests {
             let path = std::env::temp_dir().join(format!(
                 "ankiquest-competition-{}-{}-{}",
                 std::process::id(),
-                crate::now_ms(),
+                crate::app::now_ms(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             let store = Store::open(&path).unwrap();

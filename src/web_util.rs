@@ -1,6 +1,7 @@
 //! Small HTTP and encoding helpers shared by the sign-in, account and export code.
 
-use crate::{App, Error};
+use crate::app::App;
+use crate::store::Error;
 use axum::Json;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -115,6 +116,22 @@ pub(crate) fn json_error(status: StatusCode, message: &str) -> Response {
 /// A typed user name as it is stored: trimmed and lowercased.
 pub(crate) fn normalize_user(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
+}
+
+pub(crate) fn store_error(error: impl std::fmt::Display) -> StatusCode {
+    log_error!("storage failed: {error}");
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
+/// Like [`store_error`], attributed to `user`: logs "{what} {user} failed: ...".
+pub(crate) fn failed_for<'a>(
+    what: &'a str,
+    user: &'a str,
+) -> impl Fn(Error) -> StatusCode + Copy + 'a {
+    move |e| {
+        log_error!(user: user, "{what} {user} failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }
 
 #[cfg(test)]

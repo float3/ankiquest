@@ -2,7 +2,7 @@
 //! Configured users keep working; accounts only exist when registration is on.
 
 use crate::web_util::{bearer, hex, normalize_user, random_bytes};
-use crate::{App, Error, now_ms};
+use crate::{Error, app::App, app::now_ms};
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};

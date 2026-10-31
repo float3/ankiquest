@@ -10,6 +10,7 @@ mod admin;
 mod access;
 mod accounts;
 mod aki;
+mod app;
 mod avatars;
 mod challenges;
 mod companions;
@@ -37,6 +38,8 @@ mod test_support;
 mod web_util;
 mod weekly_challenges;
 
+use access::authorized;
+use app::{App, Player, load_player, mark_events_seen, now_ms};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, Response, StatusCode, header};
@@ -45,259 +48,20 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Datelike;
 use config::Config;
-use game::{Clock, ClockHistory, Periods, Profile, Records, Review, Week};
+use game::{Clock, Periods, Profile, Records, Review};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use store::{Error, Store};
+use web_util::{failed_for, store_error};
 
 const POLL: Duration = Duration::from_secs(20);
 const MAX_PENDING: usize = 5000;
 const PUSH_BUDGET: Duration = Duration::from_secs(20);
 /// How many people a record names: the holder and whoever came closest.
 const PODIUM: usize = 3;
-
-struct Player {
-    reviews: Arc<Vec<Review>>,
-    clock: Clock,
-    /// Every clock they have kept, so old reviews keep the days they fell in.
-    clock_history: ClockHistory,
-    freeze_policy: game::FreezePolicy,
-    /// Changes whenever anything above does, so cached standings know they are stale.
-    revision: u64,
-}
-
-static REVISIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-fn next_revision() -> u64 {
-    REVISIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-}
-
-/// Standings computed recently, so boards and the tick do not recompute every history on every read.
-#[derive(Default)]
-struct StandingCache(Mutex<HashMap<String, CachedStanding>>);
-
-struct CachedStanding {
-    key: (u64, game::ReviewWeighting, u64, i64, i64),
-    computed_at: i64,
-    recent: bool,
-    profile: Arc<Profile>,
-}
-
-/// How long a standing stays fresh while its player has studied in the last hour,
-/// because the rolling hour board moves with every minute.
-const STANDING_TTL_MS: i64 = 60_000;
-/// How much study history a cached standing keeps: enough for reminders about recent days.
-const STANDING_HISTORY_DAYS: usize = 14;
-
-struct App {
-    config: Config,
-    access: access::Access,
-    accounts: accounts::Directory,
-    week: Week,
-    store: Mutex<Store>,
-    players: RwLock<HashMap<String, Player>>,
-    standings: StandingCache,
-}
-
-impl App {
-    /// Rereads `user`'s reviews and settings into the cached player.
-    fn reload_player(&self, store: &Store, user: &str) -> Result<(), Error> {
-        let player = load_player(store, user)?;
-        self.players
-            .write()
-            .unwrap()
-            .insert(user.to_string(), player);
-        Ok(())
-    }
-
-    fn recipient(&self, user: String) -> decks::Recipient {
-        decks::Recipient {
-            display: self.display(&user),
-            user,
-        }
-    }
-
-    /// `users` as recipients, ordered by display name and then user name.
-    fn sorted_recipients(&self, users: impl IntoIterator<Item = String>) -> Vec<decks::Recipient> {
-        let mut recipients: Vec<_> = users.into_iter().map(|user| self.recipient(user)).collect();
-        recipients.sort_by(|a, b| a.display.cmp(&b.display).then_with(|| a.user.cmp(&b.user)));
-        recipients
-    }
-
-    fn display(&self, user: &str) -> String {
-        self.config
-            .users
-            .get(user)
-            .and_then(|u| u.display.clone())
-            .or_else(|| self.accounts.account(user).map(|account| account.display))
-            .unwrap_or_else(|| user.into())
-    }
-
-    /// Anyone this server knows: configured users and accounts.
-    fn is_user(&self, user: &str) -> bool {
-        self.config.users.contains_key(user) || self.accounts.contains(user)
-    }
-
-    /// Players who can sign in: configured users with a token, and every account.
-    fn members(&self) -> BTreeSet<String> {
-        self.config
-            .users
-            .iter()
-            .filter(|(_, config)| {
-                config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-            })
-            .map(|(user, _)| user.clone())
-            .chain(self.accounts.users())
-            .collect()
-    }
-
-    fn profile(&self, user: &str) -> Option<Profile> {
-        self.preview(user, &[])
-    }
-
-    fn preview(&self, user: &str, pending: &[Review]) -> Option<Profile> {
-        let players = self.players.read().unwrap();
-        let player = players.get(user)?;
-        let last = player.reviews.last().map_or(0, |r| r.id);
-        let mut fresh: Vec<Review> = pending.iter().filter(|r| r.id > last).copied().collect();
-        fresh.sort_by_key(|r| r.id);
-        fresh.dedup_by_key(|r| r.id);
-        let merged = [player.reviews.as_slice(), &fresh].concat();
-        Some(game::compute_with_history(
-            user,
-            &self.display(user),
-            &merged,
-            &player.clock_history,
-            &self.week,
-            now_ms(),
-            &player.freeze_policy,
-        ))
-    }
-
-    /// A player's standing: their profile without the heatmap, achievements and older history.
-    /// It is cached until the player uploads, their Anki day or the clock hour changes,
-    /// or a minute passes while they have studied in the last hour.
-    fn standing(&self, user: &str) -> Option<Arc<Profile>> {
-        let now = now_ms();
-        let players = self.players.read().unwrap();
-        let player = players.get(user)?;
-        let key = (
-            player.revision,
-            game::review_weighting(),
-            game::streak_rule_version(),
-            player.clock_history.day(now),
-            now.div_euclid(3_600_000),
-        );
-        if let Some(cached) = self.standings.0.lock().unwrap().get(user)
-            && cached.key == key
-            && (!cached.recent || now - cached.computed_at < STANDING_TTL_MS)
-        {
-            return Some(cached.profile.clone());
-        }
-        let recent = player
-            .reviews
-            .last()
-            .is_some_and(|r| r.id > now - 3_600_000);
-        let mut profile = game::compute_with_history(
-            user,
-            &self.display(user),
-            &player.reviews,
-            &player.clock_history,
-            &self.week,
-            now,
-            &player.freeze_policy,
-        );
-        drop(players);
-        profile.heatmap = Vec::new();
-        profile.achievements = Vec::new();
-        let older = profile.history.len().saturating_sub(STANDING_HISTORY_DAYS);
-        profile.history.drain(..older);
-        let profile = Arc::new(profile);
-        self.standings.0.lock().unwrap().insert(
-            user.to_string(),
-            CachedStanding {
-                key,
-                computed_at: now,
-                recent,
-                profile: profile.clone(),
-            },
-        );
-        Some(profile)
-    }
-
-    fn forget_standing(&self, user: &str) {
-        self.standings.0.lock().unwrap().remove(user);
-    }
-
-    fn standings_among(&self, users: &BTreeSet<String>) -> Vec<Arc<Profile>> {
-        let players: Vec<String> = self
-            .players
-            .read()
-            .unwrap()
-            .keys()
-            .filter(|user| users.contains(*user))
-            .cloned()
-            .collect();
-        players.iter().filter_map(|u| self.standing(u)).collect()
-    }
-
-    /// Players `user` can send things to: members of their circle other than themselves.
-    fn reachable(&self, store: &Store, user: &str) -> rusqlite::Result<BTreeSet<String>> {
-        let circle = self.circle(&store.conn, user)?;
-        Ok(self
-            .members()
-            .into_iter()
-            .filter(|other| other != user && circle.contains(other))
-            .collect())
-    }
-
-    /// The monthly competition still covers the original community only.
-    fn legacy_participants(&self) -> Vec<competition::Participant> {
-        self.participants()
-            .into_iter()
-            .filter(|participant| self.legacy(&participant.user))
-            .collect()
-    }
-
-    fn participants(&self) -> Vec<competition::Participant> {
-        let players = self.players.read().unwrap();
-        let users: BTreeSet<_> = self
-            .config
-            .users
-            .keys()
-            .chain(players.keys())
-            .cloned()
-            .chain(self.accounts.users())
-            .collect();
-        users
-            .into_iter()
-            .map(|user| {
-                let player = players.get(&user);
-                competition::Participant {
-                    display: self.display(&user),
-                    reviews: player.map_or_else(Default::default, |p| p.reviews.clone()),
-                    clock_history: player
-                        .map_or_else(ClockHistory::default, |p| p.clock_history.clone()),
-                    freeze_policy: player
-                        .map_or_else(game::FreezePolicy::default, |p| p.freeze_policy.clone()),
-                    user,
-                }
-            })
-            .collect()
-    }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
-}
 
 #[derive(Serialize)]
 struct Standing {
@@ -691,10 +455,6 @@ struct Upload {
     catalog: bool,
 }
 
-fn authorized(app: &App, user: &str, headers: &HeaderMap) -> bool {
-    access::authorized(app, user, headers)
-}
-
 async fn upload(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
@@ -944,22 +704,9 @@ async fn set_decks(
         .map_err(store_error)
 }
 
-fn store_error(error: impl std::fmt::Display) -> StatusCode {
-    log_error!("storage failed: {error}");
-    StatusCode::INTERNAL_SERVER_ERROR
-}
-
 /// Years the history and community pages can show.
 fn valid_year(year: i32) -> bool {
     (1970..=2100).contains(&year)
-}
-
-/// Like [`store_error`], attributed to `user`: logs "{what} {user} failed: ...".
-fn failed_for<'a>(what: &'a str, user: &'a str) -> impl Fn(Error) -> StatusCode + Copy + 'a {
-    move |e| {
-        log_error!(user: user, "{what} {user} failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1711,24 +1458,6 @@ fn push(
     Ok(())
 }
 
-/// Marks every event `profile` shows as seen, so none of them is announced later.
-fn mark_events_seen(store: &Store, user: &str, profile: &Profile) -> Result<(), Error> {
-    for event in &profile.events {
-        store.mark_seen(user, &event.key)?;
-    }
-    Ok(())
-}
-
-fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
-    Ok(Player {
-        reviews: Arc::new(store.reviews(user)?),
-        clock: store.clock(user)?,
-        clock_history: store.clock_history(user)?,
-        freeze_policy: store.freeze_policy(user)?,
-        revision: next_revision(),
-    })
-}
-
 fn sync_users(base: &Path) -> Result<Vec<String>, Error> {
     let mut users = Vec::new();
     let mut errors = Vec::new();
@@ -2395,7 +2124,9 @@ fn router(app: Arc<App>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::next_revision;
     use crate::config::UserConfig;
+    use crate::game::{ClockHistory, Week};
     use crate::test_support::*;
     use std::path::PathBuf;
 
@@ -5598,57 +5329,6 @@ mod tests {
                 .0
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
-    fn reviews_at(first: i64, count: i64) -> Vec<Review> {
-        (0..count)
-            .map(|index| Review {
-                id: first + index * 1000,
-                cid: 1_000 + index,
-                last_ivl: 1,
-                ivl: None,
-                time_ms: 8_000,
-                kind: 1,
-            })
-            .collect()
-    }
-
-    fn with_reviews(app: &App, user: &str, count: i64) {
-        app.players.write().unwrap().insert(
-            user.into(),
-            Player {
-                reviews: Arc::new(reviews_at(now_ms() - 600_000, count)),
-                clock: Clock::default(),
-                clock_history: ClockHistory::default(),
-                freeze_policy: game::FreezePolicy::default(),
-                revision: next_revision(),
-            },
-        );
-    }
-
-    #[test]
-    fn standings_are_cached_until_the_player_changes_and_stay_small() {
-        let (app, path) = fixture();
-        with_reviews(&app, "cerro", 5);
-        let first = app.standing("cerro").unwrap();
-        assert!(
-            Arc::ptr_eq(&first, &app.standing("cerro").unwrap()),
-            "a second read is served from the cache"
-        );
-        assert!(first.heatmap.is_empty() && first.achievements.is_empty());
-        assert!(
-            !app.profile("cerro").unwrap().heatmap.is_empty(),
-            "the full profile keeps everything"
-        );
-        with_reviews(&app, "cerro", 9);
-        let second = app.standing("cerro").unwrap();
-        assert!(
-            !Arc::ptr_eq(&first, &second),
-            "new reviews replace the cached standing"
-        );
-        assert!(second.today.reviews > first.today.reviews);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

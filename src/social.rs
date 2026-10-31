@@ -3,7 +3,7 @@
 //! sharing the original community, so existing deployments behave as before.
 
 use crate::web_util::{json_error, normalize_user};
-use crate::{App, Error, now_ms};
+use crate::{Error, app::App, app::now_ms};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};

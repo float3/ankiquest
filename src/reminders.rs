@@ -117,7 +117,7 @@ pub fn settings(store: &Store, user: &str) -> Result<Settings, Error> {
 /// Full replacement, after authentication by the API handler. No historical
 /// freeze or recap is announced when its switch is enabled for the first time.
 pub fn save_settings(store: &mut Store, user: &str, value: &Settings) -> Result<(), Error> {
-    save_settings_at(store, user, value, crate::now_ms())
+    save_settings_at(store, user, value, crate::app::now_ms())
 }
 
 fn save_settings_at(

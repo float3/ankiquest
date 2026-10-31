@@ -1,5 +1,5 @@
 //! Public, embedded mascot art. Only these fixed assets are served before sign-in.
-use crate::App;
+use crate::app::App;
 use axum::{
     Router,
     extract::Path,

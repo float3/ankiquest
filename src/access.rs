@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::web_util::{
     bearer, hex, hex_cookie, json_error, normalize_user, random_bytes, set_cookie,
 };
-use crate::{App, Error, now_ms};
+use crate::{Error, app::App, app::now_ms};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
@@ -589,7 +589,7 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Week;
+    use crate::game::Week;
 
     #[test]
     fn revoking_a_member_ends_only_their_sessions() {

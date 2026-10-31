@@ -1,5 +1,5 @@
 use crate::store::{Error, Store};
-use crate::{App, authorized};
+use crate::{access::authorized, app::App};
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};

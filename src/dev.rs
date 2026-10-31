@@ -6,7 +6,7 @@ use crate::decks::valid_message;
 use crate::game::{DAY_MS, Review};
 use crate::notifications::{Outgoing, insert_notification};
 use crate::store::{Error, Store};
-use crate::{App, access, now_ms, store_error};
+use crate::{access, app::App, app::now_ms, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Html;
@@ -678,12 +678,12 @@ mod tests {
     fn player(app: &App, user: &str, at: &[i64]) {
         app.players.write().unwrap().insert(
             user.into(),
-            crate::Player {
+            crate::app::Player {
                 reviews: Arc::new(at.iter().copied().map(review).collect()),
                 clock: Clock::default(),
                 clock_history: ClockHistory::default(),
                 freeze_policy: FreezePolicy::default(),
-                revision: crate::next_revision(),
+                revision: crate::app::next_revision(),
             },
         );
     }

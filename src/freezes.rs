@@ -85,14 +85,14 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
     // opt-in server does not retroactively earn/spend freezes or rewrite XP.
     tx.execute(
         "insert or ignore into freeze_defaults (id, enabled_from) values (1, ?1)",
-        [crate::now_ms()],
+        [crate::app::now_ms()],
     )?;
     // Existing review histories keep protection already applied by the old rule.
     // New databases never use that rule. This boundary is fixed across restarts.
     let initialized = tx.execute(
         "insert or ignore into freeze_policy (id, legacy_until)
          values (1, case when exists (select 1 from reviews) then ?1 else null end)",
-        [crate::now_ms()],
+        [crate::app::now_ms()],
     )?;
     if initialized > 0 {
         tx.execute(
@@ -273,7 +273,7 @@ mod tests {
             !store
                 .freeze_policy("cerro")
                 .unwrap()
-                .enabled_at(crate::now_ms())
+                .enabled_at(crate::app::now_ms())
         );
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn first_opt_out_is_saved_even_without_uploaded_reviews() {
         let (mut store, path) = temporary_store();
-        let at = crate::now_ms();
+        let at = crate::app::now_ms();
         store.set_freezes_enabled("cerro", false, at).unwrap();
         store.set_freezes_enabled("cerro", false, at + 1).unwrap();
         let before = store.freeze_preferences("cerro").unwrap();

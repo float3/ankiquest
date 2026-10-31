@@ -297,7 +297,7 @@ impl Store {
                  union select sender from incoming_muted_senders where recipient = ?1 and sender != ?1
                  order by sender",
             )?
-            .query_map(params![user, crate::now_ms() - INBOX_AGE_MS], |r| r.get(0))?
+            .query_map(params![user, crate::app::now_ms() - INBOX_AGE_MS], |r| r.get(0))?
             .collect::<Result<_, _>>()?)
     }
 
@@ -835,7 +835,7 @@ pub(crate) mod tests {
     #[test]
     fn known_incoming_senders_exposes_only_existing_recipient_relationships() {
         let (mut store, path) = completion_fixture(&[("1", "Private deck name", &["hill"])]);
-        let now = crate::now_ms();
+        let now = crate::app::now_ms();
         queue_kind(&mut store, "hill", "recent", "completion", now);
         queue_kind(
             &mut store,
@@ -1296,7 +1296,7 @@ pub(crate) mod tests {
         let path = std::env::temp_dir().join(format!(
             "ankiquest-decks-{}-{}-{}",
             std::process::id(),
-            crate::now_ms(),
+            crate::app::now_ms(),
             NEXT.fetch_add(1, Ordering::Relaxed),
         ));
         (Store::open(&path).unwrap(), path)

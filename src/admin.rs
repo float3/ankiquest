@@ -72,7 +72,7 @@ pub fn record(level: &'static str, user: Option<&str>, message: String) {
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     if pending.len() < MAX_PENDING {
         pending.push(Entry {
-            at: crate::now_ms(),
+            at: crate::app::now_ms(),
             level,
             user: user.map(str::to_string),
             message,
