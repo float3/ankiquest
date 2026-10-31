@@ -13,6 +13,7 @@ mod aki;
 mod app;
 mod avatars;
 mod boards;
+mod cards;
 mod challenges;
 mod cli;
 mod companions;
@@ -227,6 +228,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(inbox::routes())
         .merge(study::routes())
         .merge(boards::routes())
+        .merge(cards::routes())
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))

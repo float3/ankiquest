@@ -191,7 +191,6 @@ pub(crate) fn win(conn: &Connection, user: &str, id: i64) -> Option<Win> {
 }
 
 /// The win a public link points to, with its owner, while the link exists.
-#[allow(dead_code)]
 pub(crate) fn by_token(conn: &Connection, token: &str) -> Option<(String, Win)> {
     conn.query_row(
         &format!("select {COLUMNS} from wins where link_token = ?1"),
