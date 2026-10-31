@@ -26,6 +26,7 @@ from aqt.qt import Qt
 from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
+from .today_ui import settings_section
 
 
 def _enum(owner, group, name):
@@ -162,8 +163,9 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     return result
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None):
-    """Everything the phone keeps in its ankiquest preference screen."""
+def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None):
+    """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
+    a section and return what to run once the dialog is saved."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("ankiquest")
     layout = QVBoxLayout(dialog)
@@ -193,6 +195,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
     layout.addWidget(_row(QLabel(tr("Update channel")), channel))
+    today_values = settings_section(layout, config)
 
     if on_account is not None:
         account = QPushButton(tr("Sign in or create account…"))
@@ -211,11 +214,14 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
     upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
+    finish = extra(dialog, layout) if extra else None
     layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
 
     if not dialog.exec():
         return None
-    return _values(url, user, token, rank, hours, channel)
+    if finish:
+        finish()
+    return dict(_values(url, user, token, rank, hours, channel), **today_values())
 
 
 def _values(url, user, token, rank, hours, channel):

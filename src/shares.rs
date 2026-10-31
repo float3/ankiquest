@@ -2,9 +2,9 @@
 //! top-three place on this week's board reaches everyone in the player's circle as a
 //! notification they can reply to, with the same topic so it shows the same art.
 
-use crate::decks::Outgoing;
+use crate::notifications::Outgoing;
 use crate::store::{Error, Store};
-use crate::{App, authorized, now_ms, standings, store_error};
+use crate::{access::authorized, app::App, app::now_ms, boards::standings, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -58,9 +58,7 @@ fn notification_win(store: &Store, user: &str, id: i64) -> Result<Option<Win>, E
 
 fn muted(store: &Store, recipient: &str, sender: &str) -> Result<bool, Error> {
     Ok(store.conn.query_row(
-        "select exists(select 1 from (select recipient, sender from incoming_muted_senders
-                       union all select recipient, sender from sender_unsubscriptions)
-                       where recipient = ?1 and sender = ?2)",
+        &format!("select {}", crate::decks::sender_muted_sql("?1", "?2")),
         params![recipient, sender],
         |r| r.get(0),
     )?)
@@ -82,12 +80,7 @@ fn send(
             continue;
         }
         let key = format!("share:{sender}:{}", win.key);
-        let before = store.conn.query_row(
-            "select exists(select 1 from seen where user = ?1 and key = ?2)",
-            params![friend, key],
-            |r| r.get::<_, bool>(0),
-        )?;
-        if before {
+        if store.is_seen(friend, &key)? {
             continue;
         }
         store.send_once_about(

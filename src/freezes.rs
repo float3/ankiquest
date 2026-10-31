@@ -1,7 +1,17 @@
+use crate::access::authorized;
+use crate::app::{App, now_ms};
+use crate::game;
 use crate::game::{FreezePolicy, FreezePreference};
 use crate::store::{Error, Store};
+use crate::web_util::failed_for;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::routing::get;
+use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Protects `dates` (`YYYY-MM-DD`) for `user`, or lifts that protection again.
 /// The running service picks the change up on its next tick.
@@ -85,14 +95,14 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
     // opt-in server does not retroactively earn/spend freezes or rewrite XP.
     tx.execute(
         "insert or ignore into freeze_defaults (id, enabled_from) values (1, ?1)",
-        [crate::now_ms()],
+        [crate::app::now_ms()],
     )?;
     // Existing review histories keep protection already applied by the old rule.
     // New databases never use that rule. This boundary is fixed across restarts.
     let initialized = tx.execute(
         "insert or ignore into freeze_policy (id, legacy_until)
          values (1, case when exists (select 1 from reviews) then ?1 else null end)",
-        [crate::now_ms()],
+        [crate::app::now_ms()],
     )?;
     if initialized > 0 {
         tx.execute(
@@ -172,9 +182,81 @@ impl Store {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct FreezeSettings {
+    pub(crate) enabled: bool,
+    pub(crate) freezes: u32,
+    capacity: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FreezeUpdate {
+    pub(crate) enabled: bool,
+}
+
+fn freeze_settings(app: &App, store: &Store, user: &str) -> Result<FreezeSettings, Error> {
+    let policy = store.freeze_policy(user)?;
+    let profile = app.profile(user);
+    Ok(FreezeSettings {
+        enabled: policy.enabled_at(now_ms()),
+        freezes: profile.map_or(0, |profile| profile.stored_freezes),
+        capacity: game::MAX_FREEZES,
+    })
+}
+
+async fn get_freezes(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<FreezeSettings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    freeze_settings(&app, &app.store.lock().unwrap(), &user)
+        .map(Json)
+        .map_err(failed_for("streak freeze settings for", &user))
+}
+
+pub(crate) async fn set_freezes(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(update): Json<FreezeUpdate>,
+) -> Result<Json<FreezeSettings>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let store_error = failed_for("streak freeze settings for", &user);
+    let mut store = app.store.lock().unwrap();
+    store
+        .set_freezes_enabled(&user, update.enabled, now_ms())
+        .map_err(store_error)?;
+    // Cache the timeline with the reviews: profile/preview are read-only and are
+    // also called while the database lock is held by uploads and imports.
+    let known = app.players.read().unwrap().contains_key(&user);
+    if known {
+        app.reload_player(&store, &user).map_err(store_error)?;
+    }
+    freeze_settings(&app, &store, &user)
+        .map(Json)
+        .map_err(store_error)
+}
+
+pub(crate) fn routes() -> Router<Arc<App>> {
+    Router::new().route(
+        "/api/streak-freezes/{user}",
+        get(get_freezes).post(set_freezes),
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::app::load_player;
     use crate::decks::tests::temporary_store;
+    use crate::freezes::{FreezeUpdate, get_freezes, set_freezes};
+    use crate::study::{Pending, Upload, preview, upload};
+    use crate::test_support::*;
 
     #[test]
     fn a_new_database_never_enables_legacy_rules_after_importing_reviews() {
@@ -273,7 +355,7 @@ mod tests {
             !store
                 .freeze_policy("cerro")
                 .unwrap()
-                .enabled_at(crate::now_ms())
+                .enabled_at(crate::app::now_ms())
         );
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
@@ -282,7 +364,7 @@ mod tests {
     #[test]
     fn first_opt_out_is_saved_even_without_uploaded_reviews() {
         let (mut store, path) = temporary_store();
-        let at = crate::now_ms();
+        let at = crate::app::now_ms();
         store.set_freezes_enabled("cerro", false, at).unwrap();
         store.set_freezes_enabled("cerro", false, at + 1).unwrap();
         let before = store.freeze_preferences("cerro").unwrap();
@@ -328,6 +410,239 @@ mod tests {
         assert_eq!(changes.len(), 3);
         assert!(changes[2].enabled);
         drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn streak_freeze_settings_require_the_players_own_token() {
+        let (app, path) = fixture();
+        for headers in [HeaderMap::new(), headers("hill"), headers("unknown")] {
+            assert_eq!(
+                get_freezes(State(app.clone()), UrlPath("cerro".into()), headers.clone())
+                    .await
+                    .unwrap_err(),
+                StatusCode::UNAUTHORIZED
+            );
+            assert_eq!(
+                set_freezes(
+                    State(app.clone()),
+                    UrlPath("cerro".into()),
+                    headers,
+                    Json(FreezeUpdate { enabled: true }),
+                )
+                .await
+                .unwrap_err(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        assert!(
+            app.store
+                .lock()
+                .unwrap()
+                .freeze_preferences("cerro")
+                .unwrap()
+                .is_empty()
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn streak_freezes_default_on_and_first_opt_out_survives_restart() {
+        let (app, path) = fixture();
+        let settings = get_freezes(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(settings.enabled);
+        assert_eq!((settings.freezes, settings.capacity), (0, 3));
+        let disabled = set_freezes(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(FreezeUpdate { enabled: false }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!disabled.enabled);
+        assert!(app.players.read().unwrap().is_empty());
+        drop(app);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.freeze_preferences("cerro").unwrap().len(), 1);
+        assert!(!store.freeze_preferences("cerro").unwrap()[0].enabled);
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn streak_freezes_start_empty_can_be_toggled_before_upload_and_reload() {
+        let (app, path) = fixture();
+        let settings = get_freezes(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(settings.enabled);
+        assert_eq!((settings.freezes, settings.capacity), (0, 3));
+        for enabled in [true, true, false, true] {
+            let settings = set_freezes(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(FreezeUpdate { enabled }),
+            )
+            .await
+            .unwrap()
+            .0;
+            assert_eq!(settings.enabled, enabled);
+            assert_eq!(settings.freezes, 0);
+        }
+        assert!(
+            app.players.read().unwrap().is_empty(),
+            "settings do not add an empty leaderboard entry"
+        );
+        let other = get_freezes(State(app.clone()), UrlPath("hill".into()), headers("hill"))
+            .await
+            .unwrap()
+            .0;
+        assert!(other.enabled);
+        drop(app);
+        let store = Store::open(&path).unwrap();
+        let history = store.freeze_preferences("cerro").unwrap();
+        assert_eq!(
+            history.len(),
+            2,
+            "repeated saves cannot change the activation time"
+        );
+        assert!(history.last().unwrap().enabled);
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn streak_freeze_updates_cannot_set_a_balance_or_omit_enabled() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"enabled": null}),
+            serde_json::json!({"enabled": "true"}),
+            serde_json::json!({"enabled": true, "freezes": 3}),
+        ] {
+            assert!(serde_json::from_value::<FreezeUpdate>(value).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn streak_freeze_previews_do_not_bank_rewards_and_uploads_only_earn_once() {
+        let (app, path) = fixture();
+        let clock = Clock::default();
+        let day = clock.day(now_ms()) - 1;
+        let start = day * 86_400_000;
+        // Enough morning reviews, time, combo and two sessions for any initial quests.
+        let reviews: Vec<Review> = (0..60)
+            .map(|i| Review {
+                id: start + 6 * 3_600_000 + i * 10_000 + if i >= 30 { 600_000 } else { 0 },
+                cid: i,
+                last_ivl: 30,
+                ivl: None,
+                time_ms: 10_000,
+                kind: 0,
+            })
+            .collect();
+        {
+            let mut store = app.store.lock().unwrap();
+            store.upsert("cerro", &[], &[], clock).unwrap();
+            store.set_freezes_enabled("cerro", true, start).unwrap();
+            app.players
+                .write()
+                .unwrap()
+                .insert("cerro".into(), load_player(&store, "cerro").unwrap());
+        }
+        assert_eq!(app.profile("cerro").unwrap().freezes, 0);
+        let projected = preview(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            HeaderMap::new(),
+            Json(Pending {
+                reviews: reviews.clone(),
+                seen_through: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0
+        .profile;
+        assert_eq!(projected.freezes, 1);
+        assert_eq!(
+            app.profile("cerro").unwrap().freezes,
+            0,
+            "preview never saves reviews or a reward"
+        );
+        for _ in 0..2 {
+            let response = upload(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers("cerro"),
+                Json(Upload {
+                    reviews: reviews.clone(),
+                    deleted: vec![],
+                    clock,
+                    silent: true,
+                    decks: None,
+                    catalog: false,
+                }),
+            )
+            .await
+            .unwrap()
+            .0;
+            assert_eq!(response.profile.freezes, 1);
+            assert!(response.profile.freezes_enabled);
+        }
+        let paused = set_freezes(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(FreezeUpdate { enabled: false }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(!paused.enabled);
+        assert_eq!(paused.freezes, 1);
+        assert!(
+            !app.profile("cerro").unwrap().freezes_enabled,
+            "cached profiles see the new setting immediately"
+        );
+        assert_eq!(
+            app.profile("cerro").unwrap().freezes,
+            0,
+            "older clients only see available protection"
+        );
+        assert_eq!(app.profile("cerro").unwrap().stored_freezes, 1);
+        let config = app.config.clone();
+        drop(app);
+        let store = Store::open(&path).unwrap();
+        let player = load_player(&store, "cerro").unwrap();
+        let reloaded = App {
+            config,
+            access: access::Access::default(),
+            accounts: Default::default(),
+            week: Week::default(),
+            store: Mutex::new(store),
+            players: RwLock::new(HashMap::from([("cerro".into(), player)])),
+            standings: Default::default(),
+        };
+        assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
+        assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);
+        assert!(!reloaded.profile("cerro").unwrap().freezes_enabled);
+        drop(reloaded);
         std::fs::remove_dir_all(path).unwrap();
     }
 }

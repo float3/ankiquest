@@ -109,6 +109,10 @@ class Client:
     def profile(self):
         return self._request("/api/profile/" + self.user)
 
+    def leaderboard(self):
+        """Every visible player's standing, with XP for each period."""
+        return self._request("/api/leaderboard")
+
     def companion(self):
         return _companion(self._request("/api/companion/" + self.user))
 

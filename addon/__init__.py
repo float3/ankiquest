@@ -1,5 +1,6 @@
 import html
 import platform
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
-from . import board, notify, ui, updates, web
+from . import board, home, notify, ui, updates, web
 from . import inbox_ui, share, share_ui
 from .inbox import shareable
 from .language import tr
@@ -27,6 +28,7 @@ from .client import (
     sign_up,
 )
 from .deck_completion import deck_snapshots, study_day
+from . import copies_ui, preferences, preview
 
 MARK_KEY = "ankiquestUploadedThrough"
 RECENT_KEY = "ankiquestRecentUploads"
@@ -39,6 +41,7 @@ UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
 ADDON_DIR = Path(__file__).resolve().parent
 RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
+WEBSITE_SHORTCUT = "Ctrl+Shift+K"
 
 state = {
     "busy": False,
@@ -54,7 +57,7 @@ state = {
     "conquest": None,
 }
 
-mw.addonManager.setWebExports(__name__, r"(aki|ankilope)_face\.png")
+mw.addonManager.setWebExports(__name__, r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png")
 
 
 def config():
@@ -80,6 +83,7 @@ def refresh(show_feedback, resync=False):
         return
     api = client()
     if not api.configured:
+        preview.refresh(mw, api, show_feedback, tooltip)
         return
     state["busy"] = True
     rollover = int(mw.col.get_config("rollover", 4))
@@ -129,6 +133,7 @@ def refresh(show_feedback, resync=False):
         try:
             mw.pm.profile[MARK_KEY], mw.pm.profile[RECENT_KEY], profile = future.result()
             mw.pm.profile[BASELINE_KEY] = account
+            mw.pm.profile[preferences.LAST_UPLOAD_KEY] = int(time.time() * 1000)
         except Exception as e:
             print("ankiquest:", e)
             return
@@ -163,6 +168,7 @@ def refresh_shared_decks():
 
 def poll(quiet=False):
     """Keeps the deck list board, the inbox and the streak warning up to date."""
+    copies_ui.poll(quiet)
     api = client()
     if not api.configured or state["polling"]:
         return
@@ -245,7 +251,7 @@ def on_deck_browser(deck_browser, content):
     waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
-    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot)
+    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))
 
 
 def on_js_message(handled, message, context):
@@ -352,7 +358,10 @@ def open_account():
 
 
 def open_settings():
-    values = ui.settings_dialog(mw, config(), test_connection, upload_everything, state["companion"], ask_account)
+    values = ui.settings_dialog(
+        mw, config(), test_connection, upload_everything, state["companion"], ask_account,
+        extra=lambda dialog, layout: preferences.section(dialog, layout, mw, client()),
+    )
     if values is None:
         return
     if values.get("update_channel") != config().get("update_channel", "stable"):
@@ -561,9 +570,11 @@ def on_sync():
     poll()
 
 
-def add_action(title, handler):
+def add_action(title, handler, shortcut=None):
     action = QAction(title, mw)
     action.triggered.connect(handler)
+    if shortcut:
+        action.setShortcut(QKeySequence(shortcut))
     mw.form.menuTools.addAction(action)
     return action
 
@@ -572,9 +583,10 @@ add_action(tr("ankiquest: sign in or create account…"), open_account)
 add_action(tr("ankiquest settings…"), open_settings)
 add_action(tr("ankiquest study companion…"), open_companion)
 add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
-add_action(tr("ankiquest inbox…"), open_inbox).setShortcut(QKeySequence(inbox_ui.SHORTCUT))
-add_action(tr("ankiquest on the web…"), open_website)
+add_action(tr("ankiquest inbox…"), open_inbox, inbox_ui.SHORTCUT)
+add_action(tr("ankiquest on the web…"), open_website, WEBSITE_SHORTCUT)
 add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
+copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
 
 
 gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))
@@ -633,3 +645,6 @@ def celebrate(api, win):
         share_ui.offer(mw, api, win, current_companion(), client, mw.taskman.run_in_background)
 
     mw.taskman.run_in_background(lambda: api.deck_settings(), done)
+
+
+home.install(sys.modules[__name__])

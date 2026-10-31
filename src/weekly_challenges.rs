@@ -1,4 +1,6 @@
 //! One private, optional friend suggestion per shared competition week.
+use crate::competition::monday;
+use crate::game::DAY_MS;
 use crate::{challenges, decks, game::Week, store::Store};
 use chrono::{Datelike, Duration};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -6,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const TITLE: &str = "A week of steady studying";
-pub const DURATION_MS: i64 = 7 * 86_400_000;
+pub const DURATION_MS: i64 = 7 * DAY_MS;
 
 #[derive(Serialize)]
 pub struct Suggestion {
@@ -54,8 +56,7 @@ pub fn suggestion(
     if friends.is_empty() {
         return Ok(None);
     }
-    let date = week.competition_date(now);
-    let monday = date - Duration::days(i64::from(date.weekday().num_days_from_monday()));
+    let monday = monday(week.competition_date(now));
     let start = week.boundary_ms(monday);
     let end = week.boundary_ms(monday + Duration::days(7));
     // Stable ordering rotates through everyone without using their private deck history.
