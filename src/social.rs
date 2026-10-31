@@ -2,6 +2,7 @@
 //! Everyone who is not a self-service account (configured and sync-folder players) keeps
 //! sharing the original community, so existing deployments behave as before.
 
+use crate::web_util::{json_error, normalize_user};
 use crate::{App, Error, now_ms};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -330,13 +331,9 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
     })
 }
 
-fn refuse(status: StatusCode, message: &str) -> Response {
-    (status, Json(serde_json::json!({"error": message}))).into_response()
-}
-
 fn failed(error: impl std::fmt::Display) -> Response {
     log_error!("social storage failed: {error}");
-    refuse(
+    json_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "That could not be saved. Please try again.",
     )
@@ -355,7 +352,7 @@ async fn get_overview(
     headers: HeaderMap,
 ) -> Response {
     if !crate::access::authorized(&app, &user, &headers) {
-        return refuse(StatusCode::UNAUTHORIZED, "Sign in first.");
+        return json_error(StatusCode::UNAUTHORIZED, "Sign in first.");
     }
     respond(&app, &app.store.lock().unwrap().conn, &user)
 }
@@ -382,7 +379,7 @@ async fn change(
     Json(change): Json<Change>,
 ) -> Response {
     if !crate::access::authorized(&app, &user, &headers) {
-        return refuse(StatusCode::UNAUTHORIZED, "Sign in first.");
+        return json_error(StatusCode::UNAUTHORIZED, "Sign in first.");
     }
     let store = app.store.lock().unwrap();
     let conn = &store.conn;
@@ -512,7 +509,7 @@ async fn change(
                 Ok(())
             }
             Change::Befriend { user: other } => {
-                let other = other.trim().to_ascii_lowercase();
+                let other = normalize_user(&other);
                 if other == user || !app.is_user(&other) {
                     return Ok(Err((
                         StatusCode::NOT_FOUND,
@@ -557,7 +554,7 @@ async fn change(
                 Ok(())
             }
             Change::Unfriend { user: other } => {
-                let other = other.trim().to_ascii_lowercase();
+                let other = normalize_user(&other);
                 let (a, b) = pair(&user, &other);
                 conn.execute(
                     "delete from friendships where a = ?1 and b = ?2",
@@ -585,7 +582,7 @@ async fn change(
     }
     match outcome {
         Ok(Ok(())) => respond(&app, conn, &user),
-        Ok(Err((status, message))) => refuse(status, message),
+        Ok(Err((status, message))) => json_error(status, message),
         Err(error) => failed(error),
     }
 }
@@ -664,7 +661,7 @@ async fn invite(State(app): State<Arc<App>>, Path(code): Path<String>) -> Respon
         Ok(Some((name, members))) => {
             Json(serde_json::json!({"name": name, "members": members})).into_response()
         }
-        Ok(None) => refuse(
+        Ok(None) => json_error(
             StatusCode::NOT_FOUND,
             "That invite link is not valid any more.",
         ),

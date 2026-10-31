@@ -30,6 +30,7 @@ mod shares;
 mod social;
 mod store;
 mod subscriptions;
+mod web_util;
 mod weekly_challenges;
 
 use axum::body::{Body, Bytes};
