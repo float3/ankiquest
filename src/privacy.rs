@@ -39,12 +39,17 @@ const EXPORT: &[(&str, &str)] = &[
     ("companion", "select companion from companion_preferences where user = ?1"),
     ("reminders", "select settings from reminder_settings where user = ?1"),
     ("streak_freezes", "select at, enabled from freeze_preferences where user = ?1 order by at"),
+    ("granted_freezes", "select date, at from freeze_grants where user = ?1 order by date"),
+    ("legacy_freeze_player", "select 1 as legacy from freeze_legacy_players where user = ?1"),
+    ("reminder_baselines", "select kind, since from reminder_baselines where user = ?1"),
+    ("seen", "select key from seen where user = ?1 order by key"),
     ("encouragement", "select * from player_settings where user = ?1"),
     ("deck_alerts", "select enabled from incoming_settings where user = ?1"),
     ("muted_deck_senders", "select sender from incoming_muted_senders where recipient = ?1"),
     ("muted_nudge_senders", "select sender from friend_nudge_muted_senders where recipient = ?1"),
     ("unsubscribed_senders", "select sender from sender_unsubscriptions where recipient = ?1"),
     ("unsubscribed_decks", "select sender, deck_id from unsubscribed_decks where recipient = ?1"),
+    ("subscription_baselines", "select sender, deck_id, day from subscription_baselines where recipient = ?1"),
     ("decks", "select id, name, enabled from decks where owner = ?1"),
     ("deck_recipients", "select deck_id, recipient from deck_recipients where owner = ?1"),
     ("deck_completions", "select deck_id, day from deck_completions where owner = ?1 order by day"),
@@ -56,7 +61,8 @@ const EXPORT: &[(&str, &str)] = &[
          join deck_copy_recipients r on r.offer = o.id where r.recipient = ?1"),
     ("challenges_created", "select * from community_challenges where creator = ?1"),
     ("challenge_memberships", "select * from community_members where user = ?1"),
-    ("weekly_suggestions", "select * from community_weekly_suggestions where owner = ?1"),
+    ("challenge_requests", "select request_id, challenge, payload from community_requests where creator = ?1"),
+    ("weekly_suggestions", "select * from community_weekly_suggestions where owner = ?1 or friend = ?1"),
     ("groups", "select g.id, g.name, m.owner, m.joined_at from group_members m join groups g on g.id = m.group_id where m.user = ?1"),
     ("friendships", "select case when a = ?1 then b else a end as friend, requested_by, accepted, created_at
          from friendships where a = ?1 or b = ?1"),
@@ -64,6 +70,13 @@ const EXPORT: &[(&str, &str)] = &[
     ("conquest_labels", "select at, label from conquest_labels where user = ?1 order by at"),
     ("server_log", "select at, level, message from server_log where user = ?1 order by at"),
     ("announcements_sent", "select id, title, body, groups, recipients, created_at from announcements where sender = ?1 order by id"),
+    ("pending_removal", "select requested_at from account_removals where user = ?1"),
+];
+
+/// Owned tables left out of the download, with why.
+#[cfg(test)]
+const NOT_EXPORTED: &[(&str, &str)] = &[
+    ("freeze_grant_reloads", "a queue the server empties within a minute"),
 ];
 
 /// Rows that belong to the player alone: (table, condition on ?1).
@@ -76,7 +89,7 @@ const OWNED: &[(&str, &str)] = &[
     ("review_syncs", "user = ?1"),
     (
         "seen",
-        "user = ?1 or key like 'friend-nudge:%:' || ?1 or key like 'conquest:' || ?1 || ':%'",
+        "user = ?1 or key glob 'friend-nudge:*:' || ?1 or key glob 'conquest:' || ?1 || ':*'",
     ),
     ("languages", "user = ?1"),
     ("companion_preferences", "user = ?1"),
@@ -226,6 +239,14 @@ pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<()> {
     transaction.commit()
 }
 
+/// Drops a forgotten account from memory and signs it out everywhere.
+fn unload(app: &App, user: &str) {
+    app.accounts.remove(user);
+    app.players.write().unwrap().remove(user);
+    app.forget_standing(user);
+    app.access.revoke_member(user);
+}
+
 /// Removes the accounts an admin asked to remove with `admin remove-account`.
 pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> {
     let users: Vec<String> = conn
@@ -234,9 +255,7 @@ pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> 
         .collect::<rusqlite::Result<_>>()?;
     for user in users {
         forget(conn, &user)?;
-        app.accounts.remove(&user);
-        app.players.write().unwrap().remove(&user);
-        app.forget_standing(&user);
+        unload(app, &user);
         log_info!("an account was removed, as an admin asked");
     }
     Ok(())
@@ -308,7 +327,8 @@ async fn account(
     }
 }
 
-/// Deletes the account. The password is asked for again, so a borrowed device cannot do it.
+/// Deletes the account. The password is asked for again, or for an account without one,
+/// the username is typed out.
 async fn delete(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -365,9 +385,7 @@ async fn delete(
             "Your account could not be deleted. Please try again.",
         );
     }
-    app.accounts.remove(&user);
-    app.players.write().unwrap().remove(&user);
-    app.forget_standing(&user);
+    unload(&app, &user);
     log_info!("an account was deleted");
     StatusCode::NO_CONTENT.into_response()
 }
@@ -598,6 +616,23 @@ mod tests {
         );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn every_owned_table_is_in_the_download_or_says_why_not() {
+        let missing: Vec<&str> = OWNED
+            .iter()
+            .map(|(table, _)| *table)
+            .filter(|table| {
+                !NOT_EXPORTED.iter().any(|(skipped, _)| skipped == table)
+                    && !EXPORT.iter().any(|(_, query)| {
+                        query
+                            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                            .any(|word| word == *table)
+                    })
+            })
+            .collect();
+        assert!(missing.is_empty(), "export or explain: {missing:?}");
     }
 
     #[tokio::test]
@@ -837,6 +872,28 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn forgetting_a_name_with_an_underscore_keeps_lookalike_names() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("create table seen (user text, key text)").unwrap();
+        conn.execute_batch(
+            "insert into seen values ('x', 'conquest:a_b:1'), ('x', 'conquest:axb:1'),
+                                     ('x', 'friend-nudge:1:a_b'), ('x', 'friend-nudge:1:axb')",
+        )
+        .unwrap();
+        let (_, clause) = OWNED.iter().find(|(table, _)| *table == "seen").unwrap();
+        conn.execute(&format!("delete from seen where {clause}"), ["a_b"])
+            .unwrap();
+        let left: Vec<String> = conn
+            .prepare("select key from seen order by key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["conquest:axb:1", "friend-nudge:1:axb"]);
     }
 
     #[test]

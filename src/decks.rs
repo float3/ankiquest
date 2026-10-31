@@ -782,6 +782,7 @@ impl Store {
             .collect::<Result<_, _>>()?)
     }
 
+    #[cfg(test)]
     pub fn activity(
         &self,
         user: &str,
@@ -1248,12 +1249,17 @@ impl Store {
 
     /// Read a bounded batch, leaving it pending until ntfy confirms success.
     /// Retry times put newly queued messages ahead of previously failed pushes.
-    pub fn take_deck_deliveries(&mut self, now_ms: i64) -> Result<Vec<Delivery>, Error> {
-        let tx = self.conn.transaction()?;
-        tx.execute(
+    /// Forgets notifications older than the activity feed reaches back.
+    pub fn prune_notifications(&mut self, now_ms: i64) -> Result<(), Error> {
+        self.conn.execute(
             "delete from notifications where created_at < ?1",
             [now_ms - ACTIVITY_AGE_MS],
         )?;
+        Ok(())
+    }
+
+    pub fn take_deck_deliveries(&mut self, now_ms: i64) -> Result<Vec<Delivery>, Error> {
+        let tx = self.conn.transaction()?;
         let deliveries = {
             let mut stmt = tx.prepare(
                 "with ready as (
@@ -1334,6 +1340,20 @@ impl Store {
         self.conn.execute(
             "update notifications set retry_at = ?2 where id = ?1 and pushed = 0",
             params![id, now_ms + PUSH_LEASE_MS],
+        )?;
+        Ok(())
+    }
+
+    /// Stops pushing a notification that has nowhere to go. An inbox message
+    /// stays in the inbox; a push-only one is dropped, keeping its seen key.
+    pub fn cancel_push(&mut self, id: i64) -> Result<(), Error> {
+        self.conn.execute(
+            "delete from notifications where id = ?1 and pushed = 0 and push_only = 1",
+            [id],
+        )?;
+        self.conn.execute(
+            "update notifications set push_cancelled = 1 where id = ?1 and pushed = 0",
+            [id],
         )?;
         Ok(())
     }
@@ -1727,6 +1747,7 @@ pub(crate) mod tests {
                 .read_at,
             Some(NOW / 1000)
         );
+        store.prune_notifications(NOW).unwrap();
         let deliveries = store.take_deck_deliveries(NOW).unwrap();
         assert!(
             deliveries.iter().any(|d| d.notification.id == recent),

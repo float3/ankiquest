@@ -629,7 +629,7 @@ fn exists(app: &App, user: &str) -> bool {
             .is_some_and(|token| !token.is_empty())
 }
 
-/// The player linked to this identity. A link to a player who is gone is dropped.
+/// The player linked to this identity, if they can still sign in.
 fn owner(
     app: &App,
     conn: &Connection,
@@ -643,17 +643,7 @@ fn owner(
             |r| r.get(0),
         )
         .optional()?;
-    match linked {
-        Some(user) if exists(app, &user) => Ok(Some(user)),
-        Some(_) => {
-            conn.execute(
-                "delete from sign_in_links where provider = ?1 and subject = ?2",
-                params![provider.key(), subject],
-            )?;
-            Ok(None)
-        }
-        None => Ok(None),
-    }
+    Ok(linked.filter(|user| exists(app, user)))
 }
 
 fn linked_providers(conn: &Connection, user: &str) -> Result<Vec<Provider>, Error> {
@@ -2247,7 +2237,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(left, 0);
+        assert_eq!(left, 1, "a lookup leaves the link for the account's own cleanup");
         cleanup(app, path);
     }
 

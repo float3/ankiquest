@@ -387,6 +387,10 @@ async fn change(
     let store = app.store.lock().unwrap();
     let conn = &store.conn;
     let now = now_ms();
+    let tx = match conn.unchecked_transaction() {
+        Ok(tx) => tx,
+        Err(error) => return failed(error),
+    };
     let outcome: Result<Result<(), (StatusCode, &str)>, Error> = (|| {
         Ok(match change {
             Change::CreateGroup { name } => {
@@ -553,6 +557,7 @@ async fn change(
                 Ok(())
             }
             Change::Unfriend { user: other } => {
+                let other = other.trim().to_ascii_lowercase();
                 let (a, b) = pair(&user, &other);
                 conn.execute(
                     "delete from friendships where a = ?1 and b = ?2",
@@ -571,6 +576,13 @@ async fn change(
             }
         })
     })();
+    if matches!(outcome, Ok(Ok(()))) {
+        if let Err(error) = tx.commit() {
+            return failed(error);
+        }
+    } else {
+        drop(tx);
+    }
     match outcome {
         Ok(Ok(())) => respond(&app, conn, &user),
         Ok(Err((status, message))) => refuse(status, message),

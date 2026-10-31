@@ -356,13 +356,7 @@ impl Week {
     pub fn end_after(&self, ms: i64) -> i64 {
         let date = self.shifted(ms).date();
         let monday = date + Duration::days(7 - i64::from(date.weekday().num_days_from_monday()));
-        let boundary = monday
-            .and_hms_opt(self.rollover_hour, 0, 0)
-            .unwrap_or_default();
-        self.tz
-            .from_local_datetime(&boundary)
-            .earliest()
-            .map_or(ms + 7 * 86_400_000, |t| t.timestamp_millis())
+        self.boundary_ms(monday)
     }
 }
 

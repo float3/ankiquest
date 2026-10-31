@@ -177,17 +177,6 @@ pub fn started(conn: &Connection, id: i64) -> rusqlite::Result<Option<bool>> {
     .optional()
 }
 
-pub fn cancel_stale_invites(conn: &Connection, now: i64) -> rusqlite::Result<()> {
-    conn.execute(
-        "update notifications set push_cancelled=1 where kind='challenge_invite'
-                  and challenge_id in (select w.challenge from community_weekly_goals w
-                  join community_challenges c on c.id=w.challenge
-                  where w.started=1 or c.cancelled=1 or c.end_at<=?1)",
-        [now],
-    )?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,7 +500,7 @@ mod tests {
             )
             .is_err()
         );
-        cancel_stale_invites(&store.conn, next.expires_at).unwrap();
+        crate::challenges::cancel_stale_invites(&store.conn, next.expires_at).unwrap();
         assert_eq!(store.conn.query_row("select count(*) from notifications where kind='challenge_invite' and push_cancelled=0",[],|r|r.get::<_,i64>(0)).unwrap(),0);
     }
 
