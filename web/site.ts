@@ -76,7 +76,12 @@ import {ownerHeaders, send, type SendOptions} from "./http";
     while (epoch === connectionEpoch) {
       const native = nativeAccount(), key = nativeKey(native);
       let accepted = false;
-      if (native) {
+      if (native && !native.token) {
+        const access = await status(true, false);
+        if (epoch !== connectionEpoch) return;
+        if (nativeKey(nativeAccount()) !== key) continue;
+        accepted = memberUser(access) === native.user;
+      } else if (native?.token) {
         const owner = await fetch("/api/community/reminders/" + encodeURIComponent(native.user), {cache: "no-store", headers: {Authorization: "Bearer " + native.token}});
         if (epoch !== connectionEpoch) return;
         if (nativeKey(nativeAccount()) !== key) continue;

@@ -94,6 +94,21 @@ open `/#<user>` for a profile, `/` for the leaderboard. `/hour`, `/day`, `/week`
 
 `/records` and `GET /api/records` name whoever has had the best hour, day, week, month and year here, with the XP and the review count of each and the two who came closest, along with the longest streak and the most days studied; a profile shows the same as personal bests. the record hour is any 60 minutes, not a clock hour.
 
+## passwords and devices
+
+a self-service account signs up with `POST /api/accounts` (`{"user", "password", "display"?, "device"?}`) and trades its password for a token for each device with `POST /api/accounts/tokens` (`{"user", "password", "device"?}`); `DELETE /api/accounts/tokens` with that token signs the device out. tokens do not expire, and the server keeps only their SHA-256 hash, the device name and when it signed in.
+
+under Settings a player changes their password and sees and signs out their devices:
+
+| endpoint | does |
+| --- | --- |
+| `POST /api/sign-in/<user>` `{"action": "password", "current": "…", "password": "…", "sign_out_others": false}` | sets a new password of 10 to 256 characters and returns the sign-in methods. `current` is needed when the account has a password; one that signs in with a provider sets its first without. a wrong `current` is `403` and counts towards the same per-address limit as signing in (`429`). players from the configuration get `409`. devices stay signed in unless `sign_out_others` is true. |
+| `GET /api/devices/<user>` | `{"devices": [{"id", "kind", "name", "created_at", "current"}]}`, the requesting device first, then newest. `kind` is `app` for a device token (`name` is the device it signed in as) or `web` for a website session signed in with a password or a provider (`name` is null). a website session opened with a device token, such as AnkiDroid's, counts as that device. `id` is the start of a hash, never a secret. |
+| `POST /api/devices/<user>` `{"action": "sign_out", "id": "…"}` | signs that device out and returns the list; `404` when it is not one of the player's. |
+| `POST /api/devices/<user>` `{"action": "sign_out_others"}` | signs out every token and website session except the one making the request, and returns the list. |
+
+all of these need the player's own token or website session (`401` otherwise), and website requests send `X-Ankiquest-CSRF: 1`. signing a token out also ends the website sessions it opened. website sessions live in memory and end when the server restarts; device tokens are kept.
+
 ## clients
 
 the Android app and the desktop add-on show what the server writes, so they word things the same way. upload and preview responses carry `feedback` (`headlines` and an XP `status` line). profiles carry `day_ends_at` and a `streak_warning` while the streak is at risk. `POST /api/rank/<user>` with `{"previous": [...]}` returns the weekly `order` and a `change` notice for the player. behavior that has to stay in each client, such as the study day, the review row format and undo reconciliation, is pinned by `tests/fixtures/clients.json`, which the server, the add-on and the app all test against.

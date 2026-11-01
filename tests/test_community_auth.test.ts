@@ -8,7 +8,7 @@ import {chromium, fulfillAsset, page as built} from './support/web.ts';
 
 const html = built('community');
 const origin = 'http://ankiquest.test';
-interface Session { user: string; token: string }
+interface Session { user: string; token?: string }
 interface ActivityItem { id: number; sender: string; kind: string; title: string; body: string; created_at: number; read_at: number | null; challenge_id?: number; action_required?: boolean }
 interface Options { locale?: string; cookieUser?: string; activityItems?: ActivityItem[]; activityBefore?: number }
 interface Recorded { url: string; auth: string | undefined; csrf?: string | undefined; method: string; body: Record<string, unknown> | null }
@@ -161,7 +161,7 @@ test('community reminders reuse the saved account, including saves, without pers
   assert.ok(requests.every(request => request.auth === 'Bearer saved-token' && request.url.endsWith('/cerro')));
   assert.equal(requests.find(request => request.method === 'POST')!.body!.gentle_daily, true);
   const persisted = await page.evaluate(() => JSON.stringify([localStorage, sessionStorage, (window as unknown as TestWindow).storageWrites, location.href]));
-  assert.ok(!persisted.includes(saved.token));
+  assert.ok(!persisted.includes(saved.token!));
 });
 
 test('activity suggests congratulations only for deck completions and thanks for replies', async t => {
@@ -415,4 +415,31 @@ test('friends achievements show an honest empty state and clear on account remov
   await deliver(null);
   assert.equal(await page.locator('.friend-achievement').count(),0);
   assert.equal(await page.getByRole('region',{name:"Friends' achievements",exact:true}).count(),0);
+});
+
+test('a native member without a token keeps the session cookie the app installed', async t=>{
+  const {page,requests,deliver}=await fixture(t,null,{cookieUser:'cerro'});
+  await page.locator('#reminder-form').waitFor();
+  await deliver({user:'cerro'});
+  await deliver({user:'cerro'});
+  await page.locator('#reminder-form').waitFor();
+  assert.equal(await page.locator('#view-reminders .auth-status strong').innerText(),'Cerro');
+  await page.locator('[name=gentle_daily]').check();
+  await page.getByRole('button',{name:'Save reminder preferences'}).click();
+  await page.getByText('Your reminder preferences are saved.').waitFor();
+  assert(requests.every(request=>!request.auth),'a cookie session sends no token');
+  assert.equal(requests.find(request=>request.method==='POST')!.csrf,'1');
+  await page.locator('#tab-activity').click();
+  await page.getByText('Saved encouragement').waitFor();
+  await deliver(null);
+  await page.locator('.activity-item').waitFor({state:'detached'});
+  assert.equal(await page.locator('#reminder-form').count(),0);
+});
+
+test('a native member without a token connects through the cookie when it arrives after loading', async t=>{
+  const {page,requests,control,deliver}=await fixture(t,null);
+  control.cookieUser='cerro';
+  await deliver({user:'cerro'});
+  await page.locator('#reminder-form').waitFor();
+  assert(requests.length>0&&requests.every(request=>!request.auth&&request.url.endsWith('/cerro')));
 });

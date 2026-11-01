@@ -1065,6 +1065,12 @@ struct Change {
     provider: Option<String>,
     #[serde(default)]
     device: Option<String>,
+    #[serde(default)]
+    current: Option<String>,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    sign_out_others: bool,
 }
 
 enum Unlinked {
@@ -1096,9 +1102,11 @@ fn unlink(app: &App, user: &str, provider: Provider) -> Result<Unlinked, Error> 
 }
 
 /// `{"action": "unlink", "provider": "github"}` removes a linked sign-in;
-/// `{"action": "token"}` makes a device token, for accounts that have no password to trade for one.
+/// `{"action": "token"}` makes a device token, for accounts that have no password to trade for one;
+/// `{"action": "password", "current": "…", "password": "…", "sign_out_others": false}` sets a new password.
 async fn change(
     State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(user): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -1139,6 +1147,29 @@ async fn change(
             let device = clean_device(change.device.as_deref());
             match app.issue_token(&user, &device) {
                 Ok(token) => reply(StatusCode::CREATED, serde_json::json!({"token": token})),
+                Err(error) => internal(error),
+            }
+        }
+        "password" => {
+            let Some(password) = change.password.as_deref() else {
+                return refuse(StatusCode::BAD_REQUEST, "Enter a new password.");
+            };
+            let client = access::client_ip(&app.config, &headers, peer);
+            if let Some(refused) = crate::accounts::change_password(
+                &app,
+                &user,
+                &headers,
+                client,
+                change.current.as_deref(),
+                password,
+                change.sign_out_others,
+            )
+            .await
+            {
+                return refused;
+            }
+            match methods_of(&app, &user) {
+                Ok(methods) => reply(StatusCode::OK, methods),
                 Err(error) => internal(error),
             }
         }

@@ -265,6 +265,12 @@ fn router(app: Arc<App>) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(4096)),
         )
         .route(
+            "/api/devices/{user}",
+            get(accounts::list_devices)
+                .post(accounts::change_devices)
+                .layer(axum::extract::DefaultBodyLimit::max(4096)),
+        )
+        .route(
             "/api/companion/{user}",
             get(companions::get).post(companions::set),
         )

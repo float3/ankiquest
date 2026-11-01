@@ -86,7 +86,7 @@ import {send} from "./http";
     if (editor || locked) return;
     const native = nativeAccount();
     token = typeof token === "string" ? token.trim() : "";
-    if (!token && native?.user === user) token = native.token;
+    if (!token && native?.user === user) token = native.token ?? "";
     const dialog = document.createElement("dialog");
     editor = dialog;
     dialog.className = "avatar-editor";
@@ -100,7 +100,7 @@ import {send} from "./http";
     let selected: ImageBitmap | null = null, canvas: HTMLCanvasElement | null = null, busy = false, closed = false, selection = 0;
     let zoom = 1, offsetX = 0, offsetY = 0;
     const cropControls = dialog.querySelector<HTMLElement>(".avatar-crop-controls")!, zoomInput = form.elements.namedItem("zoom") as HTMLInputElement;
-    let password: HTMLInputElement | null = null, cookieOwner = false, checkingSession = !token && !native;
+    let password: HTMLInputElement | null = null, cookieOwner = false, checkingSession = !token && (!native || native.user === user);
     const controller = new AbortController();
     function message(text: string, error = false) { status.textContent = text; status.classList.toggle("error", error); }
     function controls() { const waiting = busy || checkingSession; save.disabled = waiting || !selected; remove.disabled = waiting || !revisions[user]; fileInput.disabled = waiting; zoomInput.disabled = waiting || !selected; dialog.querySelector<HTMLButtonElement>("[data-reset-crop]")!.disabled = waiting || !selected; if (password) password.disabled = waiting; }
