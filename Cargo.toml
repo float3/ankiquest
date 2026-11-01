@@ -37,6 +37,9 @@ opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
 
+[profile.release]
+panic = "abort"
+
 # The translation module for the web pages, built by build.rs.
 [profile.wasm]
 inherits = "release"

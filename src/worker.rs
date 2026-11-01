@@ -434,9 +434,22 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
     }
     Ok(())
 }
+/// Aborts the process when dropped by a panicking thread, so a worker that dies takes the
+/// server with it and the service manager restarts both.
+struct AbortOnPanic;
+
+impl Drop for AbortOnPanic {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            std::process::abort();
+        }
+    }
+}
+
 /// Runs [`tick`] every [`POLL`] on its own thread for as long as the server runs.
 pub(crate) fn spawn(app: Arc<App>) {
     std::thread::spawn(move || {
+        let _abort = AbortOnPanic;
         loop {
             if let Err(e) = tick(&app) {
                 log_error!("tick failed: {e}");
