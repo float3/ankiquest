@@ -86,7 +86,10 @@ const EXPORT: &[(&str, &str)] = &[
 /// Owned tables left out of the download, with why.
 #[cfg(test)]
 const NOT_EXPORTED: &[(&str, &str)] = &[
-    ("freeze_grant_reloads", "a queue the server empties within a minute"),
+    (
+        "freeze_grant_reloads",
+        "a queue the server empties within a minute",
+    ),
     ("win_auto_queue", "a queue the server empties within a tick"),
 ];
 
@@ -140,7 +143,10 @@ const OWNED: &[(&str, &str)] = &[
     ("freeze_grants", "user = ?1"),
     ("freeze_grant_reloads", "user = ?1"),
     ("sign_in_links", "user = ?1"),
-    ("win_auto_queue", "win in (select id from wins where user = ?1)"),
+    (
+        "win_auto_queue",
+        "win in (select id from wins where user = ?1)",
+    ),
     (
         "win_deliveries",
         "recipient = ?1 or win in (select id from wins where user = ?1)",
@@ -879,7 +885,8 @@ mod tests {
     #[test]
     fn forgetting_a_name_with_an_underscore_keeps_lookalike_names() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("create table seen (user text, key text)").unwrap();
+        conn.execute_batch("create table seen (user text, key text)")
+            .unwrap();
         conn.execute_batch(
             "insert into seen values ('x', 'conquest:a_b:1'), ('x', 'conquest:axb:1'),
                                      ('x', 'friend-nudge:1:a_b'), ('x', 'friend-nudge:1:axb')",

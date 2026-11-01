@@ -604,8 +604,12 @@ mod tests {
     fn revoking_a_member_ends_only_their_sessions() {
         let access = Access::default();
         let headers = HeaderMap::new();
-        let ana = access.create_session(&headers, Some("ana".into()), 0).unwrap();
-        let bo = access.create_session(&headers, Some("bo".into()), 0).unwrap();
+        let ana = access
+            .create_session(&headers, Some("ana".into()), 0)
+            .unwrap();
+        let bo = access
+            .create_session(&headers, Some("bo".into()), 0)
+            .unwrap();
         access.revoke_member("ana");
         let sessions = access.sessions.lock().unwrap();
         assert!(!sessions.expires.contains_key(&ana));

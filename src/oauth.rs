@@ -2190,7 +2190,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(left, 1, "a lookup leaves the link for the account's own cleanup");
+        assert_eq!(
+            left, 1,
+            "a lookup leaves the link for the account's own cleanup"
+        );
         cleanup(app, path);
     }
 

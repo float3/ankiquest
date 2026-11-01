@@ -200,7 +200,9 @@ async fn get_goal(
     }
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
-    Ok(Json(stored(&store.conn, &user, today).map_err(store_error)?.0))
+    Ok(Json(
+        stored(&store.conn, &user, today).map_err(store_error)?.0,
+    ))
 }
 
 async fn set_goal(
@@ -216,7 +218,9 @@ async fn set_goal(
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
     save(&store.conn, &user, &setting, today).map_err(store_error)?;
-    Ok(Json(stored(&store.conn, &user, today).map_err(store_error)?.0))
+    Ok(Json(
+        stored(&store.conn, &user, today).map_err(store_error)?.0,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -410,7 +414,13 @@ mod tests {
             now_ms(),
             &game::FreezePolicy::default(),
         );
-        save(&store.conn, "hill", &setting("cards", Some(100)), profile.day).unwrap();
+        save(
+            &store.conn,
+            "hill",
+            &setting("cards", Some(100)),
+            profile.day,
+        )
+        .unwrap();
         let today = view(&store.conn, "hill", &profile).unwrap();
         assert_eq!(
             (today.progress, today.reached),
@@ -423,7 +433,13 @@ mod tests {
         assert_eq!(moment.key, format!("goal:{}", profile.day));
         assert_eq!(moment.title, "Daily goal reached!");
         assert_eq!(moment.body, "3 cards today in 0 minutes.");
-        save(&store.conn, "hill", &setting("backlog", Some(100)), profile.day).unwrap();
+        save(
+            &store.conn,
+            "hill",
+            &setting("backlog", Some(100)),
+            profile.day,
+        )
+        .unwrap();
         assert_eq!(view(&store.conn, "hill", &profile).unwrap().progress, None);
         assert!(event(&store.conn, "hill", &profile).unwrap().is_none());
         assert!(report(&store.conn, "hill", profile.day, profile.day).unwrap());
