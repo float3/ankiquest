@@ -142,11 +142,11 @@ addEventListener("ankiquest-auth", () => {
 });
 function nativeSettingsToken(user: string) {
   const session = nativeAccount();
-  return session?.user === user ? session.token : "";
+  return session?.user === user ? session.token ?? "" : "";
 }
 function nativeSettingsIdentity() {
   const session = nativeAccount();
-  return session ? JSON.stringify([session.user, session.token]) : "";
+  return session ? JSON.stringify([session.user, session.token ?? ""]) : "";
 }
 function settingsToken(user: string) {
   return nativeSettingsToken(user) || settingsTokens.get(user) || "";
@@ -257,7 +257,7 @@ function connectSettingsAuth<T>({ user, form, input, controller, load, clear, sh
       if (activeToken && native === activeToken) {
         fromNative = true;
         settingsTokens.delete(user);
-      } else if (activeToken || fromNative || native) {
+      } else if (activeToken || fromNative || native || (cookieSession && nativeAccount()?.user !== user)) {
         generation++;
         settingsTokens.delete(user);
         reset();
@@ -273,7 +273,7 @@ function connectSettingsAuth<T>({ user, form, input, controller, load, clear, sh
   autoUnlock();
   AnkiQuestSite.member(user).then(session => {
     if (controller.signal.aborted || nativeSettingsCleared || !session || busy || unlocked || input.value.trim() || settingsToken(user) ||
-        (nativeSettingsIdentity() && !nativeSettingsToken(user))) return;
+        (nativeAccount() && nativeAccount()!.user !== user)) return;
     cookieSession = session;
     unlock("", session);
   });

@@ -8,9 +8,14 @@ export function escape(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, char => entities[char]!);
 }
 
-/** The account AnkiDroid handed this page, or `null` when it has none or is signed out. */
-export function nativeAccount(): {user: string; token: string} | null {
+/**
+ * The account AnkiDroid handed this page, or `null` when it has none or is signed out. Current apps
+ * hand only the member and have already installed its HttpOnly session cookie, so requests for it
+ * carry no token; older apps also hand the token itself.
+ */
+export function nativeAccount(): OwnerSession | null {
   const value = window.ankiquestSession;
-  const token = typeof value?.token === "string" ? value.token.trim() : "";
-  return typeof value?.user === "string" && value.user && token ? {user: value.user, token} : null;
+  if (typeof value?.user !== "string" || !value.user) return null;
+  const token = typeof value.token === "string" ? value.token.trim() : "";
+  return token ? {user: value.user, token} : {user: value.user};
 }
