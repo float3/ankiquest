@@ -283,6 +283,16 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+    examples.push((
+        "share_to_link",
+        f.call(
+            "POST",
+            "/api/share/hill",
+            Some("hill-secret"),
+            json!({"win": hill_win, "to": "link"}),
+        )
+        .await,
+    ));
     f.call(
         "POST",
         "/api/share/cerro",

@@ -18,6 +18,7 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `devices.json` | `GET /api/devices/{user}` |
 | `upload.json` | `POST /api/reviews/{user}` |
 | `share_to_friends.json` | `POST /api/share/{user}` `{"win", "to": "friends"}` |
+| `share_to_link.json` | `POST /api/share/{user}` `{"win", "to": "link"}` |
 | `react.json` | `POST /api/react/{user}` |
 | `profile.json` | `GET /api/profile/{user}`, owner view with `goal` |
 | `leaderboard.json` | `GET /api/leaderboard` |
