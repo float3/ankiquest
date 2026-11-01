@@ -1,0 +1,2276 @@
+{
+  "achievements": [
+    {
+      "description": "Review 100 cards in total",
+      "id": "reviews-100",
+      "progress": 5,
+      "reward": 100,
+      "target": 100,
+      "title": "First Hundred",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000 cards in total",
+      "id": "reviews-1000",
+      "progress": 5,
+      "reward": 200,
+      "target": 1000,
+      "title": "Thousand Flips",
+      "unlocked": null
+    },
+    {
+      "description": "Review 5000 cards in total",
+      "id": "reviews-5000",
+      "progress": 5,
+      "reward": 300,
+      "target": 5000,
+      "title": "Card Shark",
+      "unlocked": null
+    },
+    {
+      "description": "Review 10000 cards in total",
+      "id": "reviews-10000",
+      "progress": 5,
+      "reward": 400,
+      "target": 10000,
+      "title": "Ten Thousand Hours, Sort Of",
+      "unlocked": null
+    },
+    {
+      "description": "Review 25000 cards in total",
+      "id": "reviews-25000",
+      "progress": 5,
+      "reward": 500,
+      "target": 25000,
+      "title": "Memory Palace",
+      "unlocked": null
+    },
+    {
+      "description": "Review 50000 cards in total",
+      "id": "reviews-50000",
+      "progress": 5,
+      "reward": 600,
+      "target": 50000,
+      "title": "Living Library",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100000 cards in total",
+      "id": "reviews-100000",
+      "progress": 5,
+      "reward": 700,
+      "target": 100000,
+      "title": "Mnemosyne",
+      "unlocked": null
+    },
+    {
+      "description": "Review 250000 cards in total",
+      "id": "reviews-250000",
+      "progress": 5,
+      "reward": 800,
+      "target": 250000,
+      "title": "Quarter Million",
+      "unlocked": null
+    },
+    {
+      "description": "Review 500000 cards in total",
+      "id": "reviews-500000",
+      "progress": 5,
+      "reward": 900,
+      "target": 500000,
+      "title": "Half a Million",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000000 cards in total",
+      "id": "reviews-1000000",
+      "progress": 5,
+      "reward": 1000,
+      "target": 1000000,
+      "title": "The Millionaire",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 3 day streak",
+      "id": "streak-3",
+      "progress": 1,
+      "reward": 100,
+      "target": 3,
+      "title": "Warming Up",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 7 day streak",
+      "id": "streak-7",
+      "progress": 1,
+      "reward": 200,
+      "target": 7,
+      "title": "Full Week",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 14 day streak",
+      "id": "streak-14",
+      "progress": 1,
+      "reward": 300,
+      "target": 14,
+      "title": "Fortnight",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 30 day streak",
+      "id": "streak-30",
+      "progress": 1,
+      "reward": 400,
+      "target": 30,
+      "title": "Month of Mondays",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 60 day streak",
+      "id": "streak-60",
+      "progress": 1,
+      "reward": 500,
+      "target": 60,
+      "title": "Habit Formed",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 100 day streak",
+      "id": "streak-100",
+      "progress": 1,
+      "reward": 600,
+      "target": 100,
+      "title": "Centurion",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 200 day streak",
+      "id": "streak-200",
+      "progress": 1,
+      "reward": 700,
+      "target": 200,
+      "title": "Unbreakable",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 365 day streak",
+      "id": "streak-365",
+      "progress": 1,
+      "reward": 800,
+      "target": 365,
+      "title": "Orbit Complete",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 500 day streak",
+      "id": "streak-500",
+      "progress": 1,
+      "reward": 900,
+      "target": 500,
+      "title": "Five Hundred Sunrises",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 730 day streak",
+      "id": "streak-730",
+      "progress": 1,
+      "reward": 1000,
+      "target": 730,
+      "title": "Two Orbits",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 1000 day streak",
+      "id": "streak-1000",
+      "progress": 1,
+      "reward": 1100,
+      "target": 1000,
+      "title": "Thousand Days",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 1500 day streak",
+      "id": "streak-1500",
+      "progress": 1,
+      "reward": 1200,
+      "target": 1500,
+      "title": "Unstoppable",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 2000 day streak",
+      "id": "streak-2000",
+      "progress": 1,
+      "reward": 1300,
+      "target": 2000,
+      "title": "Perennial",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100 cards in one day",
+      "id": "dayreviews-100",
+      "progress": 5,
+      "reward": 100,
+      "target": 100,
+      "title": "Busy Day",
+      "unlocked": null
+    },
+    {
+      "description": "Review 250 cards in one day",
+      "id": "dayreviews-250",
+      "progress": 5,
+      "reward": 200,
+      "target": 250,
+      "title": "Marathon",
+      "unlocked": null
+    },
+    {
+      "description": "Review 500 cards in one day",
+      "id": "dayreviews-500",
+      "progress": 5,
+      "reward": 300,
+      "target": 500,
+      "title": "Ultramarathon",
+      "unlocked": null
+    },
+    {
+      "description": "Review 750 cards in one day",
+      "id": "dayreviews-750",
+      "progress": 5,
+      "reward": 400,
+      "target": 750,
+      "title": "Iron Lung",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000 cards in one day",
+      "id": "dayreviews-1000",
+      "progress": 5,
+      "reward": 500,
+      "target": 1000,
+      "title": "Thousand in a Day",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1500 cards in one day",
+      "id": "dayreviews-1500",
+      "progress": 5,
+      "reward": 600,
+      "target": 1500,
+      "title": "Grinder",
+      "unlocked": null
+    },
+    {
+      "description": "Review 2000 cards in one day",
+      "id": "dayreviews-2000",
+      "progress": 5,
+      "reward": 700,
+      "target": 2000,
+      "title": "Madness",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 50 card combo",
+      "id": "combo-50",
+      "progress": 5,
+      "reward": 100,
+      "target": 50,
+      "title": "In the Zone",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 100 card combo",
+      "id": "combo-100",
+      "progress": 5,
+      "reward": 200,
+      "target": 100,
+      "title": "Flow State",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 250 card combo",
+      "id": "combo-250",
+      "progress": 5,
+      "reward": 300,
+      "target": 250,
+      "title": "Trance",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 500 card combo",
+      "id": "combo-500",
+      "progress": 5,
+      "reward": 400,
+      "target": 500,
+      "title": "Zen",
+      "unlocked": null
+    },
+    {
+      "description": "Reach a 1000 card combo",
+      "id": "combo-1000",
+      "progress": 5,
+      "reward": 500,
+      "target": 1000,
+      "title": "Nirvana",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 10 hours in total",
+      "id": "hours-10",
+      "progress": 0,
+      "reward": 100,
+      "target": 10,
+      "title": "Ten Hours In",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 50 hours in total",
+      "id": "hours-50",
+      "progress": 0,
+      "reward": 200,
+      "target": 50,
+      "title": "Fifty Hours In",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 100 hours in total",
+      "id": "hours-100",
+      "progress": 0,
+      "reward": 300,
+      "target": 100,
+      "title": "Hundred Hours In",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 500 hours in total",
+      "id": "hours-500",
+      "progress": 0,
+      "reward": 400,
+      "target": 500,
+      "title": "Scholar",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 1000 hours in total",
+      "id": "hours-1000",
+      "progress": 0,
+      "reward": 500,
+      "target": 1000,
+      "title": "Thousand Hours",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 2000 hours in total",
+      "id": "hours-2000",
+      "progress": 0,
+      "reward": 600,
+      "target": 2000,
+      "title": "Two Thousand Hours",
+      "unlocked": null
+    },
+    {
+      "description": "Study for 5000 hours in total",
+      "id": "hours-5000",
+      "progress": 0,
+      "reward": 700,
+      "target": 5000,
+      "title": "Lifer",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100 mature cards",
+      "id": "mature-100",
+      "progress": 0,
+      "reward": 100,
+      "target": 100,
+      "title": "Long Term",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000 mature cards",
+      "id": "mature-1000",
+      "progress": 0,
+      "reward": 200,
+      "target": 1000,
+      "title": "Deep Roots",
+      "unlocked": null
+    },
+    {
+      "description": "Review 10000 mature cards",
+      "id": "mature-10000",
+      "progress": 0,
+      "reward": 300,
+      "target": 10000,
+      "title": "Old Growth",
+      "unlocked": null
+    },
+    {
+      "description": "Review 25000 mature cards",
+      "id": "mature-25000",
+      "progress": 0,
+      "reward": 400,
+      "target": 25000,
+      "title": "Ancient Forest",
+      "unlocked": null
+    },
+    {
+      "description": "Review 50000 mature cards",
+      "id": "mature-50000",
+      "progress": 0,
+      "reward": 500,
+      "target": 50000,
+      "title": "Redwood",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100000 mature cards",
+      "id": "mature-100000",
+      "progress": 0,
+      "reward": 600,
+      "target": 100000,
+      "title": "Bedrock",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 100 new cards",
+      "id": "newcards-100",
+      "progress": 0,
+      "reward": 100,
+      "target": 100,
+      "title": "Collector",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 1000 new cards",
+      "id": "newcards-1000",
+      "progress": 0,
+      "reward": 200,
+      "target": 1000,
+      "title": "Curator",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 5000 new cards",
+      "id": "newcards-5000",
+      "progress": 0,
+      "reward": 300,
+      "target": 5000,
+      "title": "Archivist",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 10000 new cards",
+      "id": "newcards-10000",
+      "progress": 0,
+      "reward": 400,
+      "target": 10000,
+      "title": "Encyclopedist",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 25000 new cards",
+      "id": "newcards-25000",
+      "progress": 0,
+      "reward": 500,
+      "target": 25000,
+      "title": "Lexicographer",
+      "unlocked": null
+    },
+    {
+      "description": "Learn 50000 new cards",
+      "id": "newcards-50000",
+      "progress": 0,
+      "reward": 600,
+      "target": 50000,
+      "title": "Polymath",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 10 quests",
+      "id": "quests-10",
+      "progress": 1,
+      "reward": 100,
+      "target": 10,
+      "title": "Adventurer",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 50 quests",
+      "id": "quests-50",
+      "progress": 1,
+      "reward": 200,
+      "target": 50,
+      "title": "Quest Hound",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 200 quests",
+      "id": "quests-200",
+      "progress": 1,
+      "reward": 300,
+      "target": 200,
+      "title": "Completionist",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 500 quests",
+      "id": "quests-500",
+      "progress": 1,
+      "reward": 400,
+      "target": 500,
+      "title": "Quest Master",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 1000 quests",
+      "id": "quests-1000",
+      "progress": 1,
+      "reward": 500,
+      "target": 1000,
+      "title": "Legend",
+      "unlocked": null
+    },
+    {
+      "description": "Complete 2500 quests",
+      "id": "quests-2500",
+      "progress": 1,
+      "reward": 600,
+      "target": 2500,
+      "title": "Mythic",
+      "unlocked": null
+    },
+    {
+      "description": "Complete every quest on 7 days",
+      "id": "perfectdays-7",
+      "progress": 0,
+      "reward": 100,
+      "target": 7,
+      "title": "Perfect Week",
+      "unlocked": null
+    },
+    {
+      "description": "Complete every quest on 30 days",
+      "id": "perfectdays-30",
+      "progress": 0,
+      "reward": 200,
+      "target": 30,
+      "title": "Perfect Month",
+      "unlocked": null
+    },
+    {
+      "description": "Complete every quest on 100 days",
+      "id": "perfectdays-100",
+      "progress": 0,
+      "reward": 300,
+      "target": 100,
+      "title": "Perfectionist",
+      "unlocked": null
+    },
+    {
+      "description": "Complete every quest on 365 days",
+      "id": "perfectdays-365",
+      "progress": 0,
+      "reward": 400,
+      "target": 365,
+      "title": "Flawless Year",
+      "unlocked": null
+    },
+    {
+      "description": "Study before 7am on 5 days",
+      "id": "earlydays-5",
+      "progress": 0,
+      "reward": 100,
+      "target": 5,
+      "title": "Early Bird",
+      "unlocked": null
+    },
+    {
+      "description": "Study before 7am on 30 days",
+      "id": "earlydays-30",
+      "progress": 0,
+      "reward": 200,
+      "target": 30,
+      "title": "Dawn Patrol",
+      "unlocked": null
+    },
+    {
+      "description": "Study before 7am on 100 days",
+      "id": "earlydays-100",
+      "progress": 0,
+      "reward": 300,
+      "target": 100,
+      "title": "Sunrise Scholar",
+      "unlocked": null
+    },
+    {
+      "description": "Study after 11pm on 5 days",
+      "id": "latedays-5",
+      "progress": 0,
+      "reward": 100,
+      "target": 5,
+      "title": "Night Owl",
+      "unlocked": null
+    },
+    {
+      "description": "Study after 11pm on 30 days",
+      "id": "latedays-30",
+      "progress": 0,
+      "reward": 200,
+      "target": 30,
+      "title": "Nocturnal",
+      "unlocked": null
+    },
+    {
+      "description": "Study after 11pm on 100 days",
+      "id": "latedays-100",
+      "progress": 0,
+      "reward": 300,
+      "target": 100,
+      "title": "Creature of the Night",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 30 different days",
+      "id": "daysactive-30",
+      "progress": 1,
+      "reward": 100,
+      "target": 30,
+      "title": "Regular",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 100 different days",
+      "id": "daysactive-100",
+      "progress": 1,
+      "reward": 200,
+      "target": 100,
+      "title": "Hundred Days",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 365 different days",
+      "id": "daysactive-365",
+      "progress": 1,
+      "reward": 300,
+      "target": 365,
+      "title": "A Year of Days",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 730 different days",
+      "id": "daysactive-730",
+      "progress": 1,
+      "reward": 400,
+      "target": 730,
+      "title": "Two Years of Days",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 1000 different days",
+      "id": "daysactive-1000",
+      "progress": 1,
+      "reward": 500,
+      "target": 1000,
+      "title": "Thousand Days Studied",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 2000 different days",
+      "id": "daysactive-2000",
+      "progress": 1,
+      "reward": 600,
+      "target": 2000,
+      "title": "Two Thousand Days Studied",
+      "unlocked": null
+    },
+    {
+      "description": "Relearn 100 forgotten cards",
+      "id": "relearns-100",
+      "progress": 0,
+      "reward": 100,
+      "target": 100,
+      "title": "Second Chance",
+      "unlocked": null
+    },
+    {
+      "description": "Relearn 1000 forgotten cards",
+      "id": "relearns-1000",
+      "progress": 0,
+      "reward": 200,
+      "target": 1000,
+      "title": "Persistence",
+      "unlocked": null
+    },
+    {
+      "description": "Relearn 10000 forgotten cards",
+      "id": "relearns-10000",
+      "progress": 0,
+      "reward": 300,
+      "target": 10000,
+      "title": "Never Give Up",
+      "unlocked": null
+    },
+    {
+      "description": "Relearn 50000 forgotten cards",
+      "id": "relearns-50000",
+      "progress": 0,
+      "reward": 400,
+      "target": 50000,
+      "title": "Sisyphus",
+      "unlocked": null
+    },
+    {
+      "description": "Recall a card last seen 180 days before",
+      "id": "maxinterval-180",
+      "progress": 1,
+      "reward": 100,
+      "target": 180,
+      "title": "Half-Year Memory",
+      "unlocked": null
+    },
+    {
+      "description": "Recall a card last seen 365 days before",
+      "id": "maxinterval-365",
+      "progress": 1,
+      "reward": 200,
+      "target": 365,
+      "title": "Year-Old Memory",
+      "unlocked": null
+    },
+    {
+      "description": "Recall a card last seen 1825 days before",
+      "id": "maxinterval-1825",
+      "progress": 1,
+      "reward": 300,
+      "target": 1825,
+      "title": "Five-Year Memory",
+      "unlocked": null
+    },
+    {
+      "description": "Recall a card last seen 3650 days before",
+      "id": "maxinterval-3650",
+      "progress": 1,
+      "reward": 400,
+      "target": 3650,
+      "title": "Decade Memory",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000 different cards",
+      "id": "distinctcards-1000",
+      "progress": 5,
+      "reward": 100,
+      "target": 1000,
+      "title": "Wide Net",
+      "unlocked": null
+    },
+    {
+      "description": "Review 5000 different cards",
+      "id": "distinctcards-5000",
+      "progress": 5,
+      "reward": 200,
+      "target": 5000,
+      "title": "Big Deck",
+      "unlocked": null
+    },
+    {
+      "description": "Review 20000 different cards",
+      "id": "distinctcards-20000",
+      "progress": 5,
+      "reward": 300,
+      "target": 20000,
+      "title": "Vast Library",
+      "unlocked": null
+    },
+    {
+      "description": "Review 50000 different cards",
+      "id": "distinctcards-50000",
+      "progress": 5,
+      "reward": 400,
+      "target": 50000,
+      "title": "Everything Everywhere",
+      "unlocked": null
+    },
+    {
+      "description": "Study 60 minutes in one sitting",
+      "id": "longestsession-60",
+      "progress": 0,
+      "reward": 100,
+      "target": 60,
+      "title": "Deep Work",
+      "unlocked": null
+    },
+    {
+      "description": "Study 120 minutes in one sitting",
+      "id": "longestsession-120",
+      "progress": 0,
+      "reward": 200,
+      "target": 120,
+      "title": "Two-Hour Sitting",
+      "unlocked": null
+    },
+    {
+      "description": "Study 240 minutes in one sitting",
+      "id": "longestsession-240",
+      "progress": 0,
+      "reward": 300,
+      "target": 240,
+      "title": "Iron Chair",
+      "unlocked": null
+    },
+    {
+      "description": "Study in 5 separate sessions in one day",
+      "id": "maxsessions-5",
+      "progress": 1,
+      "reward": 100,
+      "target": 5,
+      "title": "Snacker",
+      "unlocked": null
+    },
+    {
+      "description": "Study in 10 separate sessions in one day",
+      "id": "maxsessions-10",
+      "progress": 1,
+      "reward": 200,
+      "target": 10,
+      "title": "Grazer",
+      "unlocked": null
+    },
+    {
+      "description": "Study in 20 separate sessions in one day",
+      "id": "maxsessions-20",
+      "progress": 1,
+      "reward": 300,
+      "target": 20,
+      "title": "Can't Stop",
+      "unlocked": null
+    },
+    {
+      "description": "Review 1000 cards in one calendar month",
+      "id": "bestmonth-1000",
+      "progress": 5,
+      "reward": 100,
+      "target": 1000,
+      "title": "Busy Month",
+      "unlocked": null
+    },
+    {
+      "description": "Review 3000 cards in one calendar month",
+      "id": "bestmonth-3000",
+      "progress": 5,
+      "reward": 200,
+      "target": 3000,
+      "title": "Big Month",
+      "unlocked": null
+    },
+    {
+      "description": "Review 10000 cards in one calendar month",
+      "id": "bestmonth-10000",
+      "progress": 5,
+      "reward": 300,
+      "target": 10000,
+      "title": "Monster Month",
+      "unlocked": null
+    },
+    {
+      "description": "Review 20000 cards in one calendar month",
+      "id": "bestmonth-20000",
+      "progress": 5,
+      "reward": 400,
+      "target": 20000,
+      "title": "Month of Madness",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 10 Saturdays or Sundays",
+      "id": "weekenddays-10",
+      "progress": 0,
+      "reward": 100,
+      "target": 10,
+      "title": "Weekend Warrior",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 52 Saturdays or Sundays",
+      "id": "weekenddays-52",
+      "progress": 0,
+      "reward": 200,
+      "target": 52,
+      "title": "Weekend Regular",
+      "unlocked": null
+    },
+    {
+      "description": "Study on 200 Saturdays or Sundays",
+      "id": "weekenddays-200",
+      "progress": 0,
+      "reward": 300,
+      "target": 200,
+      "title": "No Days Off",
+      "unlocked": null
+    },
+    {
+      "description": "Come back after a month away",
+      "id": "comebacks-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "Comeback",
+      "unlocked": null
+    },
+    {
+      "description": "Come back after a month away 3 times",
+      "id": "comebacks-3",
+      "progress": 0,
+      "reward": 200,
+      "target": 3,
+      "title": "Phoenix",
+      "unlocked": null
+    },
+    {
+      "description": "Have a streak freeze save you 1 times",
+      "id": "freezesused-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "Saved by the Ice",
+      "unlocked": null
+    },
+    {
+      "description": "Have a streak freeze save you 10 times",
+      "id": "freezesused-10",
+      "progress": 0,
+      "reward": 200,
+      "target": 10,
+      "title": "Glacier",
+      "unlocked": null
+    },
+    {
+      "description": "Have a streak freeze save you 50 times",
+      "id": "freezesused-50",
+      "progress": 0,
+      "reward": 300,
+      "target": 50,
+      "title": "Ice Age",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100+ cards in a day averaging under 5 seconds, 1 times",
+      "id": "fastdays-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "Speed Demon",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100+ cards in a day averaging under 5 seconds, 10 times",
+      "id": "fastdays-10",
+      "progress": 0,
+      "reward": 200,
+      "target": 10,
+      "title": "Lightning",
+      "unlocked": null
+    },
+    {
+      "description": "Review 100+ cards in a day averaging under 5 seconds, 50 times",
+      "id": "fastdays-50",
+      "progress": 0,
+      "reward": 300,
+      "target": 50,
+      "title": "Quicksilver",
+      "unlocked": null
+    },
+    {
+      "description": "Study on New Year's Day 1 times",
+      "id": "newyeardays-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "New Year, Same Me",
+      "unlocked": null
+    },
+    {
+      "description": "Study on New Year's Day 3 times",
+      "id": "newyeardays-3",
+      "progress": 0,
+      "reward": 200,
+      "target": 3,
+      "title": "Tradition",
+      "unlocked": null
+    },
+    {
+      "description": "Study on the anniversary of your first review 1 times",
+      "id": "anniversaries-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "Anniversary",
+      "unlocked": null
+    },
+    {
+      "description": "Study on the anniversary of your first review 5 times",
+      "id": "anniversaries-5",
+      "progress": 0,
+      "reward": 200,
+      "target": 5,
+      "title": "Old Friends",
+      "unlocked": null
+    },
+    {
+      "description": "Study on the anniversary of your first review 10 times",
+      "id": "anniversaries-10",
+      "progress": 0,
+      "reward": 300,
+      "target": 10,
+      "title": "Lifelong",
+      "unlocked": null
+    },
+    {
+      "description": "Keep going for 1 years since your first review",
+      "id": "years-1",
+      "progress": 0,
+      "reward": 100,
+      "target": 1,
+      "title": "One Year In",
+      "unlocked": null
+    },
+    {
+      "description": "Keep going for 3 years since your first review",
+      "id": "years-3",
+      "progress": 0,
+      "reward": 200,
+      "target": 3,
+      "title": "Three Years In",
+      "unlocked": null
+    },
+    {
+      "description": "Keep going for 5 years since your first review",
+      "id": "years-5",
+      "progress": 0,
+      "reward": 300,
+      "target": 5,
+      "title": "Veteran",
+      "unlocked": null
+    },
+    {
+      "description": "Keep going for 10 years since your first review",
+      "id": "years-10",
+      "progress": 0,
+      "reward": 400,
+      "target": 10,
+      "title": "Decade of Anki",
+      "unlocked": null
+    }
+  ],
+  "announced": [],
+  "at_risk": false,
+  "conquests": [],
+  "day_ends_at": 1793246400000,
+  "display": "Hill",
+  "feedback": {
+    "headlines": [],
+    "status": null
+  },
+  "freeze_earned_today": false,
+  "freezes": 0,
+  "freezes_enabled": false,
+  "goal": {
+    "day": 20754,
+    "mode": "backlog",
+    "progress": null,
+    "reached": false,
+    "since": 20754,
+    "value": 30
+  },
+  "heatmap": [
+    {
+      "date": "2026-04-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-28",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-29",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-05-31",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-28",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-29",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-06-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-28",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-29",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-07-31",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-28",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-29",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-08-31",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-28",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-29",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-09-30",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-01",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-02",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-03",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-04",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-05",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-06",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-07",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-08",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-09",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-10",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-11",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-12",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-13",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-14",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-15",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-16",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-17",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-18",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-19",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-20",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-21",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-22",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-23",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-24",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-25",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-26",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-27",
+      "frozen": false,
+      "reviews": 0,
+      "xp": 0
+    },
+    {
+      "date": "2026-10-28",
+      "frozen": false,
+      "reviews": 5,
+      "xp": 101
+    }
+  ],
+  "last_review_id": 1793182204000,
+  "level": 2,
+  "lifetime": {
+    "best_combo": 5,
+    "best_day": 5,
+    "best_streak": 1,
+    "best_streak_at": 1793160000000,
+    "conquered": 0,
+    "days_active": 1,
+    "first_day_at": 1793160000000,
+    "hours": 0,
+    "quests": 1,
+    "reviews": 5
+  },
+  "local_hour": 10,
+  "periods": {
+    "all": 101,
+    "day": 101,
+    "hour": 51,
+    "month": 101,
+    "week": 101,
+    "year": 101
+  },
+  "quests": [
+    {
+      "done": false,
+      "progress": 5,
+      "reward": 50,
+      "target": 15,
+      "title": "Review 15 cards"
+    },
+    {
+      "done": true,
+      "progress": 5,
+      "reward": 50,
+      "target": 5,
+      "title": "Review 5 cards before noon"
+    },
+    {
+      "done": false,
+      "progress": 1,
+      "reward": 50,
+      "target": 2,
+      "title": "Study in 2 separate sessions"
+    }
+  ],
+  "records": {
+    "day": {
+      "at": 1793182200000,
+      "reviews": 5,
+      "until": 1793182204000,
+      "xp": 101
+    },
+    "hour": {
+      "at": 1793182200000,
+      "reviews": 5,
+      "until": 1793182204000,
+      "xp": 51
+    },
+    "month": {
+      "at": 1793182200000,
+      "reviews": 5,
+      "until": 1793182204000,
+      "xp": 101
+    },
+    "week": {
+      "at": 1793182200000,
+      "reviews": 5,
+      "until": 1793182204000,
+      "xp": 101
+    },
+    "year": {
+      "at": 1793182200000,
+      "reviews": 5,
+      "until": 1793182204000,
+      "xp": 101
+    }
+  },
+  "stored_freezes": 0,
+  "streak": 1,
+  "streak_state": "studied",
+  "streak_warning": null,
+  "today": {
+    "current_combo": 5,
+    "max_combo": 5,
+    "minutes": 0,
+    "new_cards": 0,
+    "reviews": 5,
+    "streak_minutes": 0,
+    "xp": 101
+  },
+  "user": "hill",
+  "week_xp": 101,
+  "xp_for_next": 280,
+  "xp_into_level": 1,
+  "xp_total": 101
+}

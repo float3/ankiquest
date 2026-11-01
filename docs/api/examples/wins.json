@@ -1,0 +1,26 @@
+{
+  "wins": [
+    {
+      "art": "celebrate",
+      "body": "5 cards today in 0 minutes.",
+      "created_at": 1793183400,
+      "day": 20754,
+      "id": 1,
+      "key": "goal:20754",
+      "kind": "daily_goal",
+      "link": {
+        "image": "https://anki.example.test/w/example-link-1.png",
+        "url": "https://anki.example.test/w/example-link-1"
+      },
+      "policy": "ask",
+      "shared_with_friends": true,
+      "stats": {
+        "level": 2,
+        "minutes_today": 1,
+        "reviews_today": 5,
+        "streak": 1
+      },
+      "title": "Daily goal reached!"
+    }
+  ]
+}

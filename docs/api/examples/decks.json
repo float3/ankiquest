@@ -1,0 +1,28 @@
+{
+  "celebrations": true,
+  "decks": [
+    {
+      "enabled": false,
+      "id": "1",
+      "name": "Spanish",
+      "recipients": []
+    },
+    {
+      "enabled": false,
+      "id": "2",
+      "name": "Spanish::Verbs",
+      "recipients": []
+    }
+  ],
+  "nudges": false,
+  "recipients": [
+    {
+      "display": "Cerro",
+      "user": "cerro"
+    },
+    {
+      "display": "Friend",
+      "user": "friend"
+    }
+  ]
+}

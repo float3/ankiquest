@@ -1,0 +1,48 @@
+[
+  {
+    "day_ends_at": 1793246400000,
+    "display": "Hill",
+    "level": 2,
+    "period": "week",
+    "periods": {
+      "all": 101,
+      "day": 101,
+      "hour": 51,
+      "month": 101,
+      "week": 101,
+      "year": 101
+    },
+    "streak": 1,
+    "streak_minutes": 0,
+    "streak_state": "studied",
+    "today_minutes": 0,
+    "today_reviews": 5,
+    "user": "hill",
+    "week_xp": 101,
+    "xp": 101,
+    "xp_total": 101
+  },
+  {
+    "day_ends_at": 1793246400000,
+    "display": "Cerro",
+    "level": 1,
+    "period": "week",
+    "periods": {
+      "all": 31,
+      "day": 31,
+      "hour": 30,
+      "month": 31,
+      "week": 31,
+      "year": 31
+    },
+    "streak": 1,
+    "streak_minutes": 0,
+    "streak_state": "studied",
+    "today_minutes": 0,
+    "today_reviews": 3,
+    "user": "cerro",
+    "week_xp": 31,
+    "xp": 31,
+    "xp_total": 31
+  }
+]

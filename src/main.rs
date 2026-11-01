@@ -10,6 +10,8 @@ mod admin;
 mod access;
 mod accounts;
 mod aki;
+#[cfg(test)]
+mod api_examples;
 mod app;
 mod avatars;
 mod boards;

@@ -249,7 +249,22 @@ impl App {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static FIXED_NOW_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pins [`now_ms`] on the calling thread, so a test answers the same on any day.
+#[cfg(test)]
+pub(crate) fn fix_now_ms(ms: Option<i64>) {
+    FIXED_NOW_MS.set(ms);
+}
+
 pub(crate) fn now_ms() -> i64 {
+    #[cfg(test)]
+    if let Some(ms) = FIXED_NOW_MS.get() {
+        return ms;
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)

@@ -1,0 +1,15 @@
+{
+  "daily_cap": 3,
+  "policies": {
+    "achievement": "ask",
+    "challenge": "ask",
+    "conquered": "ask",
+    "daily_goal": "ask",
+    "level": "ask",
+    "place": "ask",
+    "quest": "private",
+    "record": "ask",
+    "streak": "ask",
+    "streak_secured": "private"
+  }
+}

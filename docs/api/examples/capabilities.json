@@ -1,0 +1,12 @@
+{
+  "features": [
+    "activity",
+    "cookie_session",
+    "devices",
+    "goal_backlog_days",
+    "reactions",
+    "share_cards",
+    "wins"
+  ],
+  "version": 1
+}
