@@ -185,6 +185,7 @@ async fn main() -> Result<(), Error> {
         accounts,
         players: RwLock::new(players),
         standings: Default::default(),
+        heartbeat: Default::default(),
         store: Mutex::new(store),
     });
 
@@ -233,6 +234,7 @@ fn router(app: Arc<App>) -> Router {
         .merge(boards::routes())
         .merge(cards::routes())
         .merge(capabilities::routes())
+        .route("/api/health", get(worker::health))
         .route("/", get(index))
         .route("/records", get(index))
         .route("/community", get(community_page))

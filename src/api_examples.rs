@@ -52,6 +52,7 @@ impl Fixture {
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
             secrets: Vec::new(),

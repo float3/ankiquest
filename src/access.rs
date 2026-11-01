@@ -362,6 +362,7 @@ fn public_path(path: &str) -> bool {
                 | "/api/accounts"
                 | "/api/accounts/tokens"
                 | "/privacy"
+                | "/api/health"
         )
         || path == crate::capabilities::PATH
         || path.starts_with("/api/invites/")
@@ -744,6 +745,7 @@ mod tests {
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
         )
@@ -815,6 +817,20 @@ mod tests {
     }
 
     fn cleanup(app: Arc<App>, path: PathBuf) {
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn health_is_public_on_a_private_site_and_names_no_one() {
+        let (app, path) = fixture(true);
+        let response = request(&app, "GET", "/api/health", &[], "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(body.as_object().unwrap().len(), 2);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

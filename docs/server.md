@@ -283,6 +283,8 @@ passes it in, and the service may not connect to loopback or private
 addresses, only out to the internet for ntfy. so `ntfy` must be a public
 server. outside systemd, `addr` is bound as usual.
 
+`GET /api/health` needs no sign-in, even on a private site, and is never cached. it answers 200 with `{"ok": true, "worker_age_s": 12}` while the state database can be locked within two seconds and the background worker finished a pass in the last 100 seconds, and 503 with `"ok": false` otherwise. it says nothing about players. release builds abort on a panic, so a crashed server or worker exits and systemd restarts it.
+
 ## development
 
 the pages' scripts are TypeScript in `web/`; build.rs bundles them with esbuild and the server embeds the result, with `web/pages/*.ts` inlined where a page has `<script data-entry="pages/…"></script>`. translation lives in `crates/i18n`, which the server links directly and the pages load as `/i18n.wasm` (built from `crates/i18n-wasm`), so both look up the same catalogs the same way.

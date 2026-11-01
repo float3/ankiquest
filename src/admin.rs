@@ -444,7 +444,9 @@ fn logs(conn: &Connection, filter: &LogFilter, now_ms: i64) -> Result<String, Er
              order by id desc limit ?4
          ) order by id",
     )?;
-    let since = filter.since_ms.map_or(i64::MIN, |age| now_ms.saturating_sub(age));
+    let since = filter
+        .since_ms
+        .map_or(i64::MIN, |age| now_ms.saturating_sub(age));
     let rows = stmt.query_map(
         params![since, filter.level, filter.user, filter.limit],
         |r| {

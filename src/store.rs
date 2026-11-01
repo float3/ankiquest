@@ -329,7 +329,13 @@ impl Store {
                     "select effective_from_ms, offset_west_min, rollover_hour from clock_history
                      where user = ?1 order by effective_from_ms desc limit 1",
                     params![user],
-                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+                    |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
+                    },
                 )
                 .optional()?;
             let stale = latest.is_some_and(|(from, _, _)| received_at < from);

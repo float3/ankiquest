@@ -704,6 +704,7 @@ mod tests {
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
         )

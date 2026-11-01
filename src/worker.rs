@@ -9,13 +9,75 @@ use crate::{
     admin, challenges, competition, freezes, game, goals, i18n, notifications, privacy, reminders,
     shares, social, wins,
 };
+use axum::Json;
+use axum::extract::State;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex, TryLockError};
+use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_secs(20);
 const PUSH_BUDGET: Duration = Duration::from_secs(20);
+const STALE_AFTER_MS: i64 = 5 * POLL.as_millis() as i64;
+const HEALTH_LOCK_WAIT: Duration = Duration::from_secs(2);
+
+/// When the worker last finished a tick, in milliseconds since the epoch. It starts at the
+/// time it is made, so a server that has not finished its first tick yet counts as fresh.
+pub(crate) struct Heartbeat(AtomicI64);
+
+impl Default for Heartbeat {
+    fn default() -> Self {
+        Self(AtomicI64::new(now_ms()))
+    }
+}
+
+impl Heartbeat {
+    pub(crate) fn beat(&self, at: i64) {
+        self.0.store(at, Ordering::Relaxed);
+    }
+
+    pub(crate) fn last(&self) -> i64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Whether the store can be locked within [`HEALTH_LOCK_WAIT`]; never once it is poisoned.
+async fn store_available(store: &Mutex<Store>) -> bool {
+    let deadline = Instant::now() + HEALTH_LOCK_WAIT;
+    loop {
+        let available = match store.try_lock() {
+            Ok(_) => Some(true),
+            Err(TryLockError::Poisoned(_)) => Some(false),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        match available {
+            Some(available) => return available,
+            None if Instant::now() >= deadline => return false,
+            None => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+}
+
+/// `GET /api/health`: 200 while the store can be locked and the worker has ticked within
+/// five polls, 503 otherwise, with `{ "ok", "worker_age_s" }` and nothing about players.
+pub(crate) async fn health(State(app): State<Arc<App>>) -> Response {
+    let age_ms = (now_ms() - app.heartbeat.last()).max(0);
+    let ok = age_ms <= STALE_AFTER_MS && store_available(&app.store).await;
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "ok": ok, "worker_age_s": age_ms / 1000 })),
+    )
+        .into_response()
+}
 
 pub(crate) fn push_destination<'a>(config: &'a Config, user: &str) -> Option<(&'a str, &'a str)> {
     let base = config.ntfy.as_deref()?.trim();
@@ -197,49 +259,56 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
         };
         // One player at a time, so requests can take the database in between.
         let mut store = app.store.lock().unwrap();
-        let push_enabled = push_destination(&app.config, user).is_some();
-        let mut events = profile.events.clone();
-        events.extend(goals::event(&store.conn, user, profile)?);
-        store.queue_moments(
-            user,
-            &events,
-            profile.day,
-            now_ms(),
-            push_enabled,
-            &wins::stats(profile),
-        )?;
-        if store.nudges_enabled(user)? {
-            let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
-                .map(|other| (other.display.clone(), other.week_xp));
-            for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
-                store.send_once(
-                    &notifications::Outgoing {
-                        to: user,
-                        from: "",
-                        title: &nudge.title,
-                        body: &nudge.body,
-                        kind: "nudge",
-                    },
-                    &nudge.key,
-                    profile.day,
-                    now_ms(),
-                    false,
-                )?;
+        let result = (|| -> Result<(), Error> {
+            let push_enabled = push_destination(&app.config, user).is_some();
+            let mut events = profile.events.clone();
+            events.extend(goals::event(&store.conn, user, profile)?);
+            store.queue_moments(
+                user,
+                &events,
+                profile.day,
+                now_ms(),
+                push_enabled,
+                &wins::stats(profile),
+            )?;
+            if store.nudges_enabled(user)? {
+                let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
+                    .map(|other| (other.display.clone(), other.week_xp));
+                for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp)))
+                {
+                    store.send_once(
+                        &notifications::Outgoing {
+                            to: user,
+                            from: "",
+                            title: &nudge.title,
+                            body: &nudge.body,
+                            kind: "nudge",
+                        },
+                        &nudge.key,
+                        profile.day,
+                        now_ms(),
+                        false,
+                    )?;
+                }
             }
-        }
-        if let Some(clock) = clocks.get(user.as_str()) {
-            let recap = competition::weekly_recap(&store, user, &app.week, now)?;
-            let place = recap
-                .as_ref()
-                .map(|recap| place_win(&store.conn, user, profile, recap, now))
-                .transpose()?
-                .flatten();
-            reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
-            if let Some((win, topic, since)) = place {
-                wins::attach_recap(&store.conn, user, win, &topic, since)?;
+            if let Some(clock) = clocks.get(user.as_str()) {
+                let recap = competition::weekly_recap(&store, user, &app.week, now)?;
+                let place = recap
+                    .as_ref()
+                    .map(|recap| place_win(&store.conn, user, profile, recap, now))
+                    .transpose()?
+                    .flatten();
+                reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
+                if let Some((win, topic, since)) = place {
+                    wins::attach_recap(&store.conn, user, win, &topic, since)?;
+                }
             }
+            shares::share_automatically(app, &mut store, user, now_ms())?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            log_error!(user: user, "worker tick for {user} failed: {error}");
         }
-        shares::share_automatically(app, &mut store, user, now_ms())?;
     }
     deliver_notifications(app, PUSH_BUDGET)
 }
@@ -434,13 +503,27 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
     }
     Ok(())
 }
+/// Aborts the process when dropped by a panicking thread, so a worker that dies takes the
+/// server with it and the service manager restarts both.
+struct AbortOnPanic;
+
+impl Drop for AbortOnPanic {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            std::process::abort();
+        }
+    }
+}
+
 /// Runs [`tick`] every [`POLL`] on its own thread for as long as the server runs.
 pub(crate) fn spawn(app: Arc<App>) {
     std::thread::spawn(move || {
+        let _abort = AbortOnPanic;
         loop {
             if let Err(e) = tick(&app) {
                 log_error!("tick failed: {e}");
             }
+            app.heartbeat.beat(now_ms());
             std::thread::sleep(POLL);
         }
     });
@@ -613,6 +696,84 @@ mod tests {
                 .all(|n| n.kind != "celebration" || n.win.is_some())
         );
         drop(store);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn one_players_failure_does_not_stop_the_others_or_delivery() {
+        let (mut app, path) = fixture();
+        let (base, server) = local_push(200);
+        let config = &mut Arc::get_mut(&mut app).unwrap().config;
+        config.ntfy = Some(base);
+        config.users.get_mut("cerro").unwrap().ntfy_topic = Some("cerro-topic".into());
+        for user in ["hill", "cerro", "friend"] {
+            with_reviews(&app, user, 3);
+        }
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into player_settings (user, nudges) values ('hill', 'broken')",
+                [],
+            )
+            .unwrap();
+        let id = queued_message(&app, "cerro");
+        tick(&app).unwrap();
+        assert!(server.join().unwrap().starts_with("POST /cerro-topic "));
+        assert!(was_pushed(&app, id));
+        let seen = |user: &str| {
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row("select count(*) from seen where user = ?1", [user], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+        assert!(seen("cerro") > 0 && seen("friend") > 0);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    async fn health_of(app: &Arc<App>) -> (StatusCode, serde_json::Value) {
+        let response = health(State(app.clone())).await;
+        let status = response.status();
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn health_needs_a_recent_tick_and_a_usable_store() {
+        let (app, path) = fixture();
+        app.heartbeat.beat(now_ms() - 30_000);
+        assert_eq!(
+            health_of(&app).await,
+            (
+                StatusCode::OK,
+                serde_json::json!({"ok": true, "worker_age_s": 30})
+            )
+        );
+        app.heartbeat.beat(now_ms() - STALE_AFTER_MS - 1000);
+        let (status, body) = health_of(&app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["ok"], false);
+        app.heartbeat.beat(now_ms());
+        let poisoner = app.clone();
+        std::thread::spawn(move || {
+            let _store = poisoner.store.lock().unwrap();
+            panic!("poison the store");
+        })
+        .join()
+        .unwrap_err();
+        let (status, body) = health_of(&app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, serde_json::json!({"ok": false, "worker_age_s": 0}));
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -1224,6 +1385,7 @@ mod tests {
             store: Mutex::new(store),
             players: RwLock::new(HashMap::new()),
             standings: Default::default(),
+            heartbeat: Default::default(),
         };
         for (user, count) in [("friend", 2), ("ana", 4), ("cerro", 6), ("hill", 20)] {
             with_reviews(&app, user, count);

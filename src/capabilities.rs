@@ -56,6 +56,7 @@ mod tests {
             store: std::sync::Mutex::new(store),
             players: Default::default(),
             standings: Default::default(),
+            heartbeat: Default::default(),
         });
         let response = crate::router(app.clone())
             .oneshot(Request::get(PATH).body(Body::empty()).unwrap())

@@ -298,6 +298,7 @@ mod tests {
                 store: Mutex::new(store),
                 players: RwLock::new(Default::default()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
         )
