@@ -483,6 +483,7 @@ mod tests {
                 store: std::sync::Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
         )

@@ -1272,6 +1272,7 @@ mod tests {
                 store: Mutex::new(store),
                 players: RwLock::new(HashMap::new()),
                 standings: Default::default(),
+                heartbeat: Default::default(),
             }),
             path,
         )
@@ -2212,6 +2213,7 @@ mod tests {
             store: Mutex::new(store),
             players: RwLock::new(HashMap::new()),
             standings: Default::default(),
+            heartbeat: Default::default(),
         });
         let status = json(send(&app, "GET", "/auth/status", &[], "").await).await;
         assert!(status.get("oauth").is_none(), "{status}");

@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::game::{self, Clock, ClockHistory, Profile, Review, Week};
 use crate::store::{Error, Store};
-use crate::{access, accounts, competition, decks};
+use crate::{access, accounts, competition, decks, worker};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,6 +49,7 @@ pub(crate) struct App {
     pub(crate) store: Mutex<Store>,
     pub(crate) players: RwLock<HashMap<String, Player>>,
     pub(crate) standings: StandingCache,
+    pub(crate) heartbeat: worker::Heartbeat,
 }
 
 impl App {

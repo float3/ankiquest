@@ -638,6 +638,7 @@ mod tests {
             store: Mutex::new(store),
             players: RwLock::new(HashMap::from([("cerro".into(), player)])),
             standings: Default::default(),
+            heartbeat: Default::default(),
         };
         assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
         assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);

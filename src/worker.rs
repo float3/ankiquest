@@ -9,13 +9,75 @@ use crate::{
     admin, challenges, competition, freezes, game, goals, i18n, notifications, privacy, reminders,
     shares, social, wins,
 };
+use axum::Json;
+use axum::extract::State;
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex, TryLockError};
+use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_secs(20);
 const PUSH_BUDGET: Duration = Duration::from_secs(20);
+const STALE_AFTER_MS: i64 = 5 * POLL.as_millis() as i64;
+const HEALTH_LOCK_WAIT: Duration = Duration::from_secs(2);
+
+/// When the worker last finished a tick, in milliseconds since the epoch. It starts at the
+/// time it is made, so a server that has not finished its first tick yet counts as fresh.
+pub(crate) struct Heartbeat(AtomicI64);
+
+impl Default for Heartbeat {
+    fn default() -> Self {
+        Self(AtomicI64::new(now_ms()))
+    }
+}
+
+impl Heartbeat {
+    pub(crate) fn beat(&self, at: i64) {
+        self.0.store(at, Ordering::Relaxed);
+    }
+
+    pub(crate) fn last(&self) -> i64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Whether the store can be locked within [`HEALTH_LOCK_WAIT`]; never once it is poisoned.
+async fn store_available(store: &Mutex<Store>) -> bool {
+    let deadline = Instant::now() + HEALTH_LOCK_WAIT;
+    loop {
+        let available = match store.try_lock() {
+            Ok(_) => Some(true),
+            Err(TryLockError::Poisoned(_)) => Some(false),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        match available {
+            Some(available) => return available,
+            None if Instant::now() >= deadline => return false,
+            None => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+}
+
+/// `GET /api/health`: 200 while the store can be locked and the worker has ticked within
+/// five polls, 503 otherwise, with `{ "ok", "worker_age_s" }` and nothing about players.
+pub(crate) async fn health(State(app): State<Arc<App>>) -> Response {
+    let age_ms = (now_ms() - app.heartbeat.last()).max(0);
+    let ok = age_ms <= STALE_AFTER_MS && store_available(&app.store).await;
+    let status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(serde_json::json!({ "ok": ok, "worker_age_s": age_ms / 1000 })),
+    )
+        .into_response()
+}
 
 pub(crate) fn push_destination<'a>(config: &'a Config, user: &str) -> Option<(&'a str, &'a str)> {
     let base = config.ntfy.as_deref()?.trim();
@@ -461,6 +523,7 @@ pub(crate) fn spawn(app: Arc<App>) {
             if let Err(e) = tick(&app) {
                 log_error!("tick failed: {e}");
             }
+            app.heartbeat.beat(now_ms());
             std::thread::sleep(POLL);
         }
     });
@@ -671,6 +734,46 @@ mod tests {
                 .unwrap()
         };
         assert!(seen("cerro") > 0 && seen("friend") > 0);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    async fn health_of(app: &Arc<App>) -> (StatusCode, serde_json::Value) {
+        let response = health(State(app.clone())).await;
+        let status = response.status();
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[tokio::test]
+    async fn health_needs_a_recent_tick_and_a_usable_store() {
+        let (app, path) = fixture();
+        app.heartbeat.beat(now_ms() - 30_000);
+        assert_eq!(
+            health_of(&app).await,
+            (
+                StatusCode::OK,
+                serde_json::json!({"ok": true, "worker_age_s": 30})
+            )
+        );
+        app.heartbeat.beat(now_ms() - STALE_AFTER_MS - 1000);
+        let (status, body) = health_of(&app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["ok"], false);
+        app.heartbeat.beat(now_ms());
+        let poisoner = app.clone();
+        std::thread::spawn(move || {
+            let _store = poisoner.store.lock().unwrap();
+            panic!("poison the store");
+        })
+        .join()
+        .unwrap_err();
+        let (status, body) = health_of(&app).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, serde_json::json!({"ok": false, "worker_age_s": 0}));
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -1282,6 +1385,7 @@ mod tests {
             store: Mutex::new(store),
             players: RwLock::new(HashMap::new()),
             standings: Default::default(),
+            heartbeat: Default::default(),
         };
         for (user, count) in [("friend", 2), ("ana", 4), ("cerro", 6), ("hill", 20)] {
             with_reviews(&app, user, count);
