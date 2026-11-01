@@ -197,49 +197,56 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
         };
         // One player at a time, so requests can take the database in between.
         let mut store = app.store.lock().unwrap();
-        let push_enabled = push_destination(&app.config, user).is_some();
-        let mut events = profile.events.clone();
-        events.extend(goals::event(&store.conn, user, profile)?);
-        store.queue_moments(
-            user,
-            &events,
-            profile.day,
-            now_ms(),
-            push_enabled,
-            &wins::stats(profile),
-        )?;
-        if store.nudges_enabled(user)? {
-            let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
-                .map(|other| (other.display.clone(), other.week_xp));
-            for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp))) {
-                store.send_once(
-                    &notifications::Outgoing {
-                        to: user,
-                        from: "",
-                        title: &nudge.title,
-                        body: &nudge.body,
-                        kind: "nudge",
-                    },
-                    &nudge.key,
-                    profile.day,
-                    now_ms(),
-                    false,
-                )?;
+        let result = (|| -> Result<(), Error> {
+            let push_enabled = push_destination(&app.config, user).is_some();
+            let mut events = profile.events.clone();
+            events.extend(goals::event(&store.conn, user, profile)?);
+            store.queue_moments(
+                user,
+                &events,
+                profile.day,
+                now_ms(),
+                push_enabled,
+                &wins::stats(profile),
+            )?;
+            if store.nudges_enabled(user)? {
+                let ahead = just_ahead(app, &store.conn, user, profile, &ranking, &legacy)?
+                    .map(|other| (other.display.clone(), other.week_xp));
+                for nudge in game::nudges(profile, ahead.as_ref().map(|(w, xp)| (w.as_str(), *xp)))
+                {
+                    store.send_once(
+                        &notifications::Outgoing {
+                            to: user,
+                            from: "",
+                            title: &nudge.title,
+                            body: &nudge.body,
+                            kind: "nudge",
+                        },
+                        &nudge.key,
+                        profile.day,
+                        now_ms(),
+                        false,
+                    )?;
+                }
             }
-        }
-        if let Some(clock) = clocks.get(user.as_str()) {
-            let recap = competition::weekly_recap(&store, user, &app.week, now)?;
-            let place = recap
-                .as_ref()
-                .map(|recap| place_win(&store.conn, user, profile, recap, now))
-                .transpose()?
-                .flatten();
-            reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
-            if let Some((win, topic, since)) = place {
-                wins::attach_recap(&store.conn, user, win, &topic, since)?;
+            if let Some(clock) = clocks.get(user.as_str()) {
+                let recap = competition::weekly_recap(&store, user, &app.week, now)?;
+                let place = recap
+                    .as_ref()
+                    .map(|recap| place_win(&store.conn, user, profile, recap, now))
+                    .transpose()?
+                    .flatten();
+                reminders::tick(&mut store, user, profile, clock, &app.week, now, recap)?;
+                if let Some((win, topic, since)) = place {
+                    wins::attach_recap(&store.conn, user, win, &topic, since)?;
+                }
             }
+            shares::share_automatically(app, &mut store, user, now_ms())?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            log_error!(user: user, "worker tick for {user} failed: {error}");
         }
-        shares::share_automatically(app, &mut store, user, now_ms())?;
     }
     deliver_notifications(app, PUSH_BUDGET)
 }
@@ -626,6 +633,44 @@ mod tests {
                 .all(|n| n.kind != "celebration" || n.win.is_some())
         );
         drop(store);
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn one_players_failure_does_not_stop_the_others_or_delivery() {
+        let (mut app, path) = fixture();
+        let (base, server) = local_push(200);
+        let config = &mut Arc::get_mut(&mut app).unwrap().config;
+        config.ntfy = Some(base);
+        config.users.get_mut("cerro").unwrap().ntfy_topic = Some("cerro-topic".into());
+        for user in ["hill", "cerro", "friend"] {
+            with_reviews(&app, user, 3);
+        }
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into player_settings (user, nudges) values ('hill', 'broken')",
+                [],
+            )
+            .unwrap();
+        let id = queued_message(&app, "cerro");
+        tick(&app).unwrap();
+        assert!(server.join().unwrap().starts_with("POST /cerro-topic "));
+        assert!(was_pushed(&app, id));
+        let seen = |user: &str| {
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row("select count(*) from seen where user = ?1", [user], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap()
+        };
+        assert!(seen("cerro") > 0 && seen("friend") > 0);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
