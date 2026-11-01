@@ -1,0 +1,51 @@
+[
+  {
+    "action_required": false,
+    "body": "5 cards today in 0 minutes.",
+    "challenge_id": null,
+    "created_at": 1793183400,
+    "day": 20754,
+    "id": 1,
+    "kind": "celebration",
+    "read_at": null,
+    "replied": false,
+    "route": null,
+    "sender": "",
+    "title": "Daily goal reached!",
+    "topic": "goal",
+    "win": 1
+  },
+  {
+    "action_required": false,
+    "body": "7 day streak!: “A week in a row.”",
+    "challenge_id": null,
+    "created_at": 1793183400,
+    "day": 20754,
+    "id": 6,
+    "image": "https://anki.example.test/w/example-link-2.png",
+    "kind": "share",
+    "reacted": true,
+    "read_at": null,
+    "replied": false,
+    "route": null,
+    "sender": "cerro",
+    "title": "🎉 Cerro shared a win",
+    "topic": "streak",
+    "win": 2
+  },
+  {
+    "action_required": false,
+    "body": "“Daily goal reached!”",
+    "challenge_id": null,
+    "created_at": 1793183400,
+    "day": 20754,
+    "id": 8,
+    "kind": "reaction",
+    "read_at": null,
+    "replied": false,
+    "route": null,
+    "sender": "cerro",
+    "title": "🎉 Cerro cheered",
+    "win": 1
+  }
+]

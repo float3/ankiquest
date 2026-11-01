@@ -1,0 +1,18 @@
+{
+  "devices": [
+    {
+      "created_at": 1793183400000,
+      "current": true,
+      "id": "example-device-1",
+      "kind": "app",
+      "name": "Pixel 9"
+    },
+    {
+      "created_at": 1793183400000,
+      "current": false,
+      "id": "example-device-2",
+      "kind": "app",
+      "name": "Pixel 8"
+    }
+  ]
+}

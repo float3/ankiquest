@@ -291,8 +291,7 @@ impl Store {
         deleted: &[i64],
         clock: Clock,
     ) -> Result<(), Error> {
-        let received_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as i64;
-        self.upsert_at(user, reviews, deleted, clock, received_at)
+        self.upsert_at(user, reviews, deleted, clock, crate::app::now_ms())
     }
 
     fn upsert_at(
