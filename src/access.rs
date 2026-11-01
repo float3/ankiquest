@@ -363,6 +363,7 @@ fn public_path(path: &str) -> bool {
                 | "/api/accounts/tokens"
                 | "/privacy"
         )
+        || path == crate::capabilities::PATH
         || path.starts_with("/api/invites/")
         || path.starts_with("/auth/oauth/")
         || shared_win(path)
@@ -371,6 +372,11 @@ fn public_path(path: &str) -> bool {
 /// A win's public page or card, which sets its own caching.
 fn shared_win(path: &str) -> bool {
     path.starts_with("/w/")
+}
+
+/// A response that sets its own caching instead of `no-store`.
+fn own_caching(path: &str) -> bool {
+    shared_win(path) || path == crate::capabilities::PATH
 }
 
 pub(crate) fn encoded_next(path: &str) -> String {
@@ -387,7 +393,7 @@ pub(crate) fn encoded_next(path: &str) -> String {
 
 pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
-    let shared = shared_win(path);
+    let own_cache = own_caching(path);
     let mut response = if app.config.private_site
         && !public_path(path)
         && !authenticated(&app, request.headers())
@@ -421,7 +427,7 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
     };
     // Data and authentication responses must never survive logout in a shared cache.
     let headers = response.headers_mut();
-    if !shared || !headers.contains_key(header::CACHE_CONTROL) {
+    if !own_cache || !headers.contains_key(header::CACHE_CONTROL) {
         headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
     headers.insert(

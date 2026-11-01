@@ -2,6 +2,27 @@
 
 these additions preserve bearer authentication and the existing notification array. XP, challenges' progress rules, review scheduling, streaks, and scoring are unchanged.
 
+
+## capabilities
+
+`GET /api/capabilities` needs no sign-in, also on a private site, and may be cached for five minutes (`Cache-Control: max-age=300`). It answers what this server supports, so a client can turn a feature on when the server has it instead of waiting for a deploy:
+
+```json
+{ "version": 1, "features": ["activity", "cookie_session", "devices", "goal_backlog_days", "reactions", "share_cards", "wins"] }
+```
+
+| feature | meaning |
+|---|---|
+| `activity` | the durable inbox, `/api/activity/{user}` (below) |
+| `cookie_session` | the web dashboard works with the session cookie alone when the native app hands it only `{user}`, no token |
+| `devices` | password change and the device list and sign-out (`/api/devices/{user}`, see `docs/server.md`) |
+| `goal_backlog_days` | the `backlog` goal clears the backlog in `value` days, with `since`, `chosen` and `restart` (see [sharing.md](sharing.md)) |
+| `reactions` | cheering a friend's share, `POST /api/react/{user}` |
+| `share_cards` | server-drawn cards and public pages under `/w/` |
+| `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |
+
+A name is never removed or renamed. New names are added as their features land. A server without this endpoint (`404`) has none of them. Clients ignore names they don't know. `version` changes only if the shape of this answer changes.
+
 ## browser identity
 
 `POST /auth/session` still returns `204` with the `ankiquest_session` cookie. a valid `Authorization: Bearer <member-token>` establishes that member's session. browser JSON `{ "password": "..." }` accepts either the shared site password or a member token and requires `X-Ankiquest-CSRF: 1`. a shared-password session can read shared pages but has no personal permissions. if a secret is both the shared password and a member token, password login remains read-only. a token configured for multiple members cannot implicitly select a browser owner; existing explicit bearer requests retain their previous per-user behavior.
