@@ -10,7 +10,7 @@ import type {I18n} from "./i18n";
 export {};
 
 declare global {
-  /** Credentials AnkiDroid hands a page it opened; `null` means signed out there. */
+  /** Credentials AnkiDroid hands a page it opened; `null` means signed out there. Without a `token`, AnkiDroid has installed the member's session cookie instead. */
   interface NativeSession {
     user?: unknown;
     token?: unknown;

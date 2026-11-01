@@ -719,3 +719,31 @@ test('incoming: the leaderboard manual player can be corrected after a failed at
   await f.page.locator('#notification-player').fill('cerro');await f.unlock(incoming);
   assert.equal(f.settingsRequests().at(-1)!.url,origin+'/api/deck-subscriptions/cerro');
 });
+
+test('a native member without a token opens settings with the cookie the app installed', async t=>{
+  const f=await fixture(t,{user:'cerro'},'cerro',{modern:true,cookieUser:'cerro'});
+  for (const spec of [...dialogs, incoming]) {
+    await f.open(spec);await f.ready(spec);
+    await f.page.getByRole('button',{name:spec.save,exact:true}).click();
+    await f.close(spec);
+  }
+  assert(f.settingsRequests().length>=6);
+  assert(f.settingsRequests().every(request=>!request.auth),'a cookie session sends no token');
+  assert(f.settingsRequests().filter(request=>request.method==='POST').every(request=>request.csrf==='1'));
+});
+
+test('a native member without a token never reuses the cookie of another member', async t=>{
+  const f=await fixture(t,{user:'hill'},'cerro',{modern:true,cookieUser:'cerro'});
+  await f.open(incoming);await f.page.locator(incoming.input).waitFor();
+  await f.page.evaluate(()=>AnkiQuestSite.status());
+  assert.equal(f.settingsRequests().length,0);
+});
+
+test('a cookie session loaded for a tokenless native member closes when the app switches member', async t=>{
+  const f=await fixture(t,{user:'cerro'},'cerro',{modern:true,cookieUser:'cerro'});
+  const spec=dialogs[0]!;
+  await f.open(spec);await f.ready(spec);
+  await f.deliver({user:'hill'});
+  await f.page.locator(spec.input).waitFor();
+  assert.equal(await f.page.locator(spec.ready).count(),0);
+});
