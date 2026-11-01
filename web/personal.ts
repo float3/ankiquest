@@ -33,6 +33,7 @@ import {failure, refused, request as call, send} from "./http";
     goal?: Goal | null;
   }
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
+  interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; current: boolean }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
   interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean }
   interface Invite { name: string; members: number }
@@ -40,7 +41,7 @@ import {failure, refused, request as call, send} from "./http";
   interface State {
     session: OwnerSession | null; epoch: number; profile: Profile | null; study: StudyHistory | null; challenges: Challenges | null; activity: Activity | null;
     settings: Settings; errors: Record<string, string>; year: number | null; selected: string | null; native: boolean;
-    social: Social | null; invite: Invite | null; account: {created_at: number; password?: boolean} | null; signIn: SignIn | null;
+    social: Social | null; invite: Invite | null; account: {created_at: number; password?: boolean} | null; signIn: SignIn | null; devices: Device[] | null;
     wins: Win[] | null; winsError: string; winsMore: boolean; winsLoading: boolean; winStatus: Record<number, {text: string; error: boolean}>;
   }
 
@@ -60,7 +61,7 @@ import {failure, refused, request as call, send} from "./http";
   const backlogPresets = [7, 14, 30, 60];
   const winPage = 10;
   const cards = new Map<number, Promise<string>>();
-  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null, wins:null, winsError:"", winsMore:false, winsLoading:false, winStatus:{}};
+  const state: State = {session:null, epoch:0, profile:null, study:null, challenges:null, activity:null, settings:{}, errors:{}, year:null, selected:null, native:false, social:null, invite:null, account:null, signIn:null, devices:null, wins:null, winsError:"", winsMore:false, winsLoading:false, winStatus:{}};
   document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = page === "settings" ? "settings" : "today";
   // Text waits for translations; restore() does too, so reminders are set before any render.
   void AnkiQuestI18n.ready.then(() => {
@@ -181,10 +182,11 @@ import {failure, refused, request as call, send} from "./http";
       } else if (page === "settings") {
         const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks","sharing","goal"];
         const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session),owner("/api/sharing",undefined,session),owner("/api/goal",undefined,session)];
-        const [results, account, signIn] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number; password?: boolean}>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null)]);
+        const [results, account, signIn, devices] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number; password?: boolean}>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null), owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null)]);
         if (state.session !== session || state.epoch !== epoch) return;
         state.account = account;
         state.signIn = signIn;
+        state.devices = devices?.devices ?? null;
         state.errors = {};
         results.forEach((result,index) => {
           const settings = state.settings as Record<SettingName, unknown>;
@@ -508,7 +510,7 @@ import {failure, refused, request as call, send} from "./http";
     const {senders, unsubscribed} = subscriptions ? alertSenders(subscriptions) : {senders: [], unsubscribed: new Set<string>()};
     const subscriptionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Deck completion alerts I receive")}</h2><p>${tr("Choose the people whose completed decks reach you.")}</p></div></div>${subscriptions?html`<form id="subscriptions-form">${check("enabled",tr("Receive deck completion alerts"),subscriptions.enabled)}<fieldset><legend>${tr("Unsubscribe from specific people")}</legend>${senders.map(person=>check("",person.display,unsubscribed.has(person.user),"",`data-unsubscribe="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No one is sharing decks with you yet.")}</p>`}</fieldset><div class="setting-actions"><button class="primary" type="submit">${tr("Save alert preferences")}</button></div><p class="status" role="status"></p></form>`:settingError("subscriptions")}</article>`;
     const deckCard = html`<article class="card" id="deck-sharing"><div class="card-head"><div><h2>${tr("What I share")}</h2><p>${tr("Choose which finished decks friends can hear about.")}</p></div></div>${decks?html`<form id="decks-form"><details><summary>${tr("Manage deck sharing")}</summary>${decks.decks.length?decks.decks.map((deck,index)=>html`<fieldset data-deck-index="${index}"><legend>${esc(deck.name)}</legend>${check("",tr("Share completion"),deck.enabled,"",'data-deck-enabled')}<div class="stack">${decks.recipients.map(person=>check("",person.display,deck.recipients.includes(person.user),"",`data-deck-recipient="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No friends are available yet.")}</p>`}</div></fieldset>`).join(""):html`<p class="settings-hint">${tr("Upload reviews from Anki to see your decks here.")}</p>`}</details>${check("",tr("Celebrate milestones"),decks.celebrations!==false,"",'id="celebrations-toggle"')}<div class="setting-actions"><button class="primary" type="submit">${tr("Save deck sharing")}</button></div><p class="status" role="status"></p></form>`:settingError("decks")}</article>`;
-    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${goalCard(goal)}${sharingCard(sharing)}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${privacyCard()}</div>`;
+    const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${goalCard(goal)}${sharingCard(sharing)}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${devicesCard()}${privacyCard()}</div>`;
     const selector = card && {companion:"#companion-form",reminders:"#reminders-form",nudges:"#nudge-status",freezes:"#freeze-toggle",subscriptions:"#subscriptions-form",decks:"#decks-form",sharing:"#sharing-form",goal:"#goal-form"}[card];
     const current = selector && $("personal-content").querySelector(selector)?.closest(".card");
     if (!current) {$("personal-content").innerHTML = markup;return;}
@@ -566,13 +568,70 @@ import {failure, refused, request as call, send} from "./http";
   }
   function signInCard() {
     const methods = state.signIn;
-    if (!methods?.providers.length) return "";
+    if (!methods || (!methods.providers.length && !methods.account)) return "";
     const last = methods.account && !methods.password && methods.providers.filter(item => item.linked).length === 1;
     const rows = methods.providers.map(item => html`<div class="sign-in-row"><strong>${esc(item.name)}</strong>${item.linked
       ? html`<button type="button" data-unlink="${esc(item.provider)}" ${last ? "disabled" : ""}>${tr("Unlink")}</button>`
       : html`<a class="button-link" href="/auth/oauth/${esc(item.provider)}?link=1">${tr("Link")}</a>`}</div>`).join("");
-    const token = methods.account ? html`<div class="setting-actions"><button type="button" id="new-device-token">${tr("New device token")}</button></div><p class="settings-hint">${tr("For Anki and AnkiDroid: sign in there with your username and this token.")}</p><code id="device-token" class="device-token" hidden></code>` : "";
-    return html`<article class="card"><h2>${tr("Sign-in methods")}</h2>${rows}${last ? html`<p class="settings-hint">${tr("Link another sign-in before unlinking this one.")}</p>` : ""}${token}<p id="sign-in-status" class="status" role="status"></p></article>`;
+    const token = methods.account && methods.providers.length ? html`<div class="setting-actions"><button type="button" id="new-device-token">${tr("New device token")}</button></div><p class="settings-hint">${tr("For Anki and AnkiDroid: sign in there with your username and this token.")}</p><code id="device-token" class="device-token" hidden></code>` : "";
+    return html`<article class="card"><h2>${tr("Sign-in methods")}</h2>${rows}${last ? html`<p class="settings-hint">${tr("Link another sign-in before unlinking this one.")}</p>` : ""}${token}<p id="sign-in-status" class="status" role="status"></p>${methods.account ? passwordForm(methods.password) : ""}</article>`;
+  }
+  function passwordForm(has: boolean) {
+    const current = has ? html`<label class="field"><span>${tr("Current password")}</span><input name="current" type="password" required autocomplete="current-password" maxlength="256"></label>` : "";
+    return html`<form id="password-form" class="password-form"><h3>${has ? tr("Change password") : tr("Set a password")}</h3>${has ? "" : html`<p class="settings-hint">${tr("With a password you can also sign in with your username.")}</p>`}${current}<label class="field"><span>${tr("New password (at least 10 characters)")}</span><input name="password" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>${check("sign_out_others",tr("Sign out my other devices"),false)}<div class="setting-actions"><button class="primary" type="submit">${has ? tr("Change password") : tr("Set a password")}</button></div><p class="status" role="status"></p></form>`;
+  }
+  async function changePassword(form: HTMLFormElement) {
+    const session = state.session, status = form.querySelector<HTMLElement>(".status")!, controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button")];
+    if (!session) return;
+    const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement | null;
+    const others = field("sign_out_others")!.checked;
+    const body = {action:"password", password:field("password")!.value, sign_out_others:others, ...(field("current") ? {current:field("current")!.value} : {})};
+    controls.forEach(control => control.disabled = true); status.className = "status"; status.textContent = tr("Saving…");
+    try {
+      const response = await send(`/api/sign-in/${encodeURIComponent(session.user)}`, {session, json:body});
+      if (state.session !== session) return;
+      if (!response.ok) throw Error(response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : response.status === 400 && body.password.length < 10 ? tr("Passwords need at least 10 characters.") : (await failure(response)).message);
+      state.signIn = await response.json();
+      if (others) state.devices = (await owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null))?.devices ?? state.devices;
+      renderSettings();
+      $("password-form").querySelector(".status")!.textContent = others ? tr("Password changed. Your other devices were signed out.") : tr("Password changed.");
+    } catch (cause) {
+      if (state.session !== session) return;
+      controls.forEach(control => control.disabled = false);
+      status.className = "status error"; status.textContent = (cause as Error).message;
+    }
+  }
+  function devicesCard() {
+    const devices = state.devices;
+    if (!devices?.length) return "";
+    const rows = devices.map(device => html`<div class="device-row"><span><strong>${esc(device.name || tr("Web browser"))}</strong><small>${esc(tr`Signed in ${when(device.created_at)}`)}</small></span>${device.current
+      ? html`<span class="settings-hint">${tr("This device")}</span>`
+      : html`<button type="button" data-sign-out="${esc(device.id)}">${tr("Sign out")}</button>`}</div>`).join("");
+    const others = devices.some(device => !device.current) ? html`<div class="setting-actions"><button type="button" id="sign-out-others">${tr("Sign out all other devices")}</button></div>` : "";
+    return html`<article class="card" id="devices"><h2>${tr("Signed-in devices")}</h2><p class="section-intro">${tr("The apps and browsers signed in to your account.")}</p>${rows}${others}<p id="devices-status" class="status" role="status"></p></article>`;
+  }
+  async function deviceChange(button: HTMLButtonElement, body: {action: string; id?: string}) {
+    const session = state.session, status = $("devices-status");
+    if (!session) return;
+    if (!button.dataset.armed) {
+      button.dataset.armed = "1"; button.textContent = tr("Tap again to confirm");
+      return;
+    }
+    button.disabled = true; status.className = "status"; status.textContent = "";
+    try {
+      const result = await owner<{devices: Device[]}>("/api/devices", body, session);
+      if (state.session !== session || !result) return;
+      state.devices = result.devices; renderSettings();
+      $("devices-status").textContent = body.action === "sign_out" ? tr("Signed out.") : tr("Your other devices were signed out.");
+    } catch (cause) {
+      if (state.session !== session) return;
+      if ((cause as {status?: number}).status === 404) {
+        state.devices = (await owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null))?.devices ?? state.devices;
+        renderSettings(); $("devices-status").textContent = tr("That device is already signed out.");
+        return;
+      }
+      button.disabled = false; status.className = "status error"; status.textContent = (cause as Error).message;
+    }
   }
   async function signInChange(button: HTMLButtonElement, body: {action: string; provider?: string}) {
     const session = state.session, status = $("sign-in-status");
@@ -679,6 +738,7 @@ import {failure, refused, request as call, send} from "./http";
     }
     if (!state.session || page!=="settings") return;
     if (form.id === "delete-account-form") { event.preventDefault(); deleteAccount(form); return; }
+    if (form.id === "password-form") { event.preventDefault(); changePassword(form); return; }
     if (form.id === "companion-form") {
       event.preventDefault();submitForm(form,"/api/companion",{companion:(form.elements.namedItem("companion") as RadioNodeList).value},"companion");
     }
@@ -771,6 +831,9 @@ import {failure, refused, request as call, send} from "./http";
     const unlink=target.closest<HTMLButtonElement>("[data-unlink]");
     if(unlink && page==="settings") signInChange(unlink,{action:"unlink",provider:unlink.dataset.unlink});
     if(target.id==="new-device-token") signInChange(target as HTMLButtonElement,{action:"token"});
+    const signOut=target.closest<HTMLButtonElement>("[data-sign-out]");
+    if(signOut && page==="settings") deviceChange(signOut,{action:"sign_out",id:signOut.dataset.signOut});
+    if(target.id==="sign-out-others" && page==="settings") deviceChange(target as HTMLButtonElement,{action:"sign_out_others"});
     if((event.target as Element).id==="personal-disconnect") {
       const button=event.target as HTMLButtonElement;button.disabled=true;
       try {await site.disconnectMember();showGate(tr("Account disconnected."));}

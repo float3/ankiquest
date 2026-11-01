@@ -6,7 +6,7 @@ these additions preserve bearer authentication and the existing notification arr
 
 `POST /auth/session` still returns `204` with the `ankiquest_session` cookie. a valid `Authorization: Bearer <member-token>` establishes that member's session. browser JSON `{ "password": "..." }` accepts either the shared site password or a member token and requires `X-Ankiquest-CSRF: 1`. a shared-password session can read shared pages but has no personal permissions. if a secret is both the shared password and a member token, password login remains read-only. a token configured for multiple members cannot implicitly select a browser owner; existing explicit bearer requests retain their previous per-user behavior.
 
-the cookie is HttpOnly, SameSite=Lax, scoped to `/`, and Secure when the configured public URL uses HTTPS. sessions expire after seven days, rotate on sign-in, are revoked by logout, and disappear when the server restarts. tokens never appear in status responses.
+the cookie is HttpOnly, SameSite=Lax, scoped to `/`, and Secure when the configured public URL uses HTTPS. sessions expire after seven days, rotate on sign-in, are revoked by logout or by signing their device out (see `docs/server.md`, passwords and devices), and disappear when the server restarts. tokens never appear in status responses.
 
 `GET /auth/status` returns:
 

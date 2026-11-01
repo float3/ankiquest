@@ -21,7 +21,7 @@ const COOKIE: &str = "ankiquest_session";
 const SESSION_SECONDS: i64 = 7 * 24 * 60 * 60;
 const MAX_SESSIONS: usize = 4096;
 const FAILURE_WINDOW_MS: i64 = 60_000;
-const MAX_FAILURES: u32 = 30;
+pub(crate) const MAX_FAILURES: u32 = 30;
 const MAX_FAILURE_CLIENTS: usize = 4096;
 
 #[derive(Default)]
@@ -32,8 +32,25 @@ struct Sessions {
 
 #[derive(Clone)]
 struct Session {
+    created: i64,
     expires: i64,
     member: Option<String>,
+    /// The hash of the account token this session was opened with, if any.
+    token: Option<String>,
+}
+
+/// A browser session a member opened on the website, without a device token.
+pub(crate) struct BrowserSession {
+    pub(crate) key: String,
+    pub(crate) created: i64,
+}
+
+/// What a request signed in with: the hash of an account token, a browser session, or both
+/// when that session was opened with a token.
+#[derive(Default)]
+pub(crate) struct Credential {
+    pub(crate) token: Option<String>,
+    pub(crate) session: Option<String>,
 }
 
 struct Attempts {
@@ -115,6 +132,39 @@ impl Access {
             .retain(|_, session| session.member.as_deref() != Some(user));
     }
 
+    /// The live sessions `user` opened by signing in on the website rather than with a device token.
+    pub(crate) fn browser_sessions(&self, user: &str, now: i64) -> Vec<BrowserSession> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .expires
+            .iter()
+            .filter(|(_, session)| {
+                session.expires > now
+                    && session.token.is_none()
+                    && session.member.as_deref() == Some(user)
+            })
+            .map(|(key, session)| BrowserSession {
+                key: key.clone(),
+                created: session.created,
+            })
+            .collect()
+    }
+
+    /// Ends the sessions of `user` for which `ends(key, token hash)` holds, and says how many.
+    pub(crate) fn end_sessions(
+        &self,
+        user: &str,
+        mut ends: impl FnMut(&str, Option<&str>) -> bool,
+    ) -> usize {
+        let mut sessions = self.sessions.lock().unwrap();
+        let before = sessions.expires.len();
+        sessions.expires.retain(|key, session| {
+            session.member.as_deref() != Some(user) || !ends(key, session.token.as_deref())
+        });
+        before - sessions.expires.len()
+    }
+
     pub(crate) fn throttled(&self, client: IpAddr, now: i64) -> bool {
         let mut sessions = self.sessions.lock().unwrap();
         sessions.failures.retain(|_, attempts| {
@@ -149,6 +199,7 @@ impl Access {
         &self,
         headers: &HeaderMap,
         member: Option<String>,
+        opened_with: Option<String>,
         now: i64,
     ) -> Result<String, Error> {
         let token = hex(&random_bytes("session randomness unavailable")?);
@@ -170,8 +221,10 @@ impl Access {
         sessions.expires.insert(
             token.clone(),
             Session {
+                created: now,
                 expires: now + SESSION_SECONDS * 1000,
                 member,
+                token: opened_with,
             },
         );
         Ok(token)
@@ -217,6 +270,34 @@ fn token_owner(app: &App, given: &str) -> Option<String> {
         1 => Some(matches[0].clone()),
         0 => app.accounts.token_owner(given),
         _ => None,
+    }
+}
+
+/// The hash of `given` when it is an account's device token for `owner`.
+fn account_token(app: &App, given: &str, owner: Option<&str>) -> Option<String> {
+    owner
+        .filter(|owner| app.accounts.token_owner(given).as_deref() == Some(*owner))
+        .map(|_| crate::accounts::token_hash(given))
+}
+
+/// The token or browser session a request signed in with.
+pub(crate) fn credential(app: &App, headers: &HeaderMap) -> Credential {
+    if headers.contains_key(header::AUTHORIZATION) {
+        return Credential {
+            token: bearer(headers).map(crate::accounts::token_hash),
+            session: None,
+        };
+    }
+    let Some(key) = session_cookie(headers) else {
+        return Credential::default();
+    };
+    let sessions = app.access.sessions.lock().unwrap();
+    match sessions.expires.get(key) {
+        Some(session) if session.expires > now_ms() => Credential {
+            token: session.token.clone(),
+            session: Some(key.to_string()),
+        },
+        _ => Credential::default(),
     }
 }
 
@@ -404,7 +485,7 @@ pub(crate) fn member_session(
 ) -> Result<HeaderValue, Error> {
     let token = app
         .access
-        .create_session(headers, Some(user.to_string()), now_ms())?;
+        .create_session(headers, Some(user.to_string()), None, now_ms())?;
     Ok(cookie(app, &token, SESSION_SECONDS))
 }
 
@@ -459,6 +540,8 @@ pub(crate) async fn session(
     }
     let valid_token = bearer(&headers).is_some_and(|given| member_token(&app, given));
     let mut owner = bearer(&headers).and_then(|given| token_owner(&app, given));
+    let mut opened_with =
+        bearer(&headers).and_then(|given| account_token(&app, given, owner.as_deref()));
     if bearer(&headers).is_some() && !valid_token {
         return json_error(StatusCode::UNAUTHORIZED, "Token not recognized.");
     }
@@ -493,7 +576,10 @@ pub(crate) async fn session(
                     "Username or password not recognized.",
                 );
             }
-            return match app.access.create_session(&headers, Some(user), now_ms()) {
+            return match app
+                .access
+                .create_session(&headers, Some(user), None, now_ms())
+            {
                 Ok(token) => (
                     StatusCode::NO_CONTENT,
                     [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
@@ -531,9 +617,13 @@ pub(crate) async fn session(
             .is_some_and(|expected| constant_eq(expected, &credential.password))
         {
             owner = token_owner(&app, &credential.password);
+            opened_with = account_token(&app, &credential.password, owner.as_deref());
         }
     }
-    match app.access.create_session(&headers, owner, now_ms()) {
+    match app
+        .access
+        .create_session(&headers, owner, opened_with, now_ms())
+    {
         Ok(token) => (
             StatusCode::NO_CONTENT,
             [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
@@ -604,8 +694,12 @@ mod tests {
     fn revoking_a_member_ends_only_their_sessions() {
         let access = Access::default();
         let headers = HeaderMap::new();
-        let ana = access.create_session(&headers, Some("ana".into()), 0).unwrap();
-        let bo = access.create_session(&headers, Some("bo".into()), 0).unwrap();
+        let ana = access
+            .create_session(&headers, Some("ana".into()), None, 0)
+            .unwrap();
+        let bo = access
+            .create_session(&headers, Some("bo".into()), None, 0)
+            .unwrap();
         access.revoke_member("ana");
         let sessions = access.sessions.lock().unwrap();
         assert!(!sessions.expires.contains_key(&ana));
