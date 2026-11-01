@@ -19,6 +19,8 @@ exact public paths bypass sign-in; member APIs and unknown paths remain
 protected. the desktop face is packaged locally in `addon/aki_face.png` so
 branding works offline.
 
+the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi`. after changing a PNG in `static/`, run `python tools/export_android_art.py <android-checkout>` (Pillow) to rewrite them, and `--check` to confirm every drawable exists at its size.
+
 ## pose and voice rules
 
 | Asset | Use |
