@@ -1,6 +1,7 @@
 //! Hard cards learned at last: a page to share each one, and telling friends about it.
 //! Only what [`Conquest`] carries is shared, never the card itself, unless its owner
-//! chooses to add a label saying what the card was.
+//! chooses to add a label saying what the card was. The label also appears on the card and
+//! page of the matching `conquered` win (see `wins::shared_words`).
 use crate::game::{self, Conquest};
 use crate::notifications::Outgoing;
 use crate::store::Error;
@@ -29,7 +30,7 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn label_of(conn: &Connection, user: &str, at: i64) -> rusqlite::Result<Option<String>> {
+pub(crate) fn label_of(conn: &Connection, user: &str, at: i64) -> rusqlite::Result<Option<String>> {
     conn.query_row(
         "select label from conquest_labels where user = ?1 and at = ?2",
         params![user, at],
