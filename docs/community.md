@@ -37,7 +37,7 @@ timing uses the player's synced Anki clock and day cutoff. urgent streak and wee
 
 daily, milestone, and urgent reminders are rechecked against current studying before delivery. duplicate reminders are suppressed, including across restarts. changing preferences preserves pending reminders that remain enabled and rechecks their timing; disabling a type cancels its pending notices. a milestone reminder replaces a generic daily nudge for that day. enabling freeze-used notices or recaps does not announce historical events retroactively.
 
-reminders use the existing authenticated notification inbox and durable push queue. push delivery requires the server's `ntfy` destination and the player's `ntfy_topic`; queued attempts are rechecked and retried. these preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms remain independently controlled in each client's settings. the old global `remind_hour` / Nix `remindHour` setting is superseded by personal preferences.
+reminders use the existing authenticated notification inbox and durable push queue. push delivery requires the server's `ntfy` destination and the player's `ntfy_topic`; queued attempts are rechecked and retried. these preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms remain independently controlled in each client's settings. the old global `remind_hour` / Nix `remindHour` setting has been removed; a config that still has `remind_hour` starts and ignores it.
 
 ## what the historical record means
 

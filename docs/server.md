@@ -124,7 +124,7 @@ open `/community` for the winners calendar, weekly and monthly results, trophy c
 
 choose daily, urgent streak, freeze-used, freeze-refill, milestone, weekly closing, and weekly recap reminders, or invite friends to private challenges and shared goals. in the AnkiQuest Android app, **Settings → ankiquest → Community reminders** opens this page using your saved account. in a standalone browser, connect with your own upload token. all seven reminder types are off by default, with personal quiet hours and a daily limit. bearer tokens stay in page memory only. supported servers issue a secure account session that works across pages until you disconnect; older servers keep the connection only for the current page. see [the community guide](community.md) for details and API endpoints.
 
-the old server-wide `remind_hour` / NixOS `remindHour` setting is deprecated; enable personal reminders in `/community` instead. existing device-only AnkiQuest Android and desktop add-on alarms are controlled separately in each client's settings.
+the old server-wide `remind_hour` / NixOS `remindHour` setting has been removed (the JSON key is ignored; the NixOS option now fails evaluation with a pointer here); enable personal reminders in `/community` instead. existing device-only AnkiQuest Android and desktop add-on alarms are controlled separately in each client's settings.
 
 ## conquered cards
 
