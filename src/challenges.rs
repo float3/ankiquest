@@ -18,6 +18,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum Error {
     Invalid(&'static str),
+    /// Over a rate limit.
+    TooMany(&'static str),
     Forbidden,
     NotFound,
     Storage(rusqlite::Error),
@@ -92,6 +94,19 @@ pub struct Challenge {
     pub weekly: bool,
     pub started: bool,
     pub start_when_ready: bool,
+}
+
+/// How many people one player can invite to challenges in any 24 hours. Cancelling a
+/// challenge frees its open slot but not these, so invitations cannot be sent again and again.
+pub const DAILY_INVITES: i64 = 60;
+
+/// Invitations `user` sent in the 24 hours before `now`.
+fn invites_sent(conn: &Connection, user: &str, now: i64) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "select count(*) from notifications where sender=?1 and kind='challenge_invite' and created_at>?2",
+        params![user, now - DAY_MS],
+        |r| r.get(0),
+    )
 }
 
 pub fn initialize(conn: &Connection) -> rusqlite::Result<()> {
@@ -203,6 +218,11 @@ pub fn create(
     if active >= 10 {
         return Err(Error::Invalid(
             "You already have 10 open challenges. Close or cancel one first.",
+        ));
+    }
+    if invites_sent(&store.conn, user, now)? + recipients.len() as i64 > DAILY_INVITES {
+        return Err(Error::TooMany(
+            "You sent a lot of invitations today. Try again tomorrow.",
         ));
     }
     let tx = store.conn.transaction()?;
@@ -369,6 +389,10 @@ pub(crate) fn notice(
     kind: &str,
     now: i64,
 ) -> rusqlite::Result<Option<Sent>> {
+    if kind == "challenge_invite" && crate::social::muted(conn, to, from)? {
+        // The invitation still shows among their challenges, but nothing tells them.
+        return Ok(None);
+    }
     let key = format!("challenge:{id}:{kind}:{from}");
     if conn.execute(
         "insert or ignore into seen(user,key) values(?1,?2)",
@@ -716,6 +740,7 @@ type ChallengeFailure = (StatusCode, Json<serde_json::Value>);
 fn challenge_error(error: Error) -> ChallengeFailure {
     let (status, message) = match error {
         Error::Invalid(message) => (StatusCode::BAD_REQUEST, message),
+        Error::TooMany(message) => (StatusCode::TOO_MANY_REQUESTS, message),
         Error::Forbidden => (StatusCode::FORBIDDEN, "This challenge is private."),
         Error::NotFound => (StatusCode::NOT_FOUND, "Challenge not found."),
         Error::Storage(error) => {
@@ -1111,6 +1136,57 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_does_not_refill_the_daily_invitations_and_a_mute_silences_them() {
+        let (mut store, _) = crate::decks::tests::temporary_store();
+        let people: Vec<String> = (0..30).map(|i| format!("p{i:02}")).collect();
+        let eligible: BTreeSet<String> = people.iter().cloned().collect();
+        let mut many = request();
+        many.recipients = people.clone();
+        let invites = |store: &Store, user: &str| -> i64 {
+            store
+                .conn
+                .query_row(
+                    "select count(*) from notifications where recipient=?1 and kind='challenge_invite'",
+                    [user],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        for at in [100, 200] {
+            let id = create(&mut store, "owner", &many, &eligible, at).unwrap();
+            act(&mut store, "owner", id, "cancel", at + 1).unwrap();
+        }
+        assert_eq!(invites(&store, "p00"), 2);
+        assert!(matches!(
+            create(&mut store, "owner", &many, &eligible, 300),
+            Err(Error::TooMany(_))
+        ));
+        let mut one = request();
+        one.recipients = vec!["p00".into()];
+        assert!(
+            matches!(
+                create(&mut store, "owner", &one, &eligible, 300),
+                Err(Error::TooMany(_))
+            ),
+            "{DAILY_INVITES} a day, open or cancelled"
+        );
+        create(&mut store, "owner", &one, &eligible, 100 + DAY_MS).unwrap();
+        assert_eq!(invites(&store, "p00"), 3, "the budget refills after a day");
+
+        store
+            .conn
+            .execute(
+                "insert into muted_people(recipient,sender,created_at) values('friend','owner',0)",
+                [],
+            )
+            .unwrap();
+        let eligible = BTreeSet::from(["friend".into()]);
+        let id = create(&mut store, "owner", &request(), &eligible, 2 * DAY_MS).unwrap();
+        assert_eq!(invites(&store, "friend"), 0, "a muted creator tells nobody");
+        act(&mut store, "friend", id, "accept", 2 * DAY_MS + 1).unwrap();
+    }
+
+    #[test]
     fn custom_goal_can_wait_for_every_invitee_before_its_full_timer_starts() {
         let (mut store, _) = crate::decks::tests::temporary_store();
         initialize(&store.conn).unwrap();
@@ -1310,20 +1386,23 @@ mod tests {
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         let open = create(&mut store, "owner", &request(), &eligible, 100).unwrap();
-        for now in 101..206 {
+        // Spread out, so the daily invitation budget allows them.
+        for index in 0..105 {
+            let now = 101 + index * (DAY_MS / 50);
             let closed = create(&mut store, "owner", &request(), &eligible, now).unwrap();
             act(&mut store, "owner", closed, "cancel", now + 1).unwrap();
         }
-        let invitations = list(&store, "friend", &[], 300).unwrap();
+        const LATER: i64 = 3 * DAY_MS;
+        let invitations = list(&store, "friend", &[], LATER + 300).unwrap();
         assert_eq!(
             invitations.len(),
             101,
             "one open invitation plus 100 historical goals"
         );
         assert!(invitations.iter().any(|goal| goal.id == open));
-        act(&mut store, "friend", open, "accept", 300).unwrap();
+        act(&mut store, "friend", open, "accept", LATER + 300).unwrap();
         assert!(
-            list(&store, "friend", &[], 301)
+            list(&store, "friend", &[], LATER + 301)
                 .unwrap()
                 .iter()
                 .any(|goal| {
@@ -1334,16 +1413,16 @@ mod tests {
                             .any(|member| member.user == "friend" && member.status == "accepted")
                 })
         );
-        act(&mut store, "friend", open, "leave", 302).unwrap();
-        assert_eq!(list(&store, "friend", &[], 303).unwrap().len(), 100);
+        act(&mut store, "friend", open, "leave", LATER + 302).unwrap();
+        assert_eq!(list(&store, "friend", &[], LATER + 303).unwrap().len(), 100);
         assert!(
-            list(&store, "owner", &[], 303)
+            list(&store, "owner", &[], LATER + 303)
                 .unwrap()
                 .iter()
                 .any(|goal| goal.id == open)
         );
-        act(&mut store, "owner", open, "cancel", 304).unwrap();
-        assert_eq!(list(&store, "owner", &[], 305).unwrap().len(), 100);
+        act(&mut store, "owner", open, "cancel", LATER + 304).unwrap();
+        assert_eq!(list(&store, "owner", &[], LATER + 305).unwrap().len(), 100);
     }
 
     #[test]

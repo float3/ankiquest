@@ -1334,5 +1334,11 @@
   "Sign out all other devices": "Cerrar sesión en todos los demás dispositivos",
   "Signed out.": "Sesión cerrada.",
   "Your other devices were signed out.": "Se cerró la sesión en tus otros dispositivos.",
-  "That device is already signed out.": "Ese dispositivo ya no tiene la sesión iniciada."
+  "That device is already signed out.": "Ese dispositivo ya no tiene la sesión iniciada.",
+  "Mute": "Silenciar",
+  "Unmute": "Dejar de silenciar",
+  "Muted": "Silenciados",
+  "Mute {0}? You won't hear from them. They are not told.": "¿Silenciar a {0}? No recibirás nada de esta persona. No se le avisa.",
+  "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "No recibes de estas personas invitaciones a retos, ánimos, tarjetas conquistadas, novedades de mazos, publicaciones compartidas ni aplausos. No se les avisa.",
+  "You muted as many people as you can. Unmute someone first.": "Ya silenciaste a todas las personas que puedes. Deja de silenciar a alguien primero."
 }

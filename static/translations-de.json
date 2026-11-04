@@ -1334,5 +1334,11 @@
   "Sign out all other devices": "Alle anderen Geräte abmelden",
   "Signed out.": "Abgemeldet.",
   "Your other devices were signed out.": "Deine anderen Geräte wurden abgemeldet.",
-  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet."
+  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet.",
+  "Mute": "Stummschalten",
+  "Unmute": "Stummschaltung aufheben",
+  "Muted": "Stummgeschaltet",
+  "Mute {0}? You won't hear from them. They are not told.": "{0} stummschalten? Du bekommst nichts mehr von dieser Person. Sie erfährt es nicht.",
+  "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Keine Herausforderungs-Einladungen, Anstupser, eroberten Karten, Stapel-Neuigkeiten, Geteiltes oder Jubel von diesen Personen. Sie erfahren es nicht.",
+  "You muted as many people as you can. Unmute someone first.": "Du hast so viele Personen stummgeschaltet wie möglich. Hebe zuerst eine Stummschaltung auf."
 }

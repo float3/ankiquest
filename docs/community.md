@@ -79,13 +79,17 @@ suggestions use configured members with an upload token; they do not inspect pri
 
 ### custom goals
 
-choose a name, measure, target, duration, and 1–30 friends. names allow 1–80 characters; duration is 1–31 days; targets are 1–100,000. a study-day target must fit the duration and participant count. creators can have at most ten uncancelled challenges whose deadlines have not passed.
+choose a name, measure, target, duration, and 1–30 friends. names allow 1–80 characters; duration is 1–31 days; targets are 1–100,000. a study-day target must fit the duration and participant count. creators can have at most ten uncancelled challenges whose deadlines have not passed, and can invite at most 60 people in any 24 hours, counting every invitation sent: cancelling a challenge frees its slot but not its invitations (`429` when over).
 
 custom challenges start immediately. the creator is accepted automatically; invited players' activity counts only after acceptance. review progress excludes future timestamps and activity at or after the deadline. study days use each participant's Anki clock, and a shared goal counts each participant's study day separately.
 
 only accepted or invited members can retrieve the challenge list. Invitees can accept or decline; accepted invitees can leave; the creator can cancel. declining or leaving removes the challenge from that player's list and removes their contribution from the shared total. a reached goal can still be cancelled before its deadline, freeing an open-challenge slot. cancelled and expired challenges preserve their details for remaining members.
 
 all open memberships remain accessible; the history limit applies only to the 100 most recent cancelled or expired challenges.
+
+### muting someone
+
+**Mute** next to a friend or group member on the friends page stops everything from that person reaching you: challenge invitations, nudges, conquered cards, deck completions, shares and cheers. they are not told, and their counts do not change (a conquered card still reports every friend as told). an invitation from someone you muted still shows among your challenges, so you can accept it, but no notice or push announces it. muting also cancels pushes from them that are still queued. **Unmute** under **Muted** undoes it; nothing missed is sent afterwards. a player can mute up to 500 people. the older per-person nudge switch in nudge settings still works on its own.
 
 ## API reference
 
@@ -99,6 +103,7 @@ private member routes require `Authorization: Bearer <token>` for the `{user}` i
 | `POST /api/community/reminders/{user}` | Full replacement: booleans `gentle_daily`, `urgent_streak`, `freeze_used`, `freeze_refill`, `milestone`, `weekly_closing`, `weekly_recap`; numeric `reminder_hour`, `quiet_start`, `quiet_end`, `daily_limit`. Returns saved settings. |
 | `GET /api/community/challenges/{user}` | `{challenges, recipients, weekly_suggestion}`; recipients are eligible configured accounts. `weekly_suggestion` is null when unavailable; otherwise it includes `week_start`, `expires_at`, `friend`, `target`, `duration_days`, `dismissed`, and nullable `challenge_id`. Challenges include `weekly` and `started` flags. |
 | `POST /api/community/challenges/{user}` | `{title, kind, cooperative, target, duration_days, recipients}`. `kind` is `study_days` or `reviews`; `recipients` contains player IDs. Returns the updated list. |
+| `POST /api/social/{user}` `{action: "mute" \| "unmute", user}` | Mutes or unmutes that player for `{user}`. Returns the social overview, whose `muted` lists the muted players (`{user, display}`, by display name). Unknown players and yourself are `404`; over 500 is `409`. |
 | `POST /api/community/challenges/{user}/{id}` | `{action: "accept" \| "decline" \| "leave" \| "cancel"}`. Returns the updated list. |
 | `POST /api/community/challenges/{user}/weekly` | `{week_start, action: "invite" \| "dismiss"}`. Requires the current suggestion's millisecond `week_start`; clients cannot supply a recipient or different target. Returns the updated list. |
 
