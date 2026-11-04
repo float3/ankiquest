@@ -35,5 +35,7 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
 | `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
+| `records.json` | `GET /api/records` |
+| `study.json` | `GET /api/study/{user}`: three study days and a day off |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.
