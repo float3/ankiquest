@@ -5,6 +5,7 @@
 use crate::access::require_owner;
 use crate::app::App;
 use crate::game::Profile;
+use crate::i18n::phrase;
 use crate::notifications::Notification;
 use crate::store::Error;
 use crate::web_util::{base_url, base64url, random_bytes, store_error};
@@ -119,12 +120,127 @@ pub(crate) fn stats(profile: &Profile) -> Value {
     })
 }
 
+/// Stored texts that speak to the player, and how each reads when the player shares it.
+/// The first pattern that matches wins, so more specific ones come first.
+const OWN_WORDS: [(&str, &str); 10] = [
+    (
+        "You reached level {0} with {1} XP.",
+        phrase("I reached level {0} with {1} XP."),
+    ),
+    // Records: the span is one of `Records::SPANS`, each its own catalog entry.
+    (
+        "{0} XP in {1}, beating your old best of {2} XP.",
+        "{0} XP in {1}, beating my old best of {2} XP.",
+    ),
+    (
+        "You have studied {0} days in a row.",
+        phrase("I have studied {0} days in a row."),
+    ),
+    (
+        "Today counts toward your {0}-day streak.",
+        phrase("Today counts toward my {0}-day streak."),
+    ),
+    (
+        "A card you forgot {0} times now stays with you for weeks.",
+        phrase("I forgot it {0} times, and now it stays with me for weeks."),
+    ),
+    ("Card conquered", phrase("I just conquered a card")),
+    ("Leech tamed", phrase("I just tamed a leech")),
+    (
+        "You reached the goal in {0}.",
+        phrase("I reached the goal in {0}."),
+    ),
+    (
+        "You both finished your weekly goal. Well done!",
+        phrase("We both finished our weekly goal."),
+    ),
+    ("Your weekly study recap", phrase("My weekly study recap")),
+];
+
+/// A finished quest's stored body, "{quest} (+{xp} XP)", as the player tells it.
+const QUEST_WORDS: [(&str, &str); 7] = [
+    (
+        "Review {0} cards before noon (+{1} XP)",
+        phrase("I reviewed {0} cards before noon today."),
+    ),
+    (
+        "Review {0} mature cards (+{1} XP)",
+        phrase("I reviewed {0} mature cards today."),
+    ),
+    (
+        "Review {0} cards (+{1} XP)",
+        phrase("I reviewed {0} cards today."),
+    ),
+    (
+        "Study for {0} minutes (+{1} XP)",
+        phrase("I studied for {0} minutes today."),
+    ),
+    (
+        "Study in {0} separate sessions (+{1} XP)",
+        phrase("I studied in {0} separate sessions today."),
+    ),
+    (
+        "Reach a {0} card combo (+{1} XP)",
+        phrase("I reached a {0} card combo today."),
+    ),
+    (
+        "Learn {0} new cards (+{1} XP)",
+        phrase("I learned {0} new cards today."),
+    ),
+];
+
+/// The values `text` gives the placeholders of `pattern`, if it has that shape. The last
+/// placeholder runs to the pattern's end, so a name with the suffix in it still matches.
+fn capture<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
+    let mut parts = pattern.split('{');
+    let mut rest = text.strip_prefix(parts.next()?)?;
+    let parts: Vec<&str> = parts.collect();
+    let mut values = Vec::new();
+    for (index, part) in parts.iter().enumerate() {
+        let (_, suffix) = part.split_once('}')?;
+        let value = if index + 1 == parts.len() {
+            rest.strip_suffix(suffix)?
+        } else {
+            &rest[..rest.find(suffix)?]
+        };
+        values.push(value);
+        rest = &rest[value.len() + suffix.len()..];
+    }
+    rest.is_empty().then_some(values)
+}
+
+fn reword(text: &str, patterns: &[(&str, &str)]) -> String {
+    patterns
+        .iter()
+        .find_map(|(from, to)| {
+            capture(from, text).map(|values| crate::i18n::substitute(to, &values))
+        })
+        .unwrap_or_else(|| text.into())
+}
+
+/// A stored English title and body as the player would say them to friends. Texts that
+/// don't speak to the player, such as "Daily goal reached!", stay as they are.
+pub(crate) fn own_words(title: &str, body: &str) -> (String, String) {
+    if let Some(body) = title
+        .strip_prefix("Achievement: ")
+        .and_then(crate::game::achieved)
+    {
+        return (title.into(), body);
+    }
+    let body = if title == "Quest complete" {
+        reword(body, &QUEST_WORDS)
+    } else {
+        reword(body, &OWN_WORDS)
+    };
+    (reword(title, &OWN_WORDS), body)
+}
+
 /// How `win` reads once it leaves the player, in English: the card, the public page, the
-/// invitation text and friends' rows. A conquered card speaks in the player's own words, and
-/// names the card only when its owner added a label for it; other wins read as stored.
+/// invitation text and friends' rows. It speaks in the player's own words, and a conquered
+/// card is named only when its owner added a label for it.
 pub(crate) fn shared_words(conn: &Connection, win: &Win) -> rusqlite::Result<(String, String)> {
     if win.kind != "conquered" {
-        return Ok((win.title.clone(), win.body.clone()));
+        return Ok(own_words(&win.title, &win.body));
     }
     let label = match win
         .key
@@ -326,6 +442,16 @@ pub(crate) fn create(
     Ok(Some(id))
 }
 
+/// The wins a friend's `share` row `notification` carried, oldest first.
+pub(crate) fn delivered(conn: &Connection, notification: i64) -> rusqlite::Result<Vec<Win>> {
+    conn.prepare(&format!(
+        "select {COLUMNS} from wins where id in
+         (select win from win_deliveries where notification = ?1) order by id"
+    ))?
+    .query_map([notification], row)?
+    .collect()
+}
+
 /// The id of `user`'s win for `key`, if there is one.
 pub(crate) fn id_of(conn: &Connection, user: &str, key: &str) -> rusqlite::Result<Option<i64>> {
     conn.query_row(
@@ -454,6 +580,12 @@ struct Listed {
     policy: String,
     shared_with_friends: bool,
     link: Option<Link>,
+    /// What sharing it tells others, in the player's own words, when that differs from
+    /// `title` and `body`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    share_body: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -495,21 +627,30 @@ async fn get_wins(
     let wins = list(&store.conn, &user, limit, page.before).map_err(store_error)?;
     let wins: Vec<Listed> = wins
         .into_iter()
-        .map(|win| Listed {
-            policy: policies.get(&win.kind).cloned().unwrap_or_default(),
-            link: win.link_token.as_deref().map(|token| link(&base, token)),
-            id: win.id,
-            created_at: win.created_at / 1000,
-            title: crate::i18n::system_text(&win.title, &language),
-            body: crate::i18n::system_text(&win.body, &language),
-            kind: win.kind,
-            key: win.key,
-            day: win.day,
-            stats: win.stats,
-            art: win.art,
-            shared_with_friends: win.shared_friends > 0,
+        .map(|win| {
+            let (share_title, share_body) = shared_words(&store.conn, &win)?;
+            let differs = (share_title.as_str(), share_body.as_str())
+                != (win.title.as_str(), win.body.as_str());
+            let share = |text: &str| differs.then(|| crate::i18n::system_text(text, &language));
+            Ok(Listed {
+                share_title: share(&share_title),
+                share_body: share(&share_body),
+                policy: policies.get(&win.kind).cloned().unwrap_or_default(),
+                link: win.link_token.as_deref().map(|token| link(&base, token)),
+                id: win.id,
+                created_at: win.created_at / 1000,
+                title: crate::i18n::system_text(&win.title, &language),
+                body: crate::i18n::system_text(&win.body, &language),
+                kind: win.kind,
+                key: win.key,
+                day: win.day,
+                stats: win.stats,
+                art: win.art,
+                shared_with_friends: win.shared_friends > 0,
+            })
         })
-        .collect();
+        .collect::<rusqlite::Result<_>>()
+        .map_err(store_error)?;
     Ok(Json(json!({ "wins": wins })))
 }
 
@@ -685,6 +826,199 @@ pub(crate) mod tests {
                 .is_none()
         );
         cleanup(store, path);
+    }
+
+    #[test]
+    fn every_kind_of_win_is_shared_in_the_players_own_words() {
+        let cases = [
+            (
+                ("Level 4", "You reached level 4 with 900 XP."),
+                ("Level 4", "I reached level 4 with 900 XP."),
+                ("Nivel 4", "He alcanzado el nivel 4 con 900 XP."),
+            ),
+            (
+                (
+                    "New best 24 hours!",
+                    "120 XP in 24 hours, beating your old best of 90 XP.",
+                ),
+                (
+                    "New best 24 hours!",
+                    "120 XP in 24 hours, beating my old best of 90 XP.",
+                ),
+                (
+                    "¡Nuevo récord en 24 horas!",
+                    "120 XP en 24 horas: he superado mi récord anterior de 90 XP.",
+                ),
+            ),
+            (
+                ("50-day streak!", "You have studied 50 days in a row."),
+                ("50-day streak!", "I have studied 50 days in a row."),
+                ("¡Racha de 50 días!", "He estudiado 50 días seguidos."),
+            ),
+            (
+                ("Streak secured!", "Today counts toward your 5-day streak."),
+                ("Streak secured!", "Today counts toward my 5-day streak."),
+                ("¡Racha asegurada!", "Hoy cuenta para mi racha de 5 días."),
+            ),
+            (
+                ("Daily goal reached!", "120 cards today in 35 minutes."),
+                ("Daily goal reached!", "120 cards today in 35 minutes."),
+                ("¡Meta diaria cumplida!", "120 tarjetas hoy en 35 minutos."),
+            ),
+            (
+                (
+                    "Achievement: First Hundred",
+                    "Review 100 cards in total (+100 XP)",
+                ),
+                (
+                    "Achievement: First Hundred",
+                    "I have reviewed 100 cards in total.",
+                ),
+                (
+                    "Logro: Las primeras cien",
+                    "He repasado 100 tarjetas en total.",
+                ),
+            ),
+            (
+                (
+                    "Achievement: Saved by the Ice",
+                    "Have a streak freeze save you 1 times (+100 XP)",
+                ),
+                (
+                    "Achievement: Saved by the Ice",
+                    "A streak freeze saved me once.",
+                ),
+                (
+                    "Logro: Salvado por el hielo",
+                    "Un protector de racha me ha salvado una vez.",
+                ),
+            ),
+            (
+                (
+                    "Achievement: Three Years In",
+                    "Keep going for 3 years since your first review (+200 XP)",
+                ),
+                (
+                    "Achievement: Three Years In",
+                    "I have kept going for 3 years since my first review.",
+                ),
+                (
+                    "Logro: Tres años de estudio",
+                    "Llevo 3 años estudiando desde mi primer repaso.",
+                ),
+            ),
+            (
+                ("Quest complete", "Review 30 mature cards (+20 XP)"),
+                ("Quest complete", "I reviewed 30 mature cards today."),
+                ("Misión completada", "Hoy he repasado 30 tarjetas maduras."),
+            ),
+            (
+                ("Quest complete", "Review 50 cards before noon (+20 XP)"),
+                ("Quest complete", "I reviewed 50 cards before noon today."),
+                (
+                    "Misión completada",
+                    "Hoy he repasado 50 tarjetas antes del mediodía.",
+                ),
+            ),
+            (
+                ("Quest complete", "Review 80 cards (+20 XP)"),
+                ("Quest complete", "I reviewed 80 cards today."),
+                ("Misión completada", "Hoy he repasado 80 tarjetas."),
+            ),
+            (
+                (
+                    "Challenge complete",
+                    "You reached the goal in Spanish every day.",
+                ),
+                (
+                    "Challenge complete",
+                    "I reached the goal in Spanish every day.",
+                ),
+                (
+                    "Meta completada",
+                    "He alcanzado la meta en Spanish every day.",
+                ),
+            ),
+            (
+                (
+                    "Weekly challenge complete",
+                    "You both finished your weekly goal. Well done!",
+                ),
+                (
+                    "Weekly challenge complete",
+                    "We both finished our weekly goal.",
+                ),
+                (
+                    "Reto semanal completado",
+                    "Los dos hemos completado nuestro objetivo semanal.",
+                ),
+            ),
+            (
+                (
+                    "#2 on the weekly board",
+                    "900 XP over 5 study days last week.",
+                ),
+                (
+                    "#2 on the weekly board",
+                    "900 XP over 5 study days last week.",
+                ),
+                (
+                    "#2 on the weekly board",
+                    "900 XP over 5 study days last week.",
+                ),
+            ),
+        ];
+        for ((title, body), english, spanish) in cases {
+            let (shared_title, shared_body) = own_words(title, body);
+            assert_eq!(
+                (shared_title.as_str(), shared_body.as_str()),
+                english,
+                "{title}"
+            );
+            let spanish_words = (
+                crate::i18n::system_text(&shared_title, "es"),
+                crate::i18n::system_text(&shared_body, "es"),
+            );
+            assert_eq!(
+                (spanish_words.0.as_str(), spanish_words.1.as_str()),
+                spanish,
+                "{title}"
+            );
+        }
+        let recap = own_words(
+            "Your weekly study recap",
+            "5 study days, 900 XP, 3 daily wins. Place #2; 100 more XP than the previous week.",
+        );
+        assert_eq!(recap.0, "My weekly study recap");
+        assert_eq!(
+            crate::i18n::system_text(&recap.0, "de"),
+            "Mein wöchentlicher Lernrückblick"
+        );
+        assert_eq!(
+            own_words("Challenge complete", "You reached the goal in Read. Daily.").1,
+            "I reached the goal in Read. Daily.",
+            "a challenge name may end like the sentence does"
+        );
+        assert_eq!(
+            own_words(
+                "Card conquered",
+                "A card you forgot 9 times now stays with you for weeks."
+            ),
+            (
+                "I just conquered a card".into(),
+                "I forgot it 9 times, and now it stays with me for weeks.".into()
+            ),
+            "a celebration without a win is quoted in the same words"
+        );
+    }
+
+    #[test]
+    fn every_achievement_has_its_own_words() {
+        for title in crate::game::achievement_titles() {
+            let words = crate::game::achieved(title).unwrap();
+            assert!(words.starts_with('I') || words.starts_with('A'), "{words}");
+            assert!(!words.contains("you"), "{words}");
+        }
     }
 
     #[test]

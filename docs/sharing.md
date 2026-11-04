@@ -149,6 +149,11 @@ comes back shorter than `limit`. A row looks like this:
 - `created_at` is in seconds, like the inbox.
 - `art` is one of the companion poses, picked per kind (see Cards).
 - `link` is `{ "url": "...", "image": "..." }` once a link exists.
+- `share_title` and `share_body`, when present, are the win as it leaves the player: in their own
+  words ("I reached level 4 with 900 XP.", "Today counts toward my 12-day streak."), as friends,
+  the card, the public page and the invitation text show it. Wins that already read the same for
+  anyone, such as the daily goal or a place, leave them out. The player's own shareable inbox rows
+  carry the same two fields.
 
 Celebration notifications in the inbox (`kind` `celebration`, `challenge_complete`,
 `reminder_weekly_recap`) gain `"win": 17` when they belong to a win. Clients share by win id. A

@@ -109,6 +109,12 @@ pub struct Notification {
     /// notification, tooltip or sound for it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub quiet: bool,
+    /// For the player's own shareable rows, what sharing it tells others, in the player's
+    /// own words ("I reached level 4 …"), when that differs from `title` and `body`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_body: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -169,6 +175,8 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
         reacted: row.get(15)?,
         link_token: row.get(16)?,
         quiet: row.get(17)?,
+        share_title: None,
+        share_body: None,
     })
 }
 

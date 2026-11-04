@@ -303,6 +303,13 @@ async fn examples_match_the_handlers() {
         json!({"notification": hill_share}),
     )
     .await;
+    // A celebration that speaks to the player, so the inbox shows its first-person share words.
+    f.celebrate(
+        "hill",
+        "level:3",
+        "Level 3",
+        "You reached level 3 with 400 XP.",
+    );
     f.remember_links();
 
     for (name, method, uri, body) in [
