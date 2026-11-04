@@ -34,6 +34,8 @@ local = {
     "restarted": None,
     "reporting": False,
     "goal_loading": False,
+    "capabilities": None,
+    "capabilities_loading": False,
 }
 
 
@@ -415,6 +417,35 @@ def finish_session():
         recap(summary)
 
 
+def load_capabilities(api):
+    """Learns, in the background, which features the player's server has."""
+    if not api.configured or local["capabilities_loading"]:
+        return
+    local["capabilities_loading"] = True
+
+    def done(future):
+        local["capabilities_loading"] = False
+        try:
+            local["capabilities"] = (api.base, future.result())
+        except Exception as e:
+            print("ankiquest capabilities:", e)
+
+    mw.taskman.run_in_background(lambda: api.capabilities(), done)
+
+
+def server_celebrates_goal(api):
+    """Whether the server turns a reached daily goal into a win with its own celebration.
+
+    Only a server known to lack wins leaves the goal to the add-on. Until the answer is in,
+    the server is trusted: it celebrates once the reviews arrive.
+    """
+    known = local["capabilities"]
+    if known is None or known[0] != api.base:
+        load_capabilities(api)
+        return True
+    return "wins" in known[1]
+
+
 def celebrate(summary):
     """Shows the once-a-day streak or goal celebration, with the session in it. True when shown."""
     if not addon().config().get("goal_celebrations", True):
@@ -424,7 +455,9 @@ def celebrate(summary):
     except Exception as e:
         print("ankiquest goal:", e)
         return False
-    earned, record = goals.claim(status, mw.pm.profile.get(CELEBRATED_KEY))
+    earned, record = goals.claim(
+        status, mw.pm.profile.get(CELEBRATED_KEY), server_celebrates_goal(addon().client()),
+    )
     if earned is None:
         return False
     mw.pm.profile[CELEBRATED_KEY] = record
@@ -477,6 +510,7 @@ def on_profile_open():
             local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, True)
     refresh_board()
     sync_goal(prompt=True)
+    load_capabilities(addon().client())
 
 
 def install(module):

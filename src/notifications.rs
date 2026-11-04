@@ -105,6 +105,10 @@ pub struct Notification {
     pub reacted: bool,
     #[serde(skip)]
     pub link_token: Option<String>,
+    /// Kept in the inbox without a push: clients show it in lists but raise no system
+    /// notification, tooltip or sound for it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,6 +168,7 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
         image: None,
         reacted: row.get(15)?,
         link_token: row.get(16)?,
+        quiet: row.get(17)?,
     })
 }
 
@@ -174,7 +179,7 @@ const NOTICE_COLUMNS: &str = concat!(
     action_required_sql!(),
     ",n.reply_to_title,n.reply_to_body,n.topic,n.win_id,
  exists(select 1 from reactions r where r.reactor=n.recipient and r.notification=n.id),
- (select w.link_token from wins w where w.id=n.win_id)"
+ (select w.link_token from wins w where w.id=n.win_id),n.quiet"
 );
 /// A notification written by the server itself: a nudge, or a message sent by hand.
 pub struct Outgoing<'a> {
@@ -416,7 +421,7 @@ impl Store {
                 |row| {
                     Ok(Sent {
                         notice: notification(row)?,
-                        recipient: row.get(17)?,
+                        recipient: row.get(18)?,
                     })
                 },
             )?
@@ -490,6 +495,7 @@ impl Store {
             day,
             now_ms,
             push_enabled,
+            true,
             &serde_json::json!({}),
         )
         .map(drop)
@@ -497,6 +503,8 @@ impl Store {
 
     /// [`Store::queue_events`], also keeping every new moment as a win with `stats`.
     /// Returns the new wins' ids. History recorded on a first run makes no wins.
+    /// Without `push_secured`, "Streak secured!" reaches the inbox as a quiet row.
+    #[allow(clippy::too_many_arguments)]
     pub fn queue_moments(
         &mut self,
         user: &str,
@@ -504,6 +512,7 @@ impl Store {
         day: i64,
         now_ms: i64,
         push_enabled: bool,
+        push_secured: bool,
         stats: &serde_json::Value,
     ) -> Result<Vec<i64>, Error> {
         let celebrate = self.celebrations_enabled(user)?;
@@ -585,6 +594,36 @@ impl Store {
             }
             Ok(())
         };
+        // Securing the streak happens on every study day: it stays in the inbox, but only
+        // a streak saved late in the day is worth a push.
+        let (routine, celebrations): (Vec<_>, Vec<_>) = celebrations
+            .into_iter()
+            .partition(|event| !push_secured && event.key.starts_with("secured:"));
+        if !baseline && celebrate {
+            for event in routine {
+                let id = insert_notification(
+                    &tx,
+                    &Outgoing {
+                        to: user,
+                        from: "",
+                        title: &event.title,
+                        body: &event.body,
+                        kind: "celebration",
+                    },
+                    day,
+                    now_ms,
+                    false,
+                )?;
+                tx.execute(
+                    "update notifications set quiet = 1, push_cancelled = 1, topic = ?2
+                     where id = ?1",
+                    params![id, topic_of(&event.key)],
+                )?;
+                if let Some(win) = wins.get(event.key.as_str()) {
+                    crate::wins::attach(&tx, id, *win)?;
+                }
+            }
+        }
         if !baseline && celebrate && !celebrations.is_empty() {
             announce(celebrations, "celebration", false)?;
         }
@@ -664,14 +703,14 @@ impl Store {
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, ready.recipient
+                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
                 completion_allowed_sql("notifications.recipient", "notifications.sender")
             ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
-                    user: r.get(17)?,
+                    user: r.get(18)?,
                     notification: notification(r)?,
                 })
             })?
@@ -1356,7 +1395,7 @@ mod tests {
         };
         let stats = serde_json::json!({"streak": 4, "level": 2});
         let first = store
-            .queue_moments("hill", &[event("level:2")], DAY, NOW, false, &stats)
+            .queue_moments("hill", &[event("level:2")], DAY, NOW, false, true, &stats)
             .unwrap();
         assert!(first.is_empty(), "the first run's history makes no wins");
         let created = store
@@ -1372,6 +1411,7 @@ mod tests {
                 DAY,
                 NOW,
                 false,
+                true,
                 &stats,
             )
             .unwrap();
@@ -1398,13 +1438,13 @@ mod tests {
         );
         assert!(
             store
-                .queue_moments("hill", &[event("goal:9")], DAY, NOW, false, &stats)
+                .queue_moments("hill", &[event("goal:9")], DAY, NOW, false, true, &stats)
                 .unwrap()
                 .is_empty()
         );
         store.set_celebrations("hill", false).unwrap();
         let quiet = store
-            .queue_moments("hill", &[event("level:3")], DAY, NOW, false, &stats)
+            .queue_moments("hill", &[event("level:3")], DAY, NOW, false, true, &stats)
             .unwrap();
         assert_eq!(
             quiet.len(),
@@ -1412,6 +1452,83 @@ mod tests {
             "a win is kept even when celebrations are off"
         );
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_routine_streak_secured_stays_in_the_inbox_without_a_push() {
+        let (mut store, _path) = temporary_store();
+        let event = |key: &str| Event {
+            key: key.into(),
+            title: format!("Title {key}"),
+            body: "Body".into(),
+        };
+        let stats = serde_json::json!({"streak": 4});
+        store
+            .queue_moments("hill", &[event("level:2")], DAY, NOW, false, false, &stats)
+            .unwrap();
+        let created = store
+            .queue_moments(
+                "hill",
+                &[
+                    event("secured:9"),
+                    event("level:3"),
+                    event("level:4"),
+                    event("level:5"),
+                ],
+                DAY,
+                NOW,
+                false,
+                false,
+                &stats,
+            )
+            .unwrap();
+        assert_eq!(created.len(), 4);
+        let inbox = store.notifications("hill", NOW).unwrap();
+        assert_eq!(inbox.len(), 4, "three levels stay separate: {inbox:?}");
+        assert!(inbox[0].quiet);
+        assert_eq!(inbox[0].topic.as_deref(), Some("secured"));
+        assert_eq!(inbox[0].win, Some(created[0]));
+        assert_eq!(
+            serde_json::to_value(&inbox[0]).unwrap()["quiet"],
+            true,
+            "clients see that it is quiet"
+        );
+        assert!(inbox[1..].iter().all(|notice| !notice.quiet));
+        assert!(
+            serde_json::to_value(&inbox[1])
+                .unwrap()
+                .get("quiet")
+                .is_none()
+        );
+        let pushed: Vec<i64> = store
+            .take_deck_deliveries(NOW)
+            .unwrap()
+            .iter()
+            .map(|delivery| delivery.notification.id)
+            .collect();
+        assert_eq!(pushed, [inbox[1].id, inbox[2].id, inbox[3].id]);
+
+        store
+            .queue_moments(
+                "hill",
+                &[event("secured:10")],
+                DAY + 1,
+                NOW,
+                false,
+                true,
+                &stats,
+            )
+            .unwrap();
+        let late = store.notifications("hill", NOW).unwrap().pop().unwrap();
+        assert_eq!(late.title, "Title secured:10");
+        assert!(!late.quiet, "a streak saved late is pushed");
+        assert!(
+            store
+                .take_deck_deliveries(NOW)
+                .unwrap()
+                .iter()
+                .any(|delivery| delivery.notification.id == late.id)
+        );
     }
 
     #[test]

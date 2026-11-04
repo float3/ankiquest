@@ -215,12 +215,18 @@ def celebration(current, shown):
     return None
 
 
-def claim(current, stored):
-    """The celebration earned since the last one shown, and the record marking it shown."""
+def claim(current, stored, server_goal=False):
+    """The celebration earned since the last one shown, and the record marking it shown.
+
+    With `server_goal` the server celebrates the daily goal as a win of its own, so only the
+    streak is celebrated here; the goal popup is the fallback for servers without wins.
+    """
     stored = stored if isinstance(stored, dict) else {}
     shown = set()
     if stored.get("day") == current.day:
         shown = {name for name in (MINIMUM, GOAL) if stored.get(name)}
+    if server_goal:
+        shown.add(GOAL)
     earned = celebration(current, shown)
     if earned is None:
         return None, stored
@@ -381,7 +387,7 @@ def celebration_title(earned, translate=lambda value: value):
 def celebration_text(earned, current, translate=lambda value: value):
     minimum = minimum_text(current, translate)
     if earned == MINIMUM:
-        if current.goal is None:
+        if current.goal is None or current.goal_done:
             return minimum
         return translate("%s Next up, your daily goal: %s so far.") % (minimum, progress_text(current, translate))
     if earned == GOAL:
