@@ -356,6 +356,7 @@ mod tests {
             clock: Clock::default(),
             silent: true,
             catalog: false,
+            offsets: Vec::new(),
             decks: None,
         }
     }

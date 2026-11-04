@@ -146,6 +146,7 @@ pub(crate) fn sample_upload(remaining: u64, silent: bool) -> Upload {
         clock: Clock::default(),
         silent,
         catalog: false,
+        offsets: Vec::new(),
         decks: Some(vec![decks::Snapshot {
             id: "1".into(),
             name: "Spanish".into(),
@@ -175,6 +176,7 @@ pub(crate) fn plain_upload(reviews: Vec<Review>) -> Upload {
         clock: Clock::default(),
         silent: false,
         catalog: false,
+        offsets: Vec::new(),
         decks: None,
     }
 }
