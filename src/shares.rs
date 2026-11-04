@@ -188,17 +188,18 @@ pub(crate) fn send_wins(
             }
         }
         let (title, body) = if let [win] = fresh.as_slice() {
+            let (title, body) = wins::shared_words(&tx, win)?;
             (
                 crate::i18n::english("🎉 {0} shared a win", &[display]),
-                format!("{}: “{}”", win.title, win.body),
+                format!("{title}: “{body}”"),
             )
         } else {
             (
                 crate::i18n::english("🎉 {0}: {1} wins", &[display, &fresh.len().to_string()]),
                 fresh
                     .iter()
-                    .map(|win| win.title.as_str())
-                    .collect::<Vec<_>>()
+                    .map(|win| Ok(wins::shared_words(&tx, win)?.0))
+                    .collect::<Result<Vec<_>, Error>>()?
                     .join(" · "),
             )
         };
@@ -309,15 +310,21 @@ pub(crate) fn share_automatically(
 }
 
 /// The text a player pastes along with a win's link.
-fn invitation(win: &Moment, url: &str, language: &str) -> String {
-    crate::i18n::substitute(
+fn invitation(
+    conn: &Connection,
+    win: &Moment,
+    url: &str,
+    language: &str,
+) -> rusqlite::Result<String> {
+    let (title, body) = wins::shared_words(conn, win)?;
+    Ok(crate::i18n::substitute(
         &crate::i18n::text("{0}: {1} Join me on AnkiQuest: {2}", language),
         &[
-            &crate::i18n::system(&win.title, language),
-            &crate::i18n::system(&win.body, language),
+            &crate::i18n::system(&title, language),
+            &crate::i18n::system(&body, language),
             url,
         ],
-    )
+    ))
 }
 
 fn share_win(
@@ -338,7 +345,7 @@ fn share_win(
     let link = wins::link(&base_url(app, headers), &token);
     if to == "link" {
         let language = crate::i18n::owned(headers, &store, user).map_err(store_error)?;
-        let text = invitation(&win, &link.url, &language);
+        let text = invitation(&store.conn, &win, &link.url, &language).map_err(store_error)?;
         return Ok(json!(Linked {
             url: link.url,
             image: link.image,

@@ -362,6 +362,18 @@ async fn examples_match_the_handlers() {
         examples.push((name, f.call(method, uri, Some("hill-secret"), body).await));
     }
 
+    // After the inbox example, whose row ids would otherwise shift.
+    examples.push((
+        "deck_share",
+        f.call(
+            "POST",
+            "/api/decks/hill/share",
+            Some("hill-secret"),
+            json!({"id": "1", "name": "Spanish", "recipients": ["cerro"]}),
+        )
+        .await,
+    ));
+
     let update = std::env::var_os("UPDATE_API_EXAMPLES").is_some_and(|v| v == "1");
     let dir = examples_dir();
     let mut stale = Vec::new();

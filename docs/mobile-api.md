@@ -8,13 +8,14 @@ these additions preserve bearer authentication and the existing notification arr
 `GET /api/capabilities` needs no sign-in, also on a private site, and may be cached for five minutes (`Cache-Control: max-age=300`). It answers what this server supports, so a client can turn a feature on when the server has it instead of waiting for a deploy:
 
 ```json
-{ "version": 1, "features": ["activity", "cookie_session", "devices", "goal_backlog_days", "reactions", "share_cards", "wins"] }
+{ "version": 1, "features": ["activity", "cookie_session", "deck_share", "devices", "goal_backlog_days", "reactions", "share_cards", "wins"] }
 ```
 
 | feature | meaning |
 |---|---|
 | `activity` | the durable inbox, `/api/activity/{user}` (below) |
 | `cookie_session` | the web dashboard works with the session cookie alone when the native app hands it only `{user}`, no token |
+| `deck_share` | telling chosen friends about a deck just finished, `POST /api/decks/{user}/share` (see [sharing.md](sharing.md)) |
 | `devices` | password change and the device list and sign-out (`/api/devices/{user}`, see `docs/server.md`) |
 | `goal_backlog_days` | the `backlog` goal clears the backlog in `value` days, with `since`, `chosen` and `restart` (see [sharing.md](sharing.md)) |
 | `mute` | muting a person, `POST /api/social/{user}` `{ "action": "mute" \| "unmute", "user" }`; `muted` in the social overview (see [community.md](community.md)) |

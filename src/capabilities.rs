@@ -15,6 +15,7 @@ pub(crate) const PATH: &str = "/api/capabilities";
 pub(crate) const FEATURES: &[&str] = &[
     "activity",
     "cookie_session",
+    "deck_share",
     "devices",
     "goal_backlog_days",
     "mute",

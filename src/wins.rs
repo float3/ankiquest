@@ -119,6 +119,44 @@ pub(crate) fn stats(profile: &Profile) -> Value {
     })
 }
 
+/// How `win` reads once it leaves the player, in English: the card, the public page, the
+/// invitation text and friends' rows. A conquered card speaks in the player's own words, and
+/// names the card only when its owner added a label for it; other wins read as stored.
+pub(crate) fn shared_words(conn: &Connection, win: &Win) -> rusqlite::Result<(String, String)> {
+    if win.kind != "conquered" {
+        return Ok((win.title.clone(), win.body.clone()));
+    }
+    let label = match win
+        .key
+        .strip_prefix("conquered:")
+        .and_then(|at| at.parse::<i64>().ok())
+    {
+        Some(at) => crate::conquests::label_of(conn, &win.user, at)?,
+        None => None,
+    };
+    // The stored body is game.rs's "A card you forgot {n} times …"; its one number is the lapses.
+    let lapses = win
+        .body
+        .split_whitespace()
+        .find_map(|word| word.parse::<u32>().ok());
+    let title = if win.title == "Leech tamed" {
+        "I just tamed a leech"
+    } else {
+        "I just conquered a card"
+    };
+    let body = match (label, lapses) {
+        (Some(label), Some(n)) => {
+            format!("I forgot “{label}” {n} times, and now it stays with me for weeks.")
+        }
+        (Some(label), None) => {
+            format!("I kept forgetting “{label}”, and now it stays with me for weeks.")
+        }
+        (None, Some(n)) => format!("I forgot it {n} times, and now it stays with me for weeks."),
+        (None, None) => "I kept forgetting it, and now it stays with me for weeks.".into(),
+    };
+    Ok((title.into(), body))
+}
+
 /// One stored win.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Win {
@@ -653,6 +691,65 @@ pub(crate) mod tests {
             create(&store.conn, "hill", "nudge:x", 1, 1, "t", "b", &json!({}))
                 .unwrap()
                 .is_none()
+        );
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn a_shared_conquered_card_speaks_for_its_player_and_names_the_card_only_when_labelled() {
+        let (store, path) = decks::tests::temporary_store();
+        let make = |key: &str, title: &str, body: &str| {
+            let id = create(&store.conn, "hill", key, 1, 1, title, body, &json!({}))
+                .unwrap()
+                .unwrap();
+            win(&store.conn, "hill", id).unwrap()
+        };
+        let conquered = make(
+            "conquered:500",
+            "Card conquered",
+            "A card you forgot 5 times now stays with you for weeks.",
+        );
+        assert_eq!(
+            shared_words(&store.conn, &conquered).unwrap(),
+            (
+                "I just conquered a card".into(),
+                "I forgot it 5 times, and now it stays with me for weeks.".into()
+            ),
+            "no card content without a label"
+        );
+        store
+            .conn
+            .execute(
+                "insert into conquest_labels (user, at, label) values ('hill', 500, 'der Hund')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            shared_words(&store.conn, &conquered).unwrap().1,
+            "I forgot “der Hund” 5 times, and now it stays with me for weeks."
+        );
+        let leech = make(
+            "conquered:600",
+            "Leech tamed",
+            "A card you forgot 9 times now stays with you for weeks.",
+        );
+        assert_eq!(
+            shared_words(&store.conn, &leech).unwrap(),
+            (
+                "I just tamed a leech".into(),
+                "I forgot it 9 times, and now it stays with me for weeks.".into()
+            ),
+            "another conquest's label is not used"
+        );
+        assert_eq!(
+            crate::i18n::system(&shared_words(&store.conn, &conquered).unwrap().1, "de"),
+            "Ich habe „der Hund“ 5-mal vergessen, und jetzt bleibt es mir wochenlang im Gedächtnis."
+        );
+        let level = make("level:3", "Level 3!", "You reached level 3.");
+        assert_eq!(
+            shared_words(&store.conn, &level).unwrap(),
+            ("Level 3!".into(), "You reached level 3.".into())
         );
         drop(store);
         std::fs::remove_dir_all(path).unwrap();

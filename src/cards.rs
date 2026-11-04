@@ -334,15 +334,20 @@ pub(crate) fn date(day: i64, language: &str) -> String {
     }
 }
 
-/// Up to three chips for a win's stats, in `language`.
-pub(crate) fn chips(stats: &serde_json::Value, language: &str) -> Vec<String> {
+/// Up to three chips for a win's stats, in `language`. A conquered card is about one card, so
+/// the day's totals are left off it.
+pub(crate) fn chips(kind: &str, stats: &serde_json::Value, language: &str) -> Vec<String> {
     [
         ("streak", i18n::template("{0} day streak", language)),
         ("level", i18n::template("Level {0}", language)),
-        ("reviews_today", i18n::template("{0} cards", language)),
-        ("minutes_today", i18n::template("{0} minutes", language)),
+        ("reviews_today", i18n::template("{0} cards today", language)),
+        (
+            "minutes_today",
+            i18n::template("{0} minutes today", language),
+        ),
     ]
     .into_iter()
+    .filter(|(key, _)| kind != "conquered" || !key.ends_with("_today"))
     .filter_map(|(key, label)| {
         let value = stats.get(key)?.as_i64().filter(|n| *n > 0)?;
         Some(i18n::substitute(label, &[&value.to_string()]))
@@ -1055,9 +1060,10 @@ struct Shown {
 
 fn shown(store: &Store, win: &Win) -> Result<Shown, Error> {
     let language = store.language(&win.user)?;
+    let (title, body) = wins::shared_words(&store.conn, win)?;
     Ok(Shown {
-        title: i18n::system_text(&win.title, &language),
-        body: i18n::system_text(&win.body, &language),
+        title: i18n::system_text(&title, &language),
+        body: i18n::system_text(&body, &language),
         language,
     })
 }
@@ -1067,7 +1073,7 @@ fn card(app: &App, store: &Store, win: &Win, shown: &Shown, host: &str) -> Resul
         kind: win.kind.clone(),
         title: clean(&shown.title, supported),
         body: clean(&shown.body, supported),
-        chips: chips(&win.stats, &shown.language),
+        chips: chips(&win.kind, &win.stats, &shown.language),
         display: clean(&app.display(&win.user), supported),
         date: date(win.day, &shown.language),
         host: clean(host, supported),
@@ -1292,6 +1298,7 @@ mod tests {
             title: "Daily goal reached!".into(),
             body: "120 cards today in 35 minutes. Café, crème brûlée — €5 · naïve…".into(),
             chips: chips(
+                kind,
                 &serde_json::json!({"streak": 51, "level": 54, "reviews_today": 120, "minutes_today": 35}),
                 "en",
             ),
@@ -1382,18 +1389,27 @@ mod tests {
         assert_eq!(date(20_392, "pt-BR"), "31 de outubro de 2025");
         let stats = serde_json::json!({"streak": 51, "level": 54, "reviews_today": 120, "minutes_today": 35});
         assert_eq!(
-            chips(&stats, "en"),
-            ["51 day streak", "Level 54", "120 cards"]
+            chips("daily_goal", &stats, "en"),
+            ["51 day streak", "Level 54", "120 cards today"]
         );
         assert_eq!(
-            chips(&stats, "de"),
-            ["51 Tage Lernserie", "Level 54", "120 Karten"]
+            chips("daily_goal", &stats, "de"),
+            ["51 Tage Lernserie", "Level 54", "120 Karten heute"]
         );
         assert_eq!(
-            chips(&serde_json::json!({"streak": 0, "minutes_today": 35}), "es"),
-            ["35 minutos"]
+            chips(
+                "daily_goal",
+                &serde_json::json!({"streak": 0, "minutes_today": 35}),
+                "es"
+            ),
+            ["35 minutos hoy"]
         );
-        assert!(chips(&serde_json::json!({}), "en").is_empty());
+        assert_eq!(
+            chips("conquered", &stats, "en"),
+            ["51 day streak", "Level 54"],
+            "a conquered card leaves out the day's totals"
+        );
+        assert!(chips("level", &serde_json::json!({}), "en").is_empty());
     }
 
     #[test]
