@@ -33,6 +33,7 @@ mod game;
 mod goals;
 mod i18n;
 mod inbox;
+mod migrations;
 mod notifications;
 mod oauth;
 mod privacy;
@@ -833,9 +834,31 @@ mod tests {
                 headers(user),
             )
         };
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute_batch(
+                "insert into friendships (a, b, requested_by, accepted, created_at) values ('friend', 'hill', 'hill', 1, 0);
+                 insert into muted_people (recipient, sender, created_at) values ('friend', 'hill', 0);",
+            )
+            .unwrap();
         assert_eq!(tell("cerro").await.err(), Some(StatusCode::UNAUTHORIZED));
-        assert_eq!(tell("hill").await.unwrap().0.told, 1);
-        assert_eq!(tell("hill").await.unwrap().0.told, 1);
+        assert_eq!(
+            tell("hill").await.unwrap().0.told,
+            2,
+            "the count does not give a mute away"
+        );
+        assert_eq!(tell("hill").await.unwrap().0.told, 2);
+        assert!(
+            app.store
+                .lock()
+                .unwrap()
+                .notifications("friend", now_ms())
+                .unwrap()
+                .is_empty(),
+            "a friend who muted hill hears nothing"
+        );
         let inbox = app
             .store
             .lock()

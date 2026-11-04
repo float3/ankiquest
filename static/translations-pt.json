@@ -1340,5 +1340,11 @@
   "To set a password, link another sign-in or delete your account, first sign in again with a sign-in you linked. It counts for ten minutes in this browser.": "Para definir uma palavra-passe, associar outro início de sessão ou eliminar a tua conta, entra primeiro novamente com um início de sessão que associaste. Vale durante dez minutos neste navegador.",
   "You signed in again, so for a few minutes you can delete your account here.": "Entraste novamente, por isso durante alguns minutos podes eliminar a tua conta aqui.",
   "Sign in with your provider again first.": "Entra primeiro novamente com o teu fornecedor.",
-  "That is not the account you linked. Sign in with the one linked to this player.": "Essa não é a conta que associaste. Entra com a que está associada a este jogador."
+  "That is not the account you linked. Sign in with the one linked to this player.": "Essa não é a conta que associaste. Entra com a que está associada a este jogador.",
+  "Mute": "Silenciar",
+  "Unmute": "Deixar de silenciar",
+  "Muted": "Silenciados",
+  "Mute {0}? You won't hear from them. They are not told.": "Silenciar {0}? Não vais receber nada desta pessoa. Ela não é avisada.",
+  "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Nenhum convite para desafios, incentivo, cartão conquistado, novidade de baralhos, partilha ou aplauso destas pessoas. Elas não são avisadas.",
+  "You muted as many people as you can. Unmute someone first.": "Já silenciaste o máximo de pessoas possível. Deixa primeiro de silenciar alguém."
 }

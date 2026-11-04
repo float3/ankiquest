@@ -351,6 +351,13 @@ async fn examples_match_the_handlers() {
             "/api/streak-freezes/hill",
             Value::Null,
         ),
+        // Last, so cerro is not muted for the examples above.
+        (
+            "mute",
+            "POST",
+            "/api/social/hill",
+            json!({"action": "mute", "user": "cerro"}),
+        ),
     ] {
         examples.push((name, f.call(method, uri, Some("hill-secret"), body).await));
     }

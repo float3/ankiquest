@@ -66,13 +66,15 @@ async function main() {
   assert.equal(await page.locator('#personal-gate:visible').count(), 0);
 
   const now = Date.now();
+  // Keep both reviews on one Anki day: put the rollover 12 hours away from now.
+  const rollover = (new Date(now).getUTCHours() + 12) % 24;
   const reviews = [
     {id:now-120000,cid:1,last_ivl:0,time_ms:30000,kind:0},
     {id:now-60000,cid:2,last_ivl:1,time_ms:30000,kind:1},
   ];
   const uploaded = await fetch(base + '/api/reviews/alice', {
     method:'POST', headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},
-    body:JSON.stringify({reviews,clock:{offset_west_min:0,rollover_hour:4},silent:false}),
+    body:JSON.stringify({reviews,clock:{offset_west_min:0,rollover_hour:rollover},silent:false}),
   });
   assert.equal(uploaded.status, 200, await uploaded.text());
   await page.reload();
