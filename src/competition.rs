@@ -426,13 +426,27 @@ pub struct WeeklyRecap {
     pub week_end: i64,
     /// End of the following week, using the persisted archive clock.
     pub valid_until: i64,
+    /// Whether the 24-hour allowance for late syncs has passed and the result is fixed.
+    /// Before that the standings are the week as it closed, which a late sync can still move.
+    pub final_result: bool,
     pub days_studied: u64,
     pub xp: u64,
+    pub reviews: u64,
+    pub minutes: u64,
     pub daily_wins: u64,
     pub rank: Option<u64>,
+    /// How many players were ranked, for "place 2 of 5".
+    pub ranked: u64,
     pub improvement_xp: i64,
+    /// The competition date of the player's best day by XP, with that XP.
+    pub best_day: Option<(String, u64)>,
+    /// The player's place among their friends and group mates who studied that week,
+    /// and how many of them there were, counting the player; absent when none of them did.
+    pub circle_place: Option<(u64, u64)>,
 }
 
+/// The finished week before the one containing `now_ms`, as soon as it has closed and the
+/// archive has seen the close. `final_result` says whether late syncs can still change it.
 pub fn weekly_recap(
     store: &Store,
     user: &str,
@@ -453,11 +467,12 @@ pub fn weekly_recap(
     let end = monday(archive_week.competition_date(now_ms));
     let start = end - Duration::days(7);
     let previous = start - Duration::days(7);
-    if now_ms < archive_week.boundary_ms(end) + GRACE_MS {
+    if now_ms < archive_week.boundary_ms(end) {
         return Ok(None);
     }
-    let Some(latest) =
-        read_period(&store.conn, "week", &start.to_string())?.filter(Period::is_final)
+    // A period last refreshed before the close still lacks the week's final hours.
+    let Some(latest) = read_period(&store.conn, "week", &start.to_string())?
+        .filter(|period| period.status != "ongoing")
     else {
         return Ok(None);
     };
@@ -468,32 +483,50 @@ pub fn weekly_recap(
         .and_then(|p| p.standings.iter().find(|s| s.user == user))
         .map_or(0, |s| s.xp);
     let mut daily_wins = 0;
+    let mut best_day: Option<(String, u64)> = None;
     for offset in 0..7 {
-        if read_period(
-            &store.conn,
-            "day",
-            &(start + Duration::days(offset)).to_string(),
-        )?
-        .is_some_and(|period| won(&period, user))
-        {
+        let date = (start + Duration::days(offset)).to_string();
+        let Some(period) = read_period(&store.conn, "day", &date)? else {
+            continue;
+        };
+        if won(&period, user) {
             daily_wins += 1;
         }
+        if let Some(day) = period.standings.iter().find(|s| s.user == user && s.xp > 0)
+            && best_day.as_ref().is_none_or(|(_, best)| day.xp > *best)
+        {
+            best_day = Some((date, day.xp));
+        }
     }
+    let ranked: Vec<&Standing> = latest.standings.iter().filter(|s| s.reviews > 0).collect();
+    let place = |among: &[&Standing], s: &Standing| {
+        1 + among.iter().filter(|other| other.xp > s.xp).count() as u64
+    };
+    let ranked_score = score.filter(|s| s.reviews > 0);
+    let mut circle = crate::social::friends(&store.conn, user)?;
+    circle.extend(crate::social::group_mates(&store.conn, user)?);
+    let circle: Vec<&Standing> = ranked
+        .iter()
+        .copied()
+        .filter(|s| s.user == user || circle.contains(&s.user))
+        .collect();
     Ok(Some(WeeklyRecap {
         week_start: archive_week.boundary_ms(start),
         week_end: archive_week.boundary_ms(end),
         valid_until: archive_week.boundary_ms(end + Duration::days(7)),
+        final_result: latest.is_final(),
         days_studied: score.map_or(0, |s| s.days_active),
         xp: score.map_or(0, |s| s.xp),
+        reviews: score.map_or(0, |s| s.reviews),
+        minutes: score.map_or(0, |s| (s.time_ms.max(0) as u64 + 30_000) / 60_000),
         daily_wins,
-        rank: score.filter(|s| s.reviews > 0).map(|s| {
-            1 + latest
-                .standings
-                .iter()
-                .filter(|other| other.reviews > 0 && other.xp > s.xp)
-                .count() as u64
-        }),
+        rank: ranked_score.map(|s| place(&ranked, s)),
+        ranked: ranked.len() as u64,
         improvement_xp: score.map_or(0, |s| s.xp) as i64 - previous_xp as i64,
+        best_day,
+        circle_place: ranked_score
+            .filter(|_| circle.len() > 1)
+            .map(|s| (place(&circle, s), circle.len() as u64)),
     }))
 }
 
@@ -1475,11 +1508,14 @@ mod tests {
         refresh(db.get(), &players, &week, at("2026-09-21", 5), None).unwrap();
         let provisional = period(db.get(), "day", "2026-09-20");
         assert_eq!(provisional.status, "provisional");
+        let early = weekly_recap(db.get(), "a", &week, at("2026-09-21", 5))
+            .unwrap()
+            .unwrap();
         assert!(
-            weekly_recap(db.get(), "a", &week, at("2026-09-21", 5))
-                .unwrap()
-                .is_none()
+            !early.final_result,
+            "a closed week is recapped before it is final"
         );
+        assert_eq!(early.reviews, 1);
         players[0].reviews = reviews("2026-09-20", 10).into();
         refresh(db.get(), &players, &week, at("2026-09-21", 10), None).unwrap();
         assert_eq!(
@@ -1489,10 +1525,14 @@ mod tests {
         refresh(db.get(), &players, &week, at("2026-09-22", 4), None).unwrap();
         let final_day = serde_json::to_value(period(db.get(), "day", "2026-09-20")).unwrap();
         let final_week = serde_json::to_value(period(db.get(), "week", "2026-09-14")).unwrap();
-        assert!(
-            weekly_recap(db.get(), "a", &week, at("2026-09-22", 4))
-                .unwrap()
-                .is_some()
+        let settled = weekly_recap(db.get(), "a", &week, at("2026-09-22", 4))
+            .unwrap()
+            .unwrap();
+        assert!(settled.final_result);
+        assert_eq!(settled.reviews, 10);
+        assert_eq!(
+            settled.best_day.as_ref().map(|(date, _)| date.as_str()),
+            Some("2026-09-20")
         );
         players[0].reviews = reviews("2026-09-20", 100).into();
         refresh(db.get(), &players, &week, at("2026-09-23", 12), None).unwrap();

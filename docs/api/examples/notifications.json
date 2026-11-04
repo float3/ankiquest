@@ -47,5 +47,23 @@
     "sender": "cerro",
     "title": "🎉 Cerro cheered",
     "win": 1
+  },
+  {
+    "action_required": false,
+    "body": "You reached level 3 with 400 XP.",
+    "challenge_id": null,
+    "created_at": 1793183400,
+    "day": 20754,
+    "id": 9,
+    "kind": "celebration",
+    "read_at": null,
+    "replied": false,
+    "route": null,
+    "sender": "",
+    "share_body": "I reached level 3 with 400 XP.",
+    "share_title": "Level 3",
+    "title": "Level 3",
+    "topic": "level",
+    "win": 3
   }
 ]

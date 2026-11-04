@@ -15,8 +15,8 @@ these features become available after the updated server is installed and restar
 | 3 | Freeze-used notice | Reports a newly consumed freeze and the remaining balance. |
 | 4 | Freeze refill reminder | Prompts unfinished daily quests when protection is enabled, storage has room, and today's quest freeze has not been earned. |
 | 5 | Upcoming streak milestone | Encouragement one study day before milestones such as 7, 30, 50, 100, and 365 days. |
-| 6 | Weekly competition closing | An optional warning before the shared week ends, for players with weekly XP. |
-| 7 | Weekly recap | Study days, XP, daily wins, weekly rank, and XP change from the previous week, after the result is finalized. |
+| 6 | Weekly competition closing | An optional warning before the week closes for the player, in their own time, for players with XP in that week. |
+| 7 | Weekly recap | A report on the player's own morning after their last day of the week: reviews, minutes, study days, XP, place on the weekly board and among friends, XP change from the previous week, best day, daily wins and current streak. |
 | 8 | Winners calendar | **Calendar**: daily results, weekly champions, and monthly seasons. Open a period for standings, XP, reviews, study time, new cards, and winning margin. |
 | 9 | Trophy cabinet | **Trophies**: first daily, weekly, and monthly victories; seven and thirty daily wins; consistency and comeback trophies. |
 | 10 | Most improved | **Overview / Trophies**: the greatest positive increase in review count between consecutive complete, finalized weeks. Ties share the award. |
@@ -37,7 +37,17 @@ timing uses the player's synced Anki clock and day cutoff. urgent streak and wee
 
 daily, milestone, and urgent reminders are rechecked against current studying before delivery. duplicate reminders are suppressed, including across restarts. changing preferences preserves pending reminders that remain enabled and rechecks their timing; disabling a type cancels its pending notices. a milestone reminder replaces a generic daily nudge for that day. enabling freeze-used notices or recaps does not announce historical events retroactively.
 
+the weekly recap is written on the player's own morning once their last day of the closed week is over: the end of their quiet hours (09:00 without quiet hours) on, usually, Monday. it reads the closed week from the archive while results are still pending, so a sync that arrives during the 24-hour allowance can still move a place after the recap went out; the top-three win that a recap can be shared as is only made once the result is final. its body has one sentence a line, and each line is translated on its own.
+
 reminders use the existing authenticated notification inbox and durable push queue. push delivery requires the server's `ntfy` destination and the player's `ntfy_topic`; queued attempts are rechecked and retried. these preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms remain independently controlled in each client's settings. the old global `remind_hour` / Nix `remindHour` setting has been removed; a config that still has `remind_hour` starts and ignores it.
+
+## one week for everyone, in each player's own days
+
+the leaderboard week resets at one instant for everyone: Monday at `week_rollover_hour` in `week_timezone`. an Anki day is never split, though: each of a player's days counts toward the week its start falls in. a player whose Sunday began before the reset keeps earning toward the closing week until their own rollover, and their first day of the new week is their own Monday. so with `week_timezone = "Europe/Berlin"` and the usual 04:00 rollovers, a reset at Monday 04:00 in Berlin is Monday 00:00 in Buenos Aires and Sunday 19:00 in California, and every one of those players gets their own Monday-to-Monday week: nobody plays a shorter week, and no day counts twice.
+
+this holds for players west of the week's time zone. a player east of it has a Monday that begins before the reset, so that Monday counts toward the week before. pick the easternmost time zone your players live in, with the earliest rollover hour any of them uses.
+
+the live board compares one week: from the reset on it shows the new week, and the closing week's last hours, still being studied in the west, show in the community archive as pending until the 24-hour allowance is over. `GET /api/week` answers `starts_at` and `ends_at` (ms) and the `timezone`, so a client can say that a week has just started. weekly-closing reminders and recaps use each player's own close, the end of their last day of the week.
 
 ## what the historical record means
 

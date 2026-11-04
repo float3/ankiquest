@@ -74,7 +74,11 @@ fn notification_win(store: &Store, user: &str, id: i64) -> Result<Option<Notice>
                 Ok(Some(match r.get(4)? {
                     Some(win) => Notice::Win(win),
                     None => Notice::Quote(Win {
-                        what: format!("{}: “{}”", r.get::<_, String>(0)?, r.get::<_, String>(1)?),
+                        what: {
+                            let (title, body) =
+                                wins::own_words(&r.get::<_, String>(0)?, &r.get::<_, String>(1)?);
+                            format!("{title}: “{body}”")
+                        },
                         topic: r.get(3)?,
                         key: format!("notification:{id}"),
                     }),
@@ -238,6 +242,29 @@ pub(crate) fn send_wins(
     Ok(sent)
 }
 
+/// Gives one of `user`'s own shareable rows what sharing it would tell others, in `language`:
+/// its win's shared words, or the row itself in the player's own words. Call it before the
+/// row is translated, while its texts are still the stored English ones.
+pub(crate) fn share_words(
+    conn: &Connection,
+    user: &str,
+    notice: &mut crate::notifications::Notification,
+    language: &str,
+) -> rusqlite::Result<()> {
+    if !SHAREABLE.contains(&notice.kind.as_str()) {
+        return Ok(());
+    }
+    let (title, body) = match notice.win.and_then(|id| wins::win(conn, user, id)) {
+        Some(win) => wins::shared_words(conn, &win)?,
+        None => wins::own_words(&notice.title, &notice.body),
+    };
+    if (title.as_str(), body.as_str()) != (notice.title.as_str(), notice.body.as_str()) {
+        notice.share_title = Some(crate::i18n::system_text(&title, language));
+        notice.share_body = Some(crate::i18n::system_text(&body, language));
+    }
+    Ok(())
+}
+
 /// Words a share or cheer about wins again from the wins themselves, in `language`: their
 /// stored English titles are translated one by one, never read back out of the joined text.
 pub(crate) fn localize(
@@ -251,14 +278,10 @@ pub(crate) fn localize(
     let system = |value: &str| crate::i18n::system_text(value, language);
     match notice.kind.as_str() {
         "share" => {
-            let wins = conn
-                .prepare(
-                    "select w.title, w.body from win_deliveries d join wins w on w.id = d.win
-                     where d.notification = ?1 order by w.id",
-                )?
-                .query_map([notice.id], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?
+            // In the sharer's own words, as the English row was written.
+            let wins = wins::delivered(conn, notice.id)?
+                .iter()
+                .map(|win| wins::shared_words(conn, win))
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             match wins.as_slice() {
                 [] => {}
@@ -693,6 +716,83 @@ mod tests {
     }
 
     #[test]
+    fn the_players_own_rows_carry_what_sharing_them_would_say() {
+        let (store, _path) = crate::test_support::temporary_store();
+        let celebrate = |title: &str, body: &str, kind: &str| {
+            insert_notification(
+                &store.conn,
+                &Outgoing {
+                    to: "hill",
+                    from: "",
+                    title,
+                    body,
+                    kind,
+                },
+                20_000,
+                1_000,
+                false,
+            )
+            .unwrap()
+        };
+        let level = celebrate("Level 4", "You reached level 4 with 900 XP.", "celebration");
+        let win = wins::create(
+            &store.conn,
+            "hill",
+            "level:4",
+            20_000,
+            1_000,
+            "Level 4",
+            "You reached level 4 with 900 XP.",
+            &json!({}),
+        )
+        .unwrap()
+        .unwrap();
+        wins::attach(&store.conn, level, win).unwrap();
+        celebrate(
+            "Streak secured!",
+            "Today counts toward your 5-day streak.",
+            "celebration",
+        );
+        celebrate(
+            "Daily goal reached!",
+            "120 cards today in 35 minutes.",
+            "celebration",
+        );
+        celebrate("Hi", "You there?", "message");
+        let rows = |language: &str| {
+            let mut rows = store.notifications("hill", 2_000).unwrap();
+            rows.sort_by_key(|row| row.id);
+            for row in &mut rows {
+                share_words(&store.conn, "hill", row, language).unwrap();
+            }
+            rows.into_iter()
+                .map(|row| (row.share_title, row.share_body))
+                .collect::<Vec<_>>()
+        };
+        let some = |title: &str, body: &str| (Some(title.to_string()), Some(body.to_string()));
+        assert_eq!(
+            rows("en"),
+            [
+                some("Level 4", "I reached level 4 with 900 XP."),
+                some("Streak secured!", "Today counts toward my 5-day streak."),
+                (None, None),
+                (None, None),
+            ],
+            "a neutral row and a message carry nothing"
+        );
+        assert_eq!(
+            rows("pt")[..2],
+            [
+                some("Nível 4", "Cheguei ao nível 4 com 900 XP."),
+                some(
+                    "Sequência garantida!",
+                    "Hoje conta para a minha sequência de 5 dias."
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn shared_wins_are_worded_from_the_wins_in_the_readers_language() {
         let (mut store, _path) = crate::test_support::temporary_store();
         let win = |store: &Store, key: &str, title: &str, body: &str| {
@@ -753,9 +853,12 @@ mod tests {
         localize(&store.conn, &mut single, "de").unwrap();
         assert_eq!(single.title, "🎉 Hill hat einen Erfolg geteilt");
         assert_eq!(
-            single.body,
-            "Level 4: “Du hast Level 4 mit 900 XP erreicht.”"
+            single.body, "Level 4: “Ich habe Level 4 mit 900 XP erreicht.”",
+            "a friend reads it in the sharer's words"
         );
+        let mut english = store.notifications("aldanita", 3_000).unwrap().remove(0);
+        localize(&store.conn, &mut english, "en").unwrap();
+        assert_eq!(english.body, "Level 4: “I reached level 4 with 900 XP.”");
 
         assert_eq!(
             react(&mut store.conn, "aldanita", "Aldana", single.id, 4_000).unwrap(),

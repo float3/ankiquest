@@ -724,7 +724,62 @@ pub(crate) fn written_texts() -> Vec<String> {
     texts.extend(
         Records::SPANS.map(|span| format!("120 XP in {span}, beating your old best of 90 XP.")),
     );
+    texts.extend(
+        Records::SPANS.map(|span| format!("120 XP in {span}, beating my old best of 90 XP.")),
+    );
+    texts.extend(ACHIEVEMENTS.iter().filter_map(|def| achieved(def.title)));
     texts
+}
+
+#[cfg(test)]
+pub(crate) fn achievement_titles() -> impl Iterator<Item = &'static str> {
+    ACHIEVEMENTS.iter().map(|def| def.title)
+}
+
+/// What unlocking the achievement titled `title` says when its player shares it.
+pub(crate) fn achieved(title: &str) -> Option<String> {
+    let def = ACHIEVEMENTS.iter().find(|def| def.title == title)?;
+    let once = def.threshold == 1;
+    let template = match def.metric {
+        Metric::Reviews => phrase("I have reviewed {0} cards in total."),
+        Metric::Streak => phrase("I reached a {0} day streak."),
+        Metric::DayReviews => phrase("I reviewed {0} cards in one day."),
+        Metric::Combo => phrase("I reached a {0} card combo."),
+        Metric::Hours => phrase("I have studied for {0} hours in total."),
+        Metric::Mature => phrase("I have reviewed {0} mature cards."),
+        Metric::NewCards => phrase("I have learned {0} new cards."),
+        Metric::Quests => phrase("I have completed {0} quests."),
+        Metric::PerfectDays => phrase("I completed every quest on {0} days."),
+        Metric::EarlyDays => phrase("I studied before 7am on {0} days."),
+        Metric::LateDays => phrase("I studied after 11pm on {0} days."),
+        Metric::DaysActive => phrase("I have studied on {0} different days."),
+        Metric::Relearns => phrase("I relearned {0} forgotten cards."),
+        Metric::MaxInterval => phrase("I recalled a card last seen {0} days before."),
+        Metric::DistinctCards => phrase("I have reviewed {0} different cards."),
+        Metric::LongestSession => phrase("I studied {0} minutes in one sitting."),
+        Metric::MaxSessions => phrase("I studied in {0} separate sessions in one day."),
+        Metric::BestMonth => phrase("I reviewed {0} cards in one calendar month."),
+        Metric::WeekendDays => phrase("I studied on {0} Saturdays or Sundays."),
+        Metric::Comebacks if once => phrase("I came back after a month away."),
+        Metric::Comebacks => phrase("I came back after a month away {0} times."),
+        Metric::FreezesUsed if once => phrase("A streak freeze saved me once."),
+        Metric::FreezesUsed => phrase("A streak freeze saved me {0} times."),
+        Metric::FastDays if once => {
+            phrase("I reviewed 100+ cards in a day averaging under 5 seconds.")
+        }
+        Metric::FastDays => {
+            phrase("I reviewed 100+ cards in a day averaging under 5 seconds, {0} times.")
+        }
+        Metric::NewYearDays if once => phrase("I studied on New Year's Day."),
+        Metric::NewYearDays => phrase("I studied on New Year's Day {0} times."),
+        Metric::Anniversaries if once => phrase("I studied on the anniversary of my first review."),
+        Metric::Anniversaries => {
+            phrase("I studied on the anniversary of my first review {0} times.")
+        }
+        Metric::Years if once => phrase("I have kept going for a year since my first review."),
+        Metric::Years => phrase("I have kept going for {0} years since my first review."),
+    };
+    Some(english(template, &[&def.threshold.to_string()]))
 }
 
 fn describe(metric: Metric, n: u64) -> String {

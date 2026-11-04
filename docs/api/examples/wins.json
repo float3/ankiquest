@@ -2,6 +2,27 @@
   "wins": [
     {
       "art": "celebrate",
+      "body": "You reached level 3 with 400 XP.",
+      "created_at": 1793183400,
+      "day": 20754,
+      "id": 3,
+      "key": "level:3",
+      "kind": "level",
+      "link": null,
+      "policy": "ask",
+      "share_body": "I reached level 3 with 400 XP.",
+      "share_title": "Level 3",
+      "shared_with_friends": false,
+      "stats": {
+        "level": 2,
+        "minutes_today": 1,
+        "reviews_today": 5,
+        "streak": 1
+      },
+      "title": "Level 3"
+    },
+    {
+      "art": "celebrate",
       "body": "5 cards today in 0 minutes.",
       "created_at": 1793183400,
       "day": 20754,

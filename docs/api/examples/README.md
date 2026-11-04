@@ -34,6 +34,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `decks.json` | `GET /api/decks/{user}` |
 | `companion.json` | `GET /api/companion/{user}` |
 | `streak_freezes.json` | `GET /api/streak-freezes/{user}` |
+| `challenges.json` | `GET /api/community/challenges/{user}`: an invitation for the player, a goal in progress, one reached, one ended early, and the weekly suggestion |
+| `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
+| `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.

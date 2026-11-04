@@ -1,0 +1,148 @@
+{
+  "challenges": [
+    {
+      "cooperative": false,
+      "creator": "friend",
+      "end_at": 1793784600000,
+      "id": 4,
+      "kind": "reviews",
+      "members": [
+        {
+          "display": "Friend",
+          "progress": 0,
+          "status": "accepted",
+          "user": "friend"
+        },
+        {
+          "display": "Hill",
+          "progress": 0,
+          "status": "invited",
+          "user": "hill"
+        }
+      ],
+      "progress": 0,
+      "start_at": 1793179800000,
+      "start_when_ready": false,
+      "started": true,
+      "status": "active",
+      "target": 50,
+      "title": "Fifty reviews each",
+      "weekly": false
+    },
+    {
+      "cooperative": false,
+      "creator": "hill",
+      "end_at": 1793179800000,
+      "id": 3,
+      "kind": "reviews",
+      "members": [
+        {
+          "display": "Cerro",
+          "progress": 0,
+          "status": "invited",
+          "user": "cerro"
+        },
+        {
+          "display": "Hill",
+          "progress": 0,
+          "status": "accepted",
+          "user": "hill"
+        }
+      ],
+      "progress": 0,
+      "start_at": 1793179800000,
+      "start_when_ready": false,
+      "started": true,
+      "status": "cancelled",
+      "target": 40,
+      "title": "Weekend reviews",
+      "weekly": false
+    },
+    {
+      "cooperative": true,
+      "creator": "cerro",
+      "end_at": 1793784600000,
+      "id": 2,
+      "kind": "reviews",
+      "members": [
+        {
+          "display": "Cerro",
+          "progress": 3,
+          "status": "accepted",
+          "user": "cerro"
+        },
+        {
+          "display": "Hill",
+          "progress": 5,
+          "status": "accepted",
+          "user": "hill"
+        }
+      ],
+      "progress": 8,
+      "start_at": 1793179800000,
+      "start_when_ready": false,
+      "started": true,
+      "status": "complete",
+      "target": 5,
+      "title": "Spanish sprint",
+      "weekly": false
+    },
+    {
+      "cooperative": false,
+      "creator": "hill",
+      "end_at": 1793784600000,
+      "id": 1,
+      "kind": "study_days",
+      "members": [
+        {
+          "display": "Cerro",
+          "progress": 1,
+          "status": "accepted",
+          "user": "cerro"
+        },
+        {
+          "display": "Friend",
+          "progress": 0,
+          "status": "invited",
+          "user": "friend"
+        },
+        {
+          "display": "Hill",
+          "progress": 1,
+          "status": "accepted",
+          "user": "hill"
+        }
+      ],
+      "progress": 2,
+      "start_at": 1793179800000,
+      "start_when_ready": false,
+      "started": true,
+      "status": "active",
+      "target": 3,
+      "title": "Three study days together",
+      "weekly": false
+    }
+  ],
+  "recipients": [
+    {
+      "display": "Cerro",
+      "user": "cerro"
+    },
+    {
+      "display": "Friend",
+      "user": "friend"
+    }
+  ],
+  "weekly_suggestion": {
+    "challenge_id": null,
+    "dismissed": false,
+    "duration_days": 7,
+    "expires_at": 1793592000000,
+    "friend": {
+      "display": "Cerro",
+      "user": "cerro"
+    },
+    "target": 3,
+    "week_start": 1792987200000
+  }
+}
