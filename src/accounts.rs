@@ -160,6 +160,11 @@ impl Directory {
             .retain(|hash, owner| owner != user || !ends(hash));
     }
 
+    /// Who the token with this hash belongs to, without counting it as used.
+    pub(crate) fn hash_owner(&self, hash: &str) -> Option<String> {
+        self.tokens.read().unwrap().get(hash).cloned()
+    }
+
     pub fn token_owner(&self, token: &str) -> Option<String> {
         if token.is_empty() {
             return None;
