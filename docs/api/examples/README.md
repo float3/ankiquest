@@ -8,7 +8,7 @@ Regenerate after an intended change and commit the result:
 UPDATE_API_EXAMPLES=1 cargo test api_examples
 ```
 
-Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`, app sign-in tickets by `example-ticket-N`.
+Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`, group invite codes by `example-invite-N`, app sign-in tickets by `example-ticket-N`.
 
 | file | request |
 |---|---|
@@ -38,6 +38,10 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
 | `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
+| `group_create.json` | `POST /api/social/{user}` `{"action": "create_group", "name"}`: the new group with its invite code |
+| `social.json` | `GET /api/social/{user}`: a friend, a request each way, a muted player, a group the player owns and one they joined |
+| `invite.json` | `GET /api/invites/{code}` |
+| `social_change.json` | `POST /api/social/{user}` `{"action": "befriend", "user"}`, accepting a request |
 | `records.json` | `GET /api/records` |
 | `study.json` | `GET /api/study/{user}`: three study days and a day off |
 | `sign_in_methods.json` | `GET /api/sign-in/{user}`: a password and a linked GitHub |

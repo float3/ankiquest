@@ -1,0 +1,60 @@
+{
+  "friends": [
+    {
+      "display": "Ana",
+      "user": "ana"
+    },
+    {
+      "display": "Friend",
+      "user": "friend"
+    }
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "invite": null,
+      "members": [
+        {
+          "display": "Friend",
+          "user": "friend"
+        },
+        {
+          "display": "Hill",
+          "user": "hill"
+        }
+      ],
+      "name": "Night owls",
+      "owner": false
+    },
+    {
+      "id": 1,
+      "invite": "example-invite-1",
+      "members": [
+        {
+          "display": "Ana",
+          "user": "ana"
+        },
+        {
+          "display": "Hill",
+          "user": "hill"
+        }
+      ],
+      "name": "Spanish club",
+      "owner": true
+    }
+  ],
+  "incoming": [],
+  "muted": [
+    {
+      "display": "Cerro",
+      "user": "cerro"
+    }
+  ],
+  "outgoing": [
+    {
+      "display": "Cerro",
+      "user": "cerro"
+    }
+  ],
+  "public": true
+}
