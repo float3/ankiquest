@@ -540,6 +540,48 @@ async fn examples_match_the_handlers() {
         f.call("GET", "/api/study/hill", Some("hill-secret"), Value::Null)
             .await,
     ));
+    // Account settings come after the examples above, since they change how Ana signs in. Ana linked GitHub.
+    f.app
+        .store
+        .lock()
+        .unwrap()
+        .conn
+        .execute(
+            "insert into sign_in_links (provider, subject, user, created_at) values ('github', 'example-subject', 'ana', ?1)",
+            [NOW_MS],
+        )
+        .unwrap();
+    examples.push((
+        "sign_in_methods",
+        f.call("GET", "/api/sign-in/ana", Some(&ana), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "account",
+        f.call("GET", "/api/accounts/ana", Some(&ana), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "password_change",
+        f.call(
+            "POST",
+            "/api/sign-in/ana",
+            Some(&ana),
+            json!({"action": "password", "current": PASSWORD, "password": "an even longer pw", "sign_out_others": false}),
+        )
+        .await,
+    ));
+    examples.push((
+        "devices_sign_out",
+        f.call(
+            "POST",
+            "/api/devices/ana",
+            Some(&ana),
+            json!({"action": "sign_out_others"}),
+        )
+        .await,
+    ));
+
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
     // and belongs to one of Friend's.
@@ -609,48 +651,6 @@ async fn examples_match_the_handlers() {
             "/api/social/hill",
             Some("hill-secret"),
             befriend("ana"),
-        )
-        .await,
-    ));
-
-    // Account settings come last, since they change how Ana signs in. Ana linked GitHub.
-    f.app
-        .store
-        .lock()
-        .unwrap()
-        .conn
-        .execute(
-            "insert into sign_in_links (provider, subject, user, created_at) values ('github', 'example-subject', 'ana', ?1)",
-            [NOW_MS],
-        )
-        .unwrap();
-    examples.push((
-        "sign_in_methods",
-        f.call("GET", "/api/sign-in/ana", Some(&ana), Value::Null)
-            .await,
-    ));
-    examples.push((
-        "account",
-        f.call("GET", "/api/accounts/ana", Some(&ana), Value::Null)
-            .await,
-    ));
-    examples.push((
-        "password_change",
-        f.call(
-            "POST",
-            "/api/sign-in/ana",
-            Some(&ana),
-            json!({"action": "password", "current": PASSWORD, "password": "an even longer pw", "sign_out_others": false}),
-        )
-        .await,
-    ));
-    examples.push((
-        "devices_sign_out",
-        f.call(
-            "POST",
-            "/api/devices/ana",
-            Some(&ana),
-            json!({"action": "sign_out_others"}),
         )
         .await,
     ));
