@@ -123,6 +123,32 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
+/// `text` safe inside XML and HTML text and quoted attributes.
+pub(crate) fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `body` with `status`, never cached.
+pub(crate) fn reply(status: StatusCode, body: serde_json::Value) -> Response {
+    (status, [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
+}
+
+/// `{"error": message}` with `status`, never cached. [`json_error`] is the cacheable one.
+pub(crate) fn refuse(status: StatusCode, message: &str) -> Response {
+    reply(status, serde_json::json!({"error": message}))
+}
+
 /// `{"error": message}` with `status`.
 pub(crate) fn json_error(status: StatusCode, message: &str) -> Response {
     (status, Json(serde_json::json!({"error": message}))).into_response()

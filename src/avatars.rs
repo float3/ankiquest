@@ -1,4 +1,5 @@
 use crate::store::{Error, Store};
+use crate::web_util::refuse;
 use crate::{access::authorized, app::App};
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
@@ -106,18 +107,9 @@ fn normalize(bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(output.into_inner())
 }
 
-fn failure(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(serde_json::json!({"error": message})),
-    )
-        .into_response()
-}
-
 fn storage_failure(error: Error) -> Response {
     eprintln!("profile picture storage failed: {error}");
-    failure(
+    refuse(
         StatusCode::INTERNAL_SERVER_ERROR,
         "The profile picture could not be saved or loaded. Please try again.",
     )
@@ -157,12 +149,12 @@ async fn read(
     headers: HeaderMap,
 ) -> Response {
     if !app.is_user(&user) {
-        return failure(StatusCode::NOT_FOUND, "No profile picture.");
+        return refuse(StatusCode::NOT_FOUND, "No profile picture.");
     }
     let result = picture(&app.store.lock().unwrap(), &user);
     let (revision, bytes) = match result {
         Ok(Some(picture)) => picture,
-        Ok(None) => return failure(StatusCode::NOT_FOUND, "No profile picture."),
+        Ok(None) => return refuse(StatusCode::NOT_FOUND, "No profile picture."),
         Err(error) => return storage_failure(error),
     };
     let etag = format!("\"avatar-{revision}\"");
@@ -195,12 +187,12 @@ async fn upload(
     // Authenticate before reading or decoding the body. The explicit byte limit
     // also covers chunked bodies, which have no Content-Length header.
     if !authorized(&app, &user, request.headers()) {
-        return failure(StatusCode::UNAUTHORIZED, "Connect your own account first.");
+        return refuse(StatusCode::UNAUTHORIZED, "Connect your own account first.");
     }
     let bytes = match to_bytes(request.into_body(), MAX_UPLOAD).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            return failure(
+            return refuse(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Choose a picture smaller than 2 MiB.",
             );
@@ -208,10 +200,10 @@ async fn upload(
     };
     let image = match tokio::task::spawn_blocking(move || normalize(&bytes)).await {
         Ok(Ok(image)) => image,
-        Ok(Err(message)) => return failure(StatusCode::BAD_REQUEST, message),
+        Ok(Err(message)) => return refuse(StatusCode::BAD_REQUEST, message),
         Err(error) => {
             eprintln!("profile picture processing failed: {error}");
-            return failure(
+            return refuse(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "The picture could not be processed. Please try again.",
             );
@@ -233,7 +225,7 @@ async fn remove(
     headers: HeaderMap,
 ) -> Response {
     if !authorized(&app, &user, &headers) {
-        return failure(StatusCode::UNAUTHORIZED, "Connect your own account first.");
+        return refuse(StatusCode::UNAUTHORIZED, "Connect your own account first.");
     }
     match save(&app.store.lock().unwrap(), &user, None) {
         Ok(_) => (

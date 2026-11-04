@@ -2,9 +2,10 @@
 //! Each provider's stable user id is linked to one player. A first sign-in creates an account
 //! once the person has picked a username; later ones sign into the linked player.
 
-use crate::accounts::{clean_device, clean_display, refuse, reply, valid_username};
-use crate::privacy::escape;
+use crate::accounts::{clean_device, clean_display, valid_username};
+use crate::web_util::escape;
 use crate::web_util::{base64url, hex, hex_cookie, normalize_user, random_bytes, set_cookie};
+use crate::web_util::{refuse, reply};
 use crate::{Error, access, app::App, app::now_ms};
 use axum::Router;
 use axum::body::Bytes;

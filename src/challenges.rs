@@ -787,6 +787,24 @@ fn challenge_error(error: Error) -> ChallengeFailure {
     (status, Json(serde_json::json!({"error":message})))
 }
 
+fn require_owner(app: &App, user: &str, headers: &HeaderMap) -> Result<(), ChallengeFailure> {
+    if authorized(app, user, headers) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error":"Check your player and token."})),
+        ))
+    }
+}
+
+fn refresh_failed(error: crate::Error) -> ChallengeFailure {
+    (
+        store_error(error),
+        Json(serde_json::json!({"error":"Unable to refresh challenges."})),
+    )
+}
+
 fn challenge_list(
     app: &App,
     store: &Store,
@@ -812,20 +830,10 @@ async fn get_challenges(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
-    if !authorized(&app, &user, &headers) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error":"Check your player and token."})),
-        ));
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
-    refresh(&mut store, &participants, now_ms()).map_err(|error| {
-        (
-            store_error(error),
-            Json(serde_json::json!({"error":"Unable to refresh challenges."})),
-        )
-    })?;
+    refresh(&mut store, &participants, now_ms()).map_err(refresh_failed)?;
     challenge_list(&app, &store, &user, &participants)
         .map(Json)
         .map_err(challenge_error)
@@ -837,12 +845,7 @@ async fn create_challenge(
     headers: HeaderMap,
     Json(request): Json<Create>,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
-    if !authorized(&app, &user, &headers) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error":"Check your player and token."})),
-        ));
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     let eligible = app
         .reachable(&store, &user)
@@ -860,21 +863,11 @@ async fn act_on_challenge(
     headers: HeaderMap,
     Json(action): Json<Action>,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
-    if !authorized(&app, &user, &headers) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error":"Check your player and token."})),
-        ));
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
     act(&mut store, &user, id, &action.action, now_ms()).map_err(challenge_error)?;
-    refresh(&mut store, &participants, now_ms()).map_err(|error| {
-        (
-            store_error(error),
-            Json(serde_json::json!({"error":"Unable to refresh challenges."})),
-        )
-    })?;
+    refresh(&mut store, &participants, now_ms()).map_err(refresh_failed)?;
     challenge_list(&app, &store, &user, &participants)
         .map(Json)
         .map_err(challenge_error)
@@ -886,12 +879,7 @@ async fn act_on_weekly_challenge(
     headers: HeaderMap,
     Json(action): Json<weekly_challenges::Action>,
 ) -> Result<Json<ChallengeList>, ChallengeFailure> {
-    if !authorized(&app, &user, &headers) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error":"Check your player and token."})),
-        ));
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     let participants = app.participants();
     let roster =

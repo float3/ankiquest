@@ -275,7 +275,7 @@ impl Access {
 
 /// The refusal for a passwordless account that has to sign in with its provider again first.
 pub(crate) fn reauth_first() -> Response {
-    crate::accounts::reply(
+    crate::web_util::reply(
         StatusCode::FORBIDDEN,
         serde_json::json!({"error": "Sign in with your provider again first.", "reauth": true}),
     )

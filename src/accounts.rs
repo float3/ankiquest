@@ -3,14 +3,14 @@
 
 use crate::access::Credential;
 use crate::web_util::{bearer, hex, normalize_user, random_bytes};
+use crate::web_util::{refuse, reply};
 use crate::{Error, app::App, app::now_ms};
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -342,14 +342,6 @@ impl App {
             .insert(hash, user.to_string());
         Ok(token)
     }
-}
-
-pub(crate) fn reply(status: StatusCode, body: serde_json::Value) -> Response {
-    (status, [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
-}
-
-pub(crate) fn refuse(status: StatusCode, message: &str) -> Response {
-    reply(status, serde_json::json!({"error": message}))
 }
 
 fn internal(error: Error) -> Response {
@@ -767,6 +759,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
+    use axum::http::header;
     use std::path::PathBuf;
     use tower::ServiceExt;
 

@@ -1,8 +1,10 @@
 //! What a player can do about their data: download all of it, or delete their account and everything with it.
 //! Every table is listed in `OWNED` or `SHARED`, and a test fails when a new one is not, so nothing new escapes deletion or export.
 
-use crate::accounts::{has_password, password_matches, refuse, reply};
+use crate::accounts::{has_password, password_matches};
 use crate::web_util::base64;
+use crate::web_util::escape;
+use crate::web_util::{refuse, reply};
 use crate::{access, app::App, app::now_ms};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
@@ -419,13 +421,6 @@ async fn delete(
     unload(&app, &user);
     log_info!("an account was deleted");
     StatusCode::NO_CONTENT.into_response()
-}
-
-pub(crate) fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 /// The privacy notice, filled in with who runs this server.

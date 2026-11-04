@@ -4,6 +4,7 @@
 //! and composited with the companion art and the player's avatar.
 use crate::app::App;
 use crate::store::{Error, Store};
+use crate::web_util::escape;
 use crate::wins::{self, Win};
 use crate::{access::authorized, avatars, i18n};
 use axum::Router;
@@ -354,22 +355,6 @@ pub(crate) fn chips(kind: &str, stats: &serde_json::Value, language: &str) -> Ve
     })
     .take(3)
     .collect()
-}
-
-/// `text` safe inside XML and HTML text and quoted attributes.
-pub(crate) fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 fn font(bold: bool) -> skrifa::FontRef<'static> {
