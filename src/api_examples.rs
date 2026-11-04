@@ -3,7 +3,7 @@
 //!
 //! The clock is pinned to [`NOW_MS`]. Random values are replaced before comparing, numbered in
 //! the order they appear: device tokens by `example-token-N`, win link tokens by
-//! `example-link-N` and device ids by `example-device-N`.
+//! `example-link-N`, device ids by `example-device-N` and group invite codes by `example-invite-N`.
 
 use crate::app::App;
 use crate::game::{Clock, Event};
@@ -488,6 +488,79 @@ async fn examples_match_the_handlers() {
             "/api/decks/hill/share",
             Some("hill-secret"),
             json!({"id": "1", "name": "Spanish", "recipients": ["cerro"]}),
+        )
+        .await,
+    ));
+
+    // Friends and groups come after everything above, whose circles they would otherwise change.
+    // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
+    // and belongs to one of Friend's.
+    let befriend = |user: &str| json!({"action": "befriend", "user": user});
+    for (user, token, other) in [
+        ("hill", "hill-secret", "friend"),
+        ("friend", "friend-secret", "hill"),
+        ("hill", "hill-secret", "cerro"),
+        ("ana", ana.as_str(), "hill"),
+    ] {
+        f.call(
+            "POST",
+            &format!("/api/social/{user}"),
+            Some(token),
+            befriend(other),
+        )
+        .await;
+    }
+    let created = f
+        .call(
+            "POST",
+            "/api/social/hill",
+            Some("hill-secret"),
+            json!({"action": "create_group", "name": "Spanish club"}),
+        )
+        .await;
+    let invite = created["groups"][0]["invite"].clone();
+    f.keep_secret(&invite, "example-invite");
+    let invite = invite.as_str().unwrap().to_string();
+    examples.push(("group_create", created));
+    f.call(
+        "POST",
+        "/api/social/ana",
+        Some(&ana),
+        json!({"action": "join", "invite": invite}),
+    )
+    .await;
+    let owls = f
+        .call(
+            "POST",
+            "/api/social/friend",
+            Some("friend-secret"),
+            json!({"action": "create_group", "name": "Night owls"}),
+        )
+        .await;
+    f.call(
+        "POST",
+        "/api/social/hill",
+        Some("hill-secret"),
+        json!({"action": "join", "invite": owls["groups"][0]["invite"]}),
+    )
+    .await;
+    examples.push((
+        "social",
+        f.call("GET", "/api/social/hill", Some("hill-secret"), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "invite",
+        f.call("GET", &format!("/api/invites/{invite}"), None, Value::Null)
+            .await,
+    ));
+    examples.push((
+        "social_change",
+        f.call(
+            "POST",
+            "/api/social/hill",
+            Some("hill-secret"),
+            befriend("ana"),
         )
         .await,
     ));

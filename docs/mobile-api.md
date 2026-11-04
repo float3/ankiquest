@@ -103,6 +103,27 @@ repeated successful accept, decline, leave, and creator cancel operations are id
 
 `POST /api/community/challenges/{user}` creates a goal from `{ "title", "kind", "cooperative", "target", "duration_days", "recipients", "start_when_ready", "request_id" }`: 1–80 characters, 1–31 days, a target of 1 to 100,000 (a study-day target at most the days the participants have), and 1–30 different recipients from `recipients`. `POST /api/community/challenges/{user}/{id}` takes `{ "action" }`: `accept` or `decline` for an invitation, `leave` for a joined goal someone else created, `cancel` for the creator. `POST /api/community/challenges/{user}/weekly` takes `{ "week_start", "action": "invite" | "dismiss" }` for the weekly suggestion. all three answer the same object as the `GET`, so a client redraws from the answer. a refusal is `400` with `{ "error" }` to show, `403` for a goal the player is not part of and `404` for one that does not exist. examples: `challenges.json`, `challenge_create.json` and `challenge_action.json` in [api/examples](api/examples/README.md).
 
+### friends and groups for apps
+
+`GET /api/social/{user}` answers `{ "friends", "incoming", "outgoing", "muted", "groups", "public" }`. `friends`, `incoming` (requests waiting for the player), `outgoing` (the player's requests waiting for an answer) and `muted` are people as `{ "user", "display" }`, by display name. each group has `id`, `name`, `owner` (whether the player owns it), `invite` (its invite code, only for the owner, otherwise null) and `members`. `public` is whether the player's profile is on the global board. a group's invite link is `/join/{invite}` on the server's site.
+
+`POST /api/social/{user}` takes one `{ "action", ... }` and answers the same object as the `GET`, so a client redraws from the answer:
+
+| action | fields | |
+|---|---|---|
+| `befriend` | `user` | sends a request, or accepts one from that player |
+| `unfriend` | `user` | removes a friend, declines their request or withdraws the player's own |
+| `mute`, `unmute` | `user` | see above |
+| `create_group` | `name` | 1–40 characters; the player owns the new group |
+| `rename_group` | `group`, `name` | owner only |
+| `new_invite` | `group` | owner only; the old code stops working |
+| `join` | `invite` | the code from a `/join/{invite}` link; joining again is fine |
+| `leave` | `group` | the longest-standing member inherits an owner's group; an empty group is deleted |
+| `remove` | `group`, `member` | owner only, not themselves |
+| `visibility` | `public` | |
+
+a refusal has `{ "error" }` to show: `400` for a group name, `403` for an owner action by someone else, `404` for an unknown player or invite, `409` when the player is in 20 groups, a group has 200 members, 50 requests wait or 500 people are muted. `GET /api/invites/{code}` needs no credential and answers `{ "name", "members" }` (the member count) to show before joining, or `404`. examples: `social.json`, `group_create.json`, `invite.json` and `social_change.json` in [api/examples](api/examples/README.md). friend requests and group joins send no notifications yet.
+
 ## sharing a win
 
 `POST /api/share/{user}` passes a win on to everyone in the player's circle. The body is either `{ "notification": 42 }`, one of the player's own `celebration`, `challenge_complete` or `reminder_weekly_recap` rows, or `{ "place": 2 }`, the player's current place (1 to 3) on this week's board. It answers `{ "recipients": n }`, the friends who got it now.

@@ -8,7 +8,7 @@ Regenerate after an intended change and commit the result:
 UPDATE_API_EXAMPLES=1 cargo test api_examples
 ```
 
-Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`.
+Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`, group invite codes by `example-invite-N`.
 
 | file | request |
 |---|---|
@@ -35,5 +35,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
 | `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
+| `group_create.json` | `POST /api/social/{user}` `{"action": "create_group", "name"}`: the new group with its invite code |
+| `social.json` | `GET /api/social/{user}`: a friend, a request each way, a muted player, a group the player owns and one they joined |
+| `invite.json` | `GET /api/invites/{code}` |
+| `social_change.json` | `POST /api/social/{user}` `{"action": "befriend", "user"}`, accepting a request |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.
