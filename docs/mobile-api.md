@@ -18,6 +18,7 @@ these additions preserve bearer authentication and the existing notification arr
 | `deck_share` | telling chosen friends about a deck just finished, `POST /api/decks/{user}/share` (see [sharing.md](sharing.md)) |
 | `devices` | password change and the device list and sign-out (`/api/devices/{user}`, see `docs/server.md`) |
 | `goal_backlog_days` | the `backlog` goal clears the backlog in `value` days, with `since`, `chosen` and `restart` (see [sharing.md](sharing.md)) |
+| `mute` | muting a person, `POST /api/social/{user}` `{ "action": "mute" \| "unmute", "user" }`; `muted` in the social overview (see [community.md](community.md)) |
 | `reactions` | cheering a friend's share, `POST /api/react/{user}` |
 | `share_cards` | server-drawn cards and public pages under `/w/` |
 | `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |

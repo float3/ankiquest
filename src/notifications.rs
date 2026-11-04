@@ -66,6 +66,8 @@ pub(crate) const NUDGE_ALLOWED_SQL: &str = "((sender = '' and exists (select 1 f
     or (sender != '' and exists (select 1 from player_settings
                          where user = notifications.recipient and friend_nudges = 1)
         and not exists (select 1 from friend_nudge_muted_senders
+                         where recipient = notifications.recipient and sender = notifications.sender)
+        and not exists (select 1 from muted_people
                          where recipient = notifications.recipient and sender = notifications.sender)))";
 #[derive(Debug, Serialize)]
 pub struct Notification {
@@ -560,7 +562,10 @@ impl Store {
                     &Outgoing {
                         to: user,
                         from: "",
-                        title: &format!("{} new unlocks", events.len()),
+                        title: &crate::i18n::english(
+                            "{0} new unlocks",
+                            &[&events.len().to_string()],
+                        ),
                         body: &titles.join(", "),
                         kind,
                     },
@@ -1677,7 +1682,8 @@ mod tests {
         drop(store);
         let conn = Connection::open(path.join("ankiquest.db")).unwrap();
         conn.execute_batch(
-            "drop table notifications;
+            "pragma user_version = 0;
+             drop table notifications;
              create table notifications (
                  id integer primary key autoincrement,
                  recipient text not null,

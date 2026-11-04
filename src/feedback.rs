@@ -1,24 +1,144 @@
 //! Everything the clients say about the game, worded once here so the phone, the desktop
 //! add-on and the website cannot drift apart.
+//!
+//! Each text is kept as a catalog key and the values for its placeholders, and written in
+//! the reader's language only when it is sent, so nothing has to read English back.
 
 use crate::decks::Announcement;
 use crate::game::{Conquest, Profile};
-use serde::Serialize;
+use crate::i18n;
+use serde::{Serialize, Serializer};
 use std::collections::BTreeSet;
+use std::fmt;
 
 const HOUR_MS: i64 = 3_600_000;
 
+/// A text for a player, sent as a plain string in `language`, English unless localized.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Message {
+    text: Text,
+    language: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Text {
+    /// A catalog key and its placeholder values.
+    Said(&'static str, Vec<Arg>),
+    /// Texts shown side by side.
+    Joined(&'static str, Vec<Text>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Arg {
+    /// Numbers, names and deck titles, shown as they are.
+    Value(String),
+    /// A title the server wrote, such as an achievement's, translated on its own.
+    Title(String),
+}
+
+fn say(key: &'static str) -> Text {
+    Text::Said(key, Vec::new())
+}
+
+impl Text {
+    fn value(mut self, value: impl ToString) -> Self {
+        if let Text::Said(_, args) = &mut self {
+            args.push(Arg::Value(value.to_string()));
+        }
+        self
+    }
+
+    fn title(mut self, title: &str) -> Self {
+        if let Text::Said(_, args) = &mut self {
+            args.push(Arg::Title(title.into()));
+        }
+        self
+    }
+
+    fn render(&self, language: &str) -> String {
+        match self {
+            Text::Said(key, args) => {
+                let args: Vec<String> = args
+                    .iter()
+                    .map(|arg| match arg {
+                        Arg::Value(value) => value.clone(),
+                        Arg::Title(title) => i18n::text(title, language),
+                    })
+                    .collect();
+                let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                i18n::substitute(i18n::template(key, language), &args)
+            }
+            Text::Joined(separator, parts) => parts
+                .iter()
+                .map(|part| part.render(language))
+                .collect::<Vec<_>>()
+                .join(separator),
+        }
+    }
+}
+
+impl From<Text> for Message {
+    fn from(text: Text) -> Self {
+        Message {
+            text,
+            language: "en",
+        }
+    }
+}
+
+impl Message {
+    pub fn localize(&mut self, language: &str) {
+        self.language = i18n::normalize(language);
+    }
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text.render(self.language))
+    }
+}
+
+impl PartialEq<&str> for Message {
+    fn eq(&self, other: &&str) -> bool {
+        self.text.render(self.language) == *other
+    }
+}
+
+impl Serialize for Message {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    pub title: String,
-    pub body: String,
+    pub title: Message,
+    pub body: Message,
+}
+
+impl Notice {
+    pub fn localize(&mut self, language: &str) {
+        self.title.localize(language);
+        self.body.localize(language);
+    }
 }
 
 /// What an upload changed: headlines worth a longer banner, and the XP status line.
 #[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Feedback {
-    pub headlines: Vec<String>,
-    pub status: Option<String>,
+    pub headlines: Vec<Message>,
+    pub status: Option<Message>,
+}
+
+impl Feedback {
+    pub fn localize(&mut self, language: &str) {
+        for headline in &mut self.headlines {
+            headline.localize(language);
+        }
+        if let Some(status) = &mut self.status {
+            status.localize(language);
+        }
+    }
 }
 
 fn grouped(value: u64) -> String {
@@ -42,45 +162,52 @@ pub fn streak_warning(
     minutes: Option<(u64, u64)>,
 ) -> Notice {
     let hours = ((day_ends_at - now_ms).max(1) + HOUR_MS - 1) / HOUR_MS;
-    Notice {
-        title: match minutes {
-            Some((done, needed)) => format!(
-                "🔥 Your {streak} day streak ends in {hours}h · {} of {needed} minutes today",
-                done.min(needed)
-            ),
-            None => format!("🔥 Your {streak} day streak ends in {hours}h"),
-        },
-        body: if freezes > 0 {
-            "A freeze is available if you need a break."
-        } else {
-            "A little study is waiting when you have time. Your previous progress is still yours."
+    let title = match minutes {
+        Some((done, needed)) => {
+            say("🔥 Your {0} day streak ends in {1}h · {2} of {3} minutes today")
+                .value(streak)
+                .value(hours)
+                .value(done.min(needed))
+                .value(needed)
         }
-        .into(),
-    }
-}
-
-fn announcement(item: &Announcement) -> String {
-    let people = item.recipients;
-    format!(
-        "📣 {} — told {people} {}",
-        item.deck,
-        if people == 1 { "friend" } else { "friends" }
-    )
-}
-
-fn conquest_headline(conquest: &Conquest) -> String {
-    if conquest.leech {
-        format!("🏆 Leech tamed after {} lapses", conquest.lapses)
+        None => say("🔥 Your {0} day streak ends in {1}h")
+            .value(streak)
+            .value(hours),
+    };
+    let body = if freezes > 0 {
+        say("A freeze is available if you need a break.")
     } else {
-        format!("🏆 Card conquered after {} lapses", conquest.lapses)
+        say("A little study is waiting when you have time. Your previous progress is still yours.")
+    };
+    Notice {
+        title: title.into(),
+        body: body.into(),
     }
 }
 
-fn level_status(profile: &Profile) -> String {
-    format!(
-        "Lv {}  {}/{}",
-        profile.level, profile.xp_into_level, profile.xp_for_next
-    )
+fn announcement(item: &Announcement) -> Message {
+    let told = if item.recipients == 1 {
+        say("📣 {0} — told {1} friend")
+    } else {
+        say("📣 {0} — told {1} friends")
+    };
+    told.value(&item.deck).value(item.recipients).into()
+}
+
+fn conquest_headline(conquest: &Conquest) -> Message {
+    let headline = if conquest.leech {
+        say("🏆 Leech tamed after {0} lapses")
+    } else {
+        say("🏆 Card conquered after {0} lapses")
+    };
+    headline.value(conquest.lapses).into()
+}
+
+fn level_status(profile: &Profile) -> Text {
+    say("Lv {0}  {1}/{2}")
+        .value(profile.level)
+        .value(profile.xp_into_level)
+        .value(profile.xp_for_next)
 }
 
 fn done_quests(profile: &Profile) -> BTreeSet<&str> {
@@ -101,10 +228,13 @@ fn unlocked(profile: &Profile) -> BTreeSet<&str> {
         .collect()
 }
 
+const STATUS_SEPARATOR: &str = "  ·  ";
+
 /// Compares the profile before and after an upload or preview. Without a baseline only
-/// the deck announcements are reported.
+/// the deck announcements are reported. The profiles' quest and achievement titles must
+/// still be the English ones.
 pub fn feedback(before: Option<&Profile>, after: &Profile, announced: &[Announcement]) -> Feedback {
-    let mut headlines: Vec<String> = announced.iter().map(announcement).collect();
+    let mut headlines: Vec<Message> = announced.iter().map(announcement).collect();
     let Some(before) = before else {
         return Feedback {
             headlines,
@@ -124,39 +254,45 @@ pub fn feedback(before: Option<&Profile>, after: &Profile, announced: &[Announce
     let combo = after.today.current_combo;
     let status = match after.xp_total.cmp(&before.xp_total) {
         std::cmp::Ordering::Equal => None,
-        std::cmp::Ordering::Less => Some(format!(
-            "−{} XP  ·  combo {combo}  ·  {}",
-            before.xp_total - after.xp_total,
-            level_status(after)
+        std::cmp::Ordering::Less => Some(Text::Joined(
+            STATUS_SEPARATOR,
+            vec![
+                say("−{0} XP").value(before.xp_total - after.xp_total),
+                say("combo {0}").value(combo),
+                level_status(after),
+            ],
         )),
         std::cmp::Ordering::Greater => {
             if after.level > before.level {
-                headlines.push(format!("Level {}!", after.level));
+                headlines.push(say("Level {0}!").value(after.level).into());
             }
             let had = unlocked(before);
             headlines.extend(
                 unlocked(after)
                     .difference(&had)
-                    .map(|title| format!("Achievement: {title}")),
+                    .map(|title| say("Achievement: {0}").title(title).into()),
             );
             let had = done_quests(before);
             headlines.extend(
                 done_quests(after)
                     .difference(&had)
-                    .map(|title| format!("Quest complete: {title}")),
+                    .map(|title| say("Quest complete: {0}").title(title).into()),
             );
             if after.streak > before.streak {
-                headlines.push(format!("{} day streak", after.streak));
+                headlines.push(say("{0} day streak").value(after.streak).into());
             }
-            let mut status = format!("+{} XP", after.xp_total - before.xp_total);
+            let mut parts = vec![say("+{0} XP").value(after.xp_total - before.xp_total)];
             if combo >= 5 {
-                status.push_str(&format!("  ·  combo {combo}"));
+                parts.push(say("combo {0}").value(combo));
             }
-            status.push_str(&format!("  ·  {}", level_status(after)));
-            Some(status)
+            parts.push(level_status(after));
+            Some(Text::Joined(STATUS_SEPARATOR, parts))
         }
     };
-    Feedback { headlines, status }
+    Feedback {
+        headlines,
+        status: status.map(Message::from),
+    }
 }
 
 /// One row of the weekly board, in board order.
@@ -188,33 +324,25 @@ pub fn rank_change(previous: &[String], board: &[Place], me: &str) -> Option<Not
             .join(", ")
     };
     let now_at = |user: &str| board.iter().position(|place| place.user == user);
-    let gap = if rank > 0 {
+    let gap = (rank > 0).then(|| {
         let ahead = &board[rank - 1];
-        format!(
-            " {} XP behind {}.",
-            grouped(ahead.week_xp.saturating_sub(board[rank].week_xp)),
-            ahead.display
-        )
-    } else {
-        String::new()
-    };
-    let (title, body) = if rank < before {
+        say("{0} XP behind {1}.")
+            .value(grouped(ahead.week_xp.saturating_sub(board[rank].week_xp)))
+            .value(ahead.display)
+    });
+    let (title, mut body) = if rank < before {
         let passed: Vec<&str> = previous[..before]
             .iter()
             .map(String::as_str)
             .filter(|user| now_at(user).is_some_and(|at| at > rank))
             .collect();
         let title = if rank == 0 {
-            "👑 You took the crown".to_string()
+            say("👑 You took the crown")
         } else {
-            format!("▲ You're now #{}", rank + 1)
+            say("▲ You're now #{0}").value(rank + 1)
         };
-        let passed = if passed.is_empty() {
-            String::new()
-        } else {
-            format!("You passed {}.", names(passed))
-        };
-        (title, format!("{passed}{gap}"))
+        let passed = (!passed.is_empty()).then(|| say("You passed {0}.").value(names(passed)));
+        (title, passed.into_iter().collect::<Vec<_>>())
     } else {
         let overtakers: Vec<&str> = board[..rank]
             .iter()
@@ -226,21 +354,18 @@ pub fn rank_change(previous: &[String], board: &[Place], me: &str) -> Option<Not
                     .is_some_and(|at| at > before)
             })
             .collect();
-        let who = if overtakers.is_empty() {
-            "Someone".to_string()
-        } else {
-            names(overtakers)
+        let title = match (overtakers.is_empty(), before == 0) {
+            (true, true) => say("👑 Someone took the crown"),
+            (true, false) => say("▼ Someone passed you"),
+            (false, true) => say("👑 {0} took the crown").value(names(overtakers)),
+            (false, false) => say("▼ {0} passed you").value(names(overtakers)),
         };
-        let title = if before == 0 {
-            format!("👑 {who} took the crown")
-        } else {
-            format!("▼ {who} passed you")
-        };
-        (title, format!("You're now #{}.{gap}", rank + 1))
+        (title, vec![say("You're now #{0}.").value(rank + 1)])
     };
+    body.extend(gap);
     Some(Notice {
-        title,
-        body: body.trim().to_string(),
+        title: title.into(),
+        body: Text::Joined(" ", body).into(),
     })
 }
 
@@ -305,7 +430,7 @@ mod tests {
         assert_eq!(warning.body, "A freeze is available if you need a break.");
         let warning = streak_warning(3, 0, HOUR_MS, HOUR_MS, None);
         assert_eq!(warning.title, "🔥 Your 3 day streak ends in 1h");
-        assert!(warning.body.starts_with("A little study"));
+        assert!(warning.body.to_string().starts_with("A little study"));
     }
 
     #[test]
@@ -316,7 +441,100 @@ mod tests {
             "🔥 Your 12 day streak ends in 3h · 6 of 10 minutes today"
         );
         let warning = streak_warning(12, 0, 10 * HOUR_MS, 7 * HOUR_MS, Some((14, 10)));
-        assert!(warning.title.ends_with("10 of 10 minutes today"));
+        assert!(
+            warning
+                .title
+                .to_string()
+                .ends_with("10 of 10 minutes today")
+        );
+    }
+
+    #[test]
+    fn names_that_look_like_feedback_stay_verbatim_in_every_language() {
+        let deck = "Lv 3 — told 2 friends (+5";
+        let mut told = announcement(&Announcement {
+            deck: deck.into(),
+            recipients: 1,
+        });
+        assert_eq!(told, "📣 Lv 3 — told 2 friends (+5 — told 1 friend");
+        told.localize("es");
+        assert_eq!(told, "📣 Lv 3 — told 2 friends (+5 — se avisó a 1 amigo");
+        told.localize("de-AT");
+        assert_eq!(
+            told,
+            "📣 Lv 3 — told 2 friends (+5 — 1 Freund benachrichtigt"
+        );
+
+        let tricky = "Bo. 5 XP behind Ana.";
+        let board = [
+            Place {
+                user: "ana",
+                display: "Ana",
+                week_xp: 3000,
+            },
+            Place {
+                user: "me",
+                display: "Me",
+                week_xp: 1500,
+            },
+            Place {
+                user: "bo",
+                display: tricky,
+                week_xp: 10,
+            },
+        ];
+        let mut notice = rank_change(&order(&["ana", "bo", "me"]), &board, "me").unwrap();
+        notice.localize("de");
+        assert_eq!(notice.title, "▲ Du bist jetzt auf Platz 2");
+        assert_eq!(
+            notice.body,
+            "Du hast Bo. 5 XP behind Ana. überholt. 1,500 XP hinter Ana."
+        );
+    }
+
+    #[test]
+    fn someone_unseen_is_named_in_the_readers_language() {
+        let board = [place("new", 3000), place("me", 1500)];
+        let mut notice = rank_change(&order(&["me"]), &board, "me").unwrap();
+        assert_eq!(notice.title, "👑 Someone took the crown");
+        notice.localize("fr");
+        assert_eq!(notice.title, "👑 Quelqu’un a pris la couronne");
+        assert_eq!(notice.body, "Tu es maintenant n° 2. 1,500 XP derrière new.");
+    }
+
+    #[test]
+    fn messages_are_sent_as_plain_strings() {
+        let mut warning = streak_warning(12, 1, 10 * HOUR_MS, 7 * HOUR_MS + 1, None);
+        warning.localize("pt-BR");
+        assert_eq!(
+            serde_json::to_value(&warning).unwrap(),
+            serde_json::json!({
+                "title": "🔥 A tua sequência de 12 dias termina em 3 h",
+                "body": "Tens uma proteção de sequência disponível se precisares de uma pausa.",
+            })
+        );
+        let mut feedback = Feedback {
+            headlines: vec![say("Level {0}!").value(4).into()],
+            status: Some(
+                Text::Joined(
+                    STATUS_SEPARATOR,
+                    vec![
+                        say("+{0} XP").value(30),
+                        say("Lv {0}  {1}/{2}").value(4).value(5).value(400),
+                    ],
+                )
+                .into(),
+            ),
+        };
+        assert_eq!(
+            serde_json::to_value(&feedback).unwrap(),
+            serde_json::json!({"headlines": ["Level 4!"], "status": "+30 XP  ·  Lv 4  5/400"})
+        );
+        feedback.localize("de");
+        assert_eq!(
+            serde_json::to_value(&feedback).unwrap(),
+            serde_json::json!({"headlines": ["Level 4!"], "status": "+30 XP  ·  Stufe 4  5/400"})
+        );
     }
 
     #[test]

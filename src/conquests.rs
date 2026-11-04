@@ -157,6 +157,9 @@ pub(crate) async fn tell(
     let day = store.clock(&user).map_err(store_error)?.day(now);
     let friends = crate::social::friends(&store.conn, &user).map_err(store_error)?;
     for friend in &friends {
+        if crate::social::muted(&store.conn, friend, &user).map_err(store_error)? {
+            continue;
+        }
         store
             .send_once(
                 &Outgoing {

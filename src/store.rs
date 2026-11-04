@@ -46,15 +46,6 @@ fn config_number(conn: &Connection, key: &str) -> Option<i64> {
     serde_json::from_slice::<f64>(&raw).ok().map(|n| n as i64)
 }
 
-/// Whether `table` already has `column`, for migrations that add one.
-pub(crate) fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
-    conn.query_row(
-        "select exists (select 1 from pragma_table_info(?1) where name = ?2)",
-        [table, column],
-        |r| r.get(0),
-    )
-}
-
 /// The player's current clock, or the default for someone who never uploaded.
 pub fn clock_in(conn: &Connection, user: &str) -> rusqlite::Result<Clock> {
     let clock = conn
@@ -114,18 +105,6 @@ impl Store {
                  received_at integer not null
              ) without rowid;",
         )?;
-        if !has_column(&conn, "reviews", "ivl")? {
-            conn.execute_batch("alter table reviews add column ivl integer")?;
-        }
-        // Players recorded before clocks had a history keep the only clock we
-        // know about, reaching back over all of their reviews. A move they made
-        // before this point has to be declared; it is not in the review data.
-        conn.execute(
-            "insert into clock_history (user, effective_from_ms, offset_west_min, rollover_hour)
-             select user, 0, offset_west_min, rollover_hour from clocks
-             where not exists (select 1 from clock_history where clock_history.user = clocks.user)",
-            [],
-        )?;
         crate::accounts::initialize(&conn)?;
         crate::oauth::initialize(&conn)?;
         crate::social::initialize(&conn)?;
@@ -145,6 +124,7 @@ impl Store {
         crate::dev::initialize(&conn)?;
         crate::goals::initialize(&conn)?;
         crate::wins::initialize(&conn)?;
+        crate::migrations::run(&conn)?;
         Ok(Self {
             conn,
             scratch,
@@ -513,7 +493,10 @@ mod tests {
                     params!["hill", berlin.offset_west_min, berlin.rollover_hour],
                 )
                 .unwrap();
-            store.conn.execute("delete from clock_history", []).unwrap();
+            store
+                .conn
+                .execute_batch("delete from clock_history; pragma user_version = 0;")
+                .unwrap();
         }
         let store = Store::open(&dir).unwrap();
         let history = store.clock_history("hill").unwrap();

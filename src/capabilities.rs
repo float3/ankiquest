@@ -18,6 +18,7 @@ pub(crate) const FEATURES: &[&str] = &[
     "deck_share",
     "devices",
     "goal_backlog_days",
+    "mute",
     "reactions",
     "share_cards",
     "wins",

@@ -1,0 +1,13 @@
+{
+  "friends": [],
+  "groups": [],
+  "incoming": [],
+  "muted": [
+    {
+      "display": "Cerro",
+      "user": "cerro"
+    }
+  ],
+  "outgoing": [],
+  "public": true
+}

@@ -338,19 +338,19 @@ pub(crate) fn date(day: i64, language: &str) -> String {
 /// the day's totals are left off it.
 pub(crate) fn chips(kind: &str, stats: &serde_json::Value, language: &str) -> Vec<String> {
     [
-        ("streak", "{0} day streak"),
-        ("level", "Level {0}"),
-        ("reviews_today", "{0} cards today"),
-        ("minutes_today", "{0} minutes today"),
+        ("streak", i18n::template("{0} day streak", language)),
+        ("level", i18n::template("Level {0}", language)),
+        ("reviews_today", i18n::template("{0} cards today", language)),
+        (
+            "minutes_today",
+            i18n::template("{0} minutes today", language),
+        ),
     ]
     .into_iter()
     .filter(|(key, _)| kind != "conquered" || !key.ends_with("_today"))
     .filter_map(|(key, label)| {
         let value = stats.get(key)?.as_i64().filter(|n| *n > 0)?;
-        Some(i18n::substitute(
-            &i18n::text(label, language),
-            &[&value.to_string()],
-        ))
+        Some(i18n::substitute(label, &[&value.to_string()]))
     })
     .take(3)
     .collect()
