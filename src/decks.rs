@@ -1,8 +1,8 @@
 use crate::access::authorized;
 use crate::app::App;
 use crate::game::Clock;
-use crate::notifications::{INBOX_AGE_MS, NUDGE_ALLOWED_SQL, Outgoing, insert_notification};
-use crate::store::{Error, Store, has_column};
+use crate::notifications::{INBOX_AGE_MS, Outgoing, insert_notification};
+use crate::store::{Error, Store};
 use crate::web_util::failed_for;
 use crate::worker::push_destination;
 use axum::extract::{Path as UrlPath, State};
@@ -209,64 +209,6 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              sender text not null,
              primary key (recipient, sender)
          ) without rowid;",
-    )?;
-    // Databases from before replies exist in the wild; adding the columns is the migration.
-    for (column, definition) in [
-        ("sender", "text not null default ''"),
-        ("replied", "integer not null default 0"),
-        ("kind", "text not null default 'message'"),
-        ("push_only", "integer not null default 0"),
-        ("retry_at", "integer not null default 0"),
-        ("push_attempts", "integer not null default 0"),
-        ("push_cancelled", "integer not null default 0"),
-        ("completion_cancelled", "integer not null default 0"),
-        ("read_at", "integer"),
-        ("challenge_id", "integer"),
-        ("reply_to_title", "text"),
-        ("reply_to_body", "text"),
-        ("topic", "text"),
-        ("win_id", "integer"),
-    ] {
-        if !has_column(conn, "notifications", column)? {
-            conn.execute(
-                &format!("alter table notifications add column {column} {definition}"),
-                [],
-            )?;
-        }
-    }
-    if !has_column(conn, "player_settings", "celebrations")? {
-        conn.execute(
-            "alter table player_settings add column celebrations integer not null default 1",
-            [],
-        )?;
-    }
-    if !has_column(conn, "player_settings", "friend_nudges")? {
-        // Add the column and copy the prior choice together: a restart must not
-        // mistake a half-migrated database for a new user's opt-out.
-        conn.execute_batch(
-            "begin immediate;
-             alter table player_settings add column friend_nudges integer not null default 0;
-             update player_settings set friend_nudges = nudges;
-             commit;",
-        )?;
-    }
-    conn.execute(
-        "create index if not exists notifications_pending on notifications (pushed, retry_at, id)",
-        [],
-    )?;
-    conn.execute(
-        "create index if not exists notifications_sender on notifications (sender, id)",
-        [],
-    )?;
-    // Older servers left nudges queued after opt-out. Retain their inbox history
-    // without resuming those pushes when the player next enables nudges.
-    conn.execute(
-        &format!(
-            "update notifications set push_cancelled = 1
-             where pushed = 0 and push_cancelled = 0 and kind = 'nudge'
-             and not {NUDGE_ALLOWED_SQL}"
-        ),
-        [],
     )?;
     Ok(())
 }
@@ -881,7 +823,8 @@ pub(crate) mod tests {
         store
             .conn
             .execute_batch(
-                "drop table incoming_settings;
+                "pragma user_version = 0;
+             drop table incoming_settings;
              drop table incoming_muted_senders;
              alter table notifications drop column completion_cancelled;",
             )
@@ -1323,7 +1266,8 @@ pub(crate) mod tests {
     fn existing_nudge_choices_migrate_to_friend_choices_once() {
         let (store, path) = temporary_store();
         store.conn.execute_batch(
-            "drop table player_settings;
+            "pragma user_version = 0;
+             drop table player_settings;
              create table player_settings (user text primary key, nudges integer not null default 0) without rowid;
              insert into player_settings (user, nudges) values ('hill', 1), ('cerro', 0);",
         ).unwrap();
@@ -1363,9 +1307,9 @@ pub(crate) mod tests {
         // Simulate an older server's opt-out, which left the delivery pending.
         store
             .conn
-            .execute(
-                "update player_settings set nudges = 0 where user = 'hill'",
-                [],
+            .execute_batch(
+                "update player_settings set nudges = 0 where user = 'hill';
+                 pragma user_version = 0;",
             )
             .unwrap();
         drop(store);

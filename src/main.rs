@@ -33,6 +33,7 @@ mod game;
 mod goals;
 mod i18n;
 mod inbox;
+mod migrations;
 mod notifications;
 mod oauth;
 mod privacy;

@@ -1560,7 +1560,8 @@ mod tests {
         drop(store);
         let conn = Connection::open(path.join("ankiquest.db")).unwrap();
         conn.execute_batch(
-            "drop table notifications;
+            "pragma user_version = 0;
+             drop table notifications;
              create table notifications (
                  id integer primary key autoincrement,
                  recipient text not null,

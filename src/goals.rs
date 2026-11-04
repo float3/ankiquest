@@ -24,9 +24,6 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              since integer
          ) without rowid;",
     )?;
-    if !crate::store::has_column(conn, "goals", "since")? {
-        conn.execute("alter table goals add column since integer", [])?;
-    }
     Ok(())
 }
 
