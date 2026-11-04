@@ -129,6 +129,7 @@ impl Fixture {
                 Clock::default().day(NOW_MS),
                 NOW_MS,
                 false,
+                true,
                 &json!({"streak": 1, "level": 2, "reviews_today": 5, "minutes_today": 1}),
             )
             .unwrap()[0]

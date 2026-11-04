@@ -79,6 +79,8 @@ both timestamp fields are Unix **seconds**; challenge `start_at` and `end_at` re
 
 `topic` is present only when the server knows what a row is about, so clients can pick matching art. Celebrations and game events carry the first part of their event key: `achievement`, `level`, `streak`, `record`, `conquered`, `secured` or `goal`; a grouped "N new unlocks" row has one only when all of its events share it. A weekly recap carries `place:N` when the player was ranked. Both personal inbox endpoints include it.
 
+`quiet: true` marks a row the server keeps in the inbox without pushing it. Clients list it like any other row but raise no system notification, tooltip, sound or share prompt for it. Today this is "Streak secured!" on an ordinary study day; it is absent (false) on every other row, so older clients that ignore it just announce the row as before.
+
 counts cover all items within the selected window, independently of pagination, push state, and any Android delivery cursor. `unread_count` counts rows with no read timestamp. `action_count` counts still-pending challenge invitations whose challenge is neither cancelled nor past its deadline. reading an invitation does not accept it. a 30-day view counts its own 30-day window; use the default 90-day view for the full retained inbox. follow `next_before` until null to load more.
 
 `POST /api/activity/{user}/read` accepts `{ "ids": [42, 43] }` and returns `204`. at most 200 positive IDs per request; clients mark larger selections in batches. duplicate IDs/retries are safe and preserve the first read timestamp. unknown, expired, push-only, and other members' IDs have no effect. the caller must own `{user}`. read state survives restart and changes neither push acknowledgement nor legacy delivery state.
