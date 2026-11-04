@@ -1,29 +1,15 @@
 """Sharing settings and the share window; run with python -m unittest discover -s tests."""
 
-import importlib.util
 import sys
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
+from addon_loader import load_in_package
 import test_deck_completion as base
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-
-
-def load_in_package(name):
-    package = ModuleType("aq_sharing_package")
-    package.__path__ = [str(ADDON)]
-    sys.modules[package.__name__] = package
-    spec = importlib.util.spec_from_file_location(package.__name__ + "." + name, ADDON / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-sharing = load_in_package("sharing")
+sharing = load_in_package("aq_sharing_package", "sharing")
 language = sys.modules["aq_sharing_package.language"]
 
 

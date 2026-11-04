@@ -1,12 +1,9 @@
 """Deck copies, server-side preferences and token-less previews, without Anki or Qt."""
 
-import importlib.util
 import json
 import os
-import sys
 import tempfile
 import threading
-import types
 import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -14,30 +11,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-PACKAGE = "aq_copies_pkg"
+from addon_loader import load_in_package
 
-
-def load(name):
-    """Loads one add-on module inside a stand-in package, so relative imports work without running __init__."""
-    if PACKAGE not in sys.modules:
-        package = types.ModuleType(PACKAGE)
-        package.__path__ = [str(ADDON)]
-        sys.modules[PACKAGE] = package
-    full = PACKAGE + "." + name
-    if full in sys.modules:
-        return sys.modules[full]
-    spec = importlib.util.spec_from_file_location(full, ADDON / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[full] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-copies = load("copies")
-preferences = load("preferences")
-preview = load("preview")
-client = load("client")
+copies = load_in_package("aq_copies_pkg", "copies")
+preferences = load_in_package("aq_copies_pkg", "preferences")
+preview = load_in_package("aq_copies_pkg", "preview")
+client = load_in_package("aq_copies_pkg", "client")
 english = lambda text: text
 
 

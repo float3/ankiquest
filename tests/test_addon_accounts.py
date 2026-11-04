@@ -1,23 +1,16 @@
 """Signing in and creating accounts from the desktop add-on, against a stand-in server."""
 
 import ast
-import importlib.util
 import json
-import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1] / "addon"
+from addon_loader import ADDON, load_module
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location("aq_accounts_" + name, ROOT / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_module("aq_accounts_" + name, name + ".py")
 
 
 class Server(BaseHTTPRequestHandler):
@@ -126,7 +119,7 @@ class SpanishCoverage(unittest.TestCase):
         spanish = load("language").SPANISH
         labels = {
             node.args[0].value
-            for path in ROOT.glob("*.py")
+            for path in ADDON.glob("*.py")
             for node in ast.walk(ast.parse(path.read_text("utf-8")))
             if isinstance(node, ast.Call)
             and getattr(node.func, "id", None) in ("tr", "translate")

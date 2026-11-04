@@ -1,22 +1,12 @@
 """Every desktop label has a translation in every language, with the same placeholders."""
 
 import ast
-import importlib.util
 import re
-import sys
 import unittest
-from pathlib import Path
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
+from addon_loader import ADDON, load_module
+
 PLACEHOLDER = re.compile(r"%[sd]")
-
-
-def load():
-    spec = importlib.util.spec_from_file_location("aq_language_tables", ADDON / "language.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def literals(node):
@@ -49,7 +39,7 @@ def code_strings():
     return found
 
 
-language = load()
+language = load_module("aq_language_tables", "language.py")
 
 
 class TranslationTables(unittest.TestCase):
@@ -85,6 +75,13 @@ class TranslationTables(unittest.TestCase):
         self.assertEqual(language.tr("Save", "es-AR"), "Guardar")
         self.assertEqual(language.tr("Save", "ja"), "Save")
         self.assertEqual(language.tr("Not a label", "de"), "Not a label")
+
+    def test_labels_are_translated_before_names_are_filled_in(self):
+        board = load_module("aq_language_board", "board.py")
+        spanish = lambda value: language.tr(value, "es-AR")
+        self.assertIn("Clasificación", board.html({"level": 4, "streak": 3}, 2, 1, spanish))
+        self.assertIn("Puesto 2 esta semana", board.html({}, 2, 0, spanish))
+        self.assertEqual("Conectado como Friends::{0}, nivel 2.", spanish("Connected as %s, level %d.") % ("Friends::{0}", 2))
 
 
 if __name__ == "__main__":

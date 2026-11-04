@@ -1,17 +1,13 @@
 """Desktop add-on self-update decisions; run with python -m unittest discover -s tests."""
 
-import importlib.util
 import json
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-spec = importlib.util.spec_from_file_location("ankiquest_updates", ADDON / "updates.py")
-updates = importlib.util.module_from_spec(spec)
-sys.modules["ankiquest_updates"] = updates
-spec.loader.exec_module(updates)
+from addon_loader import load_module
+
+updates = load_module("ankiquest_updates", "updates.py")
 
 
 def release(tag, prerelease=False, draft=False, package=True):

@@ -1,30 +1,18 @@
 """The desktop inbox, replies and sharing a win; run with python -m unittest discover -s tests."""
 
 import ast
-import importlib.util
-import sys
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from addon_loader import ADDON, load_module
 import test_deck_completion as base
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-
-
-def load(name):
-    spec = importlib.util.spec_from_file_location("aq_inbox_" + name, ADDON / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-inbox = load("inbox")
-share = load("share")
-language = load("language")
+inbox = load_module("aq_inbox_inbox", "inbox.py")
+share = load_module("aq_inbox_share", "share.py")
+language = load_module("aq_inbox_language", "language.py")
 
 
 class Refused(Exception):

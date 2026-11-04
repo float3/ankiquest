@@ -1,35 +1,22 @@
 """Desktop Today panel, daily goal, deck states and session recaps; run with python -m unittest discover -s tests."""
 
 import ast
-import importlib.util
 import re
 import sqlite3
 import sys
 import unittest
-from pathlib import Path
 from concurrent.futures import Future
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
+from addon_loader import ADDON, load_module
 
-
-def load_module(name, path, package=False):
-    spec = importlib.util.spec_from_file_location(
-        name, path, submodule_search_locations=[str(ADDON)] if package else None
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-goals = load_module("ankiquest_goals", ADDON / "goals.py")
-moods = load_module("ankiquest_moods", ADDON / "moods.py")
-today = load_module("ankiquest_today", ADDON / "today.py")
-board = load_module("ankiquest_today_board", ADDON / "board.py")
-language = load_module("ankiquest_today_language", ADDON / "language.py")
-progress = load_module("ankiquest_today_progress", ADDON / "deck_completion.py")
+goals = load_module("ankiquest_goals", "goals.py")
+moods = load_module("ankiquest_moods", "moods.py")
+today = load_module("ankiquest_today", "today.py")
+board = load_module("ankiquest_today_board", "board.py")
+language = load_module("ankiquest_today_language", "language.py")
+progress = load_module("ankiquest_today_progress", "deck_completion.py")
 
 
 def node(deck_id, name="", new=0, review=0, learn=0, intraday=0, children=()):
@@ -629,7 +616,7 @@ class HomeTests(unittest.TestCase):
         modules = patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt, "anki": anki, "anki.lang": anki.lang})
         modules.start()
         self.addCleanup(modules.stop)
-        self.addon = load_module("ankiquest_home_addon", ADDON / "__init__.py", package=True)
+        self.addon = load_module("ankiquest_home_addon", "__init__.py", package=True)
         self.addon.client = lambda: self.api
         self.home = sys.modules["ankiquest_home_addon.home"]
         self.home.today_ui = SimpleNamespace(session_dialog=Mock())
