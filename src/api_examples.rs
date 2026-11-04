@@ -6,15 +6,14 @@
 //! `example-link-N` and device ids by `example-device-N`.
 
 use crate::app::App;
-use crate::game::{Clock, Event, Week};
+use crate::game::{Clock, Event};
 use axum::body::{Body, to_bytes};
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::Request;
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 const PASSWORD: &str = "long enough pw";
@@ -30,7 +29,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let config = serde_json::from_value(json!({
             "registration": true,
             "public_url": "https://anki.example.test",
@@ -41,19 +40,9 @@ impl Fixture {
             }
         }))
         .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
         crate::app::fix_now_ms(Some(NOW_MS));
         Self {
-            app: Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
+            app: Arc::new(crate::test_support::app_from(store, config)),
             path,
             secrets: Vec::new(),
         }

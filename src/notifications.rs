@@ -786,6 +786,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::decks::tests::*;
+    use crate::test_support::temporary_store;
     #[test]
     fn activity_categories_filter_before_pagination_and_keep_global_unread_count() {
         let (mut store, _path) = temporary_store();

@@ -11,32 +11,53 @@ pub(crate) use axum::extract::{Path as UrlPath, State};
 pub(crate) use axum::http::{HeaderMap, StatusCode, header};
 pub(crate) use std::collections::HashMap;
 pub(crate) use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) use std::sync::{Arc, Mutex, RwLock};
 pub(crate) use std::time::Duration;
 
+/// A store in a new temporary directory.
+pub(crate) fn temporary_store() -> (Store, PathBuf) {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "ankiquest-test-{}-{}-{}",
+        std::process::id(),
+        now_ms(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
+    ));
+    (Store::open(&path).unwrap(), path)
+}
+
+/// An app over `store` with `config`: accounts loaded from the store, no players loaded.
+pub(crate) fn app_from(store: Store, config: Config) -> App {
+    App {
+        accounts: crate::accounts::Directory::load(&store.conn).unwrap(),
+        config,
+        access: access::Access::default(),
+        week: Week::default(),
+        store: Mutex::new(store),
+        players: RwLock::new(HashMap::new()),
+        standings: Default::default(),
+        heartbeat: Default::default(),
+    }
+}
+
+/// An app with the JSON `config` over a new temporary store.
+pub(crate) fn app_with(config: serde_json::Value) -> (Arc<App>, PathBuf) {
+    let (store, path) = temporary_store();
+    (
+        Arc::new(app_from(store, serde_json::from_value(config).unwrap())),
+        path,
+    )
+}
+
 pub(crate) fn fixture() -> (Arc<App>, PathBuf) {
-    let (store, path) = decks::tests::temporary_store();
-    let config: Config = serde_json::from_value(serde_json::json!({
+    app_with(serde_json::json!({
         "users": {
             "cerro": {"display": "Cerro", "token": "cerro-secret"},
             "hill": {"display": "Hill", "token": "hill-secret"},
             "friend": {"token": "friend-secret"}
         }
     }))
-    .unwrap();
-    (
-        Arc::new(App {
-            config,
-            access: access::Access::default(),
-            accounts: Default::default(),
-            week: Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        }),
-        path,
-    )
 }
 
 pub(crate) fn headers(user: &str) -> HeaderMap {

@@ -545,7 +545,7 @@ mod tests {
     use axum::http::Request;
     use std::net::SocketAddr;
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     const NOW: i64 = 1_790_000_000_000;
@@ -561,20 +561,11 @@ mod tests {
             }
         }))
         .unwrap();
-        App {
-            config,
-            access: crate::access::Access::default(),
-            accounts: crate::accounts::Directory::load(&store.conn).unwrap(),
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        }
+        crate::test_support::app_from(store, config)
     }
 
     fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         (Arc::new(app_with(store)), path)
     }
 
@@ -873,7 +864,7 @@ mod tests {
 
     #[test]
     fn stats_count_players_signups_groups_and_retention() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let now = now_ms();
         for (user, age) in [
             ("old", 20 * DAY_MS),

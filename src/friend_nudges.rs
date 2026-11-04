@@ -203,26 +203,14 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn sender_routes_require_owner_auth_and_reject_self_or_unknown_recipients() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({"users": {
+        let (app, path) = crate::test_support::app_with(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
-        }}))
-        .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        }}));
         for (owner, token, recipient, expected) in [
             ("cerro", "", "hill", StatusCode::UNAUTHORIZED),
             ("cerro", "hill-secret", "hill", StatusCode::UNAUTHORIZED),
@@ -270,22 +258,13 @@ mod tests {
 
     #[tokio::test]
     async fn changing_friend_nudges_does_not_disable_automatic_progress_nudges() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         store.set_nudges("hill", true).unwrap();
         let config = serde_json::from_value(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
         }}))
         .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        let app = Arc::new(crate::test_support::app_from(store, config));
         let response = routes()
             .with_state(app.clone())
             .oneshot(
@@ -308,21 +287,9 @@ mod tests {
 
     #[tokio::test]
     async fn only_the_recipient_can_change_a_specific_friend_nudge_choice() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({"users": {
+        let (app, path) = crate::test_support::app_with(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
-        }}))
-        .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        }}));
         for (owner, sender, token, expected) in [
             ("hill", "cerro", "cerro-secret", StatusCode::UNAUTHORIZED),
             ("hill", "hill", "hill-secret", StatusCode::BAD_REQUEST),
@@ -355,7 +322,7 @@ mod tests {
 
     #[test]
     fn nudges_require_opt_in_and_limit_each_friend_until_the_next_anki_day() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let now = 1_800_000_000_000;
         assert_eq!(
             send(&mut store, "cerro", "Cerro", "hill", now).unwrap(),
@@ -408,7 +375,7 @@ mod tests {
 
     #[test]
     fn muting_one_friend_preserves_other_friends_and_automatic_nudges() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let now = 1_800_000_000_000;
         store.set_nudges("hill", true).unwrap();
         store.set_friend_nudges("hill", true).unwrap();

@@ -640,7 +640,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_win_is_made_once_and_its_link_is_unguessable_reusable_and_revocable() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         store.set_companion("hill", "ankilope").unwrap();
         let id = moment(&store, "hill", "record:day:20000");
         assert_eq!(
@@ -690,7 +690,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_shared_conquered_card_speaks_for_its_player_and_names_the_card_only_when_labelled() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let make = |key: &str, title: &str, body: &str| {
             let id = create(&store.conn, "hill", key, 1, 1, title, body, &json!({}))
                 .unwrap()
@@ -749,7 +749,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sharing_settings_default_merge_and_reject_unknowns() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let defaults = sharing(&store.conn, "hill").unwrap();
         assert_eq!(defaults.daily_cap, 3);
         assert_eq!(defaults.policies.len(), KINDS.len());
@@ -790,7 +790,7 @@ pub(crate) mod tests {
 
     #[test]
     fn automatic_wins_wait_in_a_queue_taken_once() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         update_sharing(
             &store.conn,
             "hill",

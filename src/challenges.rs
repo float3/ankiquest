@@ -916,7 +916,7 @@ mod tests {
 
     #[test]
     fn challenge_events_are_private_transactional_and_retry_safe() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let eligible = BTreeSet::from(["friend".into(), "outsider".into()]);
         let mut request = request();
         request.request_id = Some("create-request-1".into());
@@ -1093,7 +1093,7 @@ mod tests {
 
     #[test]
     fn invitation_actions_and_completion_skip_declined_and_expired_members() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let eligible = BTreeSet::from(["friend".into(), "outsider".into()]);
         let mut request = request();
         request.recipients.push("outsider".into());
@@ -1175,7 +1175,7 @@ mod tests {
 
     #[test]
     fn cancelling_does_not_refill_the_daily_invitations_and_a_mute_silences_them() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         let people: Vec<String> = (0..30).map(|i| format!("p{i:02}")).collect();
         let eligible: BTreeSet<String> = people.iter().cloned().collect();
         let mut many = request();
@@ -1226,7 +1226,7 @@ mod tests {
 
     #[test]
     fn custom_goal_can_wait_for_every_invitee_before_its_full_timer_starts() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let request: Create = serde_json::from_value(serde_json::json!({
             "title": "Study together", "kind": "reviews", "cooperative": true,
@@ -1263,7 +1263,7 @@ mod tests {
 
     #[test]
     fn declining_a_waiting_custom_goal_ends_it_without_starting_the_timer() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let mut request = request();
         request.start_when_ready = true;
@@ -1287,7 +1287,7 @@ mod tests {
 
     #[test]
     fn invitations_are_private_and_only_post_acceptance_reviews_count() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into(), "other".into()]);
         let id = create(&mut store, "owner", &request(), &eligible, 100).unwrap();
@@ -1320,7 +1320,7 @@ mod tests {
 
     #[test]
     fn study_days_are_distinct_and_future_and_post_deadline_reviews_do_not_count() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let mut request = request();
         request.kind = Kind::StudyDays;
@@ -1348,7 +1348,7 @@ mod tests {
 
     #[test]
     fn cancelling_preserves_prior_progress_and_excludes_later_reviews() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         let id = create(&mut store, "owner", &request(), &eligible, 100).unwrap();
@@ -1369,7 +1369,7 @@ mod tests {
 
     #[test]
     fn creator_can_close_a_completed_goal_to_free_an_open_slot() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         let mut ids = Vec::new();
@@ -1393,7 +1393,7 @@ mod tests {
 
     #[test]
     fn validates_targets_people_and_creator_limit_before_writing() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         let mut request = request();
@@ -1420,7 +1420,7 @@ mod tests {
 
     #[test]
     fn recent_history_does_not_hide_an_older_open_invitation() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         let open = create(&mut store, "owner", &request(), &eligible, 100).unwrap();
@@ -1465,7 +1465,7 @@ mod tests {
 
     #[test]
     fn every_open_invitation_is_visible_even_above_the_history_limit() {
-        let (mut store, _) = crate::decks::tests::temporary_store();
+        let (mut store, _) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         let eligible = BTreeSet::from(["friend".into()]);
         for index in 0..105 {

@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn a_celebration_is_shared_as_its_win_and_older_rows_as_a_quote() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         let win = store.notifications("hill", 2_000).unwrap()[0].win.unwrap();
         assert!(matches!(
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn only_your_own_wins_can_be_shared() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         assert!(notification_win(&store, "cerro", id).unwrap().is_none());
         store
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn a_win_reaches_each_friend_once_with_its_topic_and_card() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = moment(&store, "hill", "streak:1:30");
         let token = wins::ensure_link(&store.conn, "hill", id).unwrap().unwrap();
         let win = wins::win(&store.conn, "hill", id).unwrap();
@@ -651,7 +651,7 @@ mod tests {
 
     #[test]
     fn automatic_wins_arrive_as_one_digest_within_the_daily_cap() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         wins::update_sharing(
             &store.conn,
             "hill",
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn shared_wins_are_worded_from_the_wins_in_the_readers_language() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let win = |store: &Store, key: &str, title: &str, body: &str| {
             let id = wins::create(
                 &store.conn,
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn a_cheer_reaches_the_sender_once_and_can_be_answered() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = moment(&store, "hill", "level:7");
         let win = wins::win(&store.conn, "hill", id).unwrap();
         send_wins(
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn a_friend_who_muted_you_is_skipped() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         store
             .conn

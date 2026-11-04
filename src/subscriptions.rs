@@ -254,13 +254,13 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decks::tests::temporary_store;
     use crate::decks::{Preference, Snapshot, get_decks, set_decks};
     use crate::game::Clock;
     use crate::inbox::get_notifications;
     use crate::notifications::Outgoing;
     use crate::router;
     use crate::study::upload;
+    use crate::test_support::temporary_store;
     use crate::test_support::*;
 
     fn settings(enabled: bool, senders: &[&str]) -> Settings {

@@ -764,26 +764,10 @@ mod tests {
     use tower::ServiceExt;
 
     fn fixture(registration: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": registration,
             "users": {"alice": {"token": "alice-token"}}
         }))
-        .unwrap();
-        let accounts = Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: std::sync::Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     async fn call(

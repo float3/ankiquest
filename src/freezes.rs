@@ -249,9 +249,9 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use crate::app::load_player;
-    use crate::decks::tests::temporary_store;
     use crate::freezes::{FreezeUpdate, get_freezes, set_freezes};
     use crate::study::{Pending, Upload, preview, upload};
+    use crate::test_support::temporary_store;
     use crate::test_support::*;
 
     #[test]
@@ -626,16 +626,12 @@ mod tests {
         drop(app);
         let store = Store::open(&path).unwrap();
         let player = load_player(&store, "cerro").unwrap();
-        let reloaded = App {
-            config,
-            access: access::Access::default(),
-            accounts: Default::default(),
-            week: Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::from([("cerro".into(), player)])),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        };
+        let reloaded = app_from(store, config);
+        reloaded
+            .players
+            .write()
+            .unwrap()
+            .insert("cerro".into(), player);
         assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
         assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);
         assert!(!reloaded.profile("cerro").unwrap().freezes_enabled);

@@ -737,7 +737,6 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::Week;
 
     #[test]
     fn signing_in_again_counts_briefly_for_its_own_session_only() {
@@ -794,33 +793,20 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use std::path::PathBuf;
-    use std::sync::RwLock;
+
     use tower::ServiceExt;
 
     fn fixture(private_site: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let config = serde_json::from_value(serde_json::json!({
             "private_site": private_site,
             "public_url": "https://anki.example.test",
             "users": {"alice": {"token": "alice-token"}, "bob": {"token": "bob-token"}}
         }))
         .unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: Access {
-                    password: Some("shared-master".into()),
-                    ..Access::default()
-                },
-                accounts: Default::default(),
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
+        let mut app = crate::test_support::app_from(store, config);
+        app.access.password = Some("shared-master".into());
+        (Arc::new(app), path)
     }
 
     async fn request(
@@ -1864,7 +1850,7 @@ mod tests {
         )
         .unwrap();
         assert!(Access::from_config(&token).is_ok());
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let password_file = path.join("password");
         std::fs::write(&password_file, "  \n").unwrap();
         let mut config = token;

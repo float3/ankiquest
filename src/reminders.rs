@@ -680,7 +680,7 @@ mod tests {
     }
 
     fn store() -> (Store, std::path::PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         (store, path)
     }

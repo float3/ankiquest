@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn suggestions_rotate_are_private_stable_and_persist_skipping() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let week = Week::default();
         let roster = roster();
         let first = suggestion(&store, "owner", &roster, &week, NOW)
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn invitations_and_delivery_commit_together_and_retries_do_not_duplicate() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let roster = roster();
         let week = Week::default();
         let draft = suggestion(&store, "owner", &roster, &week, NOW)
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn both_agree_before_the_timer_or_either_players_progress_starts() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let roster = roster();
         let week = Week::default();
         let draft = suggestion(&store, "owner", &roster, &week, NOW)
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn decline_and_expiry_never_start_a_weekly_goal() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let roster = roster();
         let week = Week::default();
         let draft = suggestion(&store, "owner", &roster, &week, NOW)
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn failed_acceptance_rolls_back_both_clocks_and_a_leaver_cannot_finish_solo() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let roster = roster();
         let week = Week::default();
         let draft = suggestion(&store, "owner", &roster, &week, NOW)
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn shared_week_respects_timezone_and_daylight_saving() {
-        let (store, _path) = crate::decks::tests::temporary_store();
+        let (store, _path) = crate::test_support::temporary_store();
         let roster = roster();
         let week = Week {
             tz: chrono_tz::Europe::Berlin,

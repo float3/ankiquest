@@ -512,33 +512,17 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": true,
             "users": {"alice": {"token": "alice-token"}},
             "privacy": {"operator": "Ada <Operator>", "contact": "privacy@example.org"}
         }))
-        .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     async fn call(

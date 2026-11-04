@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn progress_and_the_moment_follow_the_mode() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let mut profile = game::compute_with_history(
             "hill",
             "Hill",
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn a_plan_starts_when_the_goal_changes_or_restarts() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let since = |today| stored(&store.conn, "hill", today).unwrap().0.since;
         assert_eq!(since(5), 5, "an unchosen goal starts today");
         save(&store.conn, "hill", &setting("backlog", Some(14)), 10).unwrap();

@@ -466,7 +466,7 @@ mod tests {
     }
     #[test]
     fn saved_language_is_per_owner_and_persists() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         assert_eq!(store.language("hill").unwrap(), "en");
         store.set_language("hill", "es-MX").unwrap();
         assert_eq!(store.language("friend").unwrap(), "en");

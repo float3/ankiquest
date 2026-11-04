@@ -262,12 +262,12 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::Config, game::Week};
+
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use image::{GenericImageView, Rgb, RgbImage};
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
@@ -275,25 +275,10 @@ mod tests {
     }
 
     fn fixture_with_private_site(private_site: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config: Config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "private_site": private_site,
             "users": {"cerro": {"token": "cerro-secret"}, "hill": {"token": "hill-secret"}}
         }))
-        .unwrap();
-        (
-            Arc::new(App {
-                access: crate::access::Access::from_config(&config).unwrap(),
-                accounts: Default::default(),
-                config,
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(Default::default()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     fn cleanup(app: Arc<App>, path: PathBuf) {
@@ -615,7 +600,7 @@ mod tests {
 
     #[test]
     fn revisions_and_removal_survive_restart_without_reusing_a_version() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let image = normalize(&sample(ImageFormat::Png)).unwrap();
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 1);
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 2);

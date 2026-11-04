@@ -807,7 +807,6 @@ pub(crate) mod tests {
     use crate::notifications::PUSH_LEASE_MS;
     use crate::study::upload;
     use crate::test_support::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     pub(crate) const DAY: i64 = 20_000;
     pub(crate) const NOW: i64 = DAY * 86_400_000 + 12 * 3_600_000;
@@ -1403,17 +1402,6 @@ pub(crate) mod tests {
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 1);
         drop(store);
         std::fs::remove_dir_all(path).unwrap();
-    }
-
-    pub fn temporary_store() -> (Store, std::path::PathBuf) {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "ankiquest-decks-{}-{}-{}",
-            std::process::id(),
-            crate::app::now_ms(),
-            NEXT.fetch_add(1, Ordering::Relaxed),
-        ));
-        (Store::open(&path).unwrap(), path)
     }
 
     fn snapshot(id: &str, remaining: u64, reviewed_today: u64, day: i64) -> Snapshot {

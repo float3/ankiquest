@@ -541,7 +541,7 @@ pub(crate) fn spawn(app: Arc<App>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts;
+
     use crate::app::load_player;
     use crate::decks::set_decks;
     use crate::test_support::*;
@@ -1224,25 +1224,18 @@ mod tests {
 
     #[test]
     fn the_nudge_target_is_the_closest_player_above_within_the_circle() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         store
             .conn
             .execute_batch("insert into accounts (user, display, password_hash, created_at) values ('ana', 'Ana', 'x', 0)")
             .unwrap();
-        let accounts = accounts::Directory::load(&store.conn).unwrap();
-        let app = App {
-            config: serde_json::from_value(
+        let app = app_from(
+            store,
+            serde_json::from_value(
                 serde_json::json!({"users": {"cerro": {}, "hill": {}, "friend": {}}}),
             )
             .unwrap(),
-            access: access::Access::default(),
-            accounts,
-            week: Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        };
+        );
         for (user, count) in [("friend", 2), ("ana", 4), ("cerro", 6), ("hill", 20)] {
             with_reviews(&app, user, count);
         }

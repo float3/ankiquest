@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn choice_is_per_player_and_survives_reopening_the_store() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         assert_eq!(store.companion("alice").unwrap(), DEFAULT);
         store.set_companion("alice", "ankilope").unwrap();
         store.set_companion("bob", "none").unwrap();

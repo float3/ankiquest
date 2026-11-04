@@ -1246,7 +1246,7 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use axum::routing::post;
-    use std::sync::RwLock;
+
     use tower::ServiceExt;
 
     const ORIGIN: &str = "https://anki.example.test";
@@ -1322,8 +1322,7 @@ mod tests {
     }
 
     fn fixture(registration: bool, base: &str) -> (Arc<App>, std::path::PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": registration,
             "public_url": ORIGIN,
             "devs": ["hill"],
@@ -1339,21 +1338,6 @@ mod tests {
                 }
             }
         }))
-        .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     fn cleanup(app: Arc<App>, path: std::path::PathBuf) {
@@ -2347,21 +2331,9 @@ mod tests {
 
     #[tokio::test]
     async fn servers_without_providers_say_nothing_about_them() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(
+        let (app, path) = crate::test_support::app_with(
             serde_json::json!({"users": {"alice": {"token": "alice-token"}}}),
-        )
-        .unwrap();
-        let app = Arc::new(App {
-            config,
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        );
         let status = json(send(&app, "GET", "/auth/status", &[], "").await).await;
         assert!(status.get("oauth").is_none(), "{status}");
         assert_eq!(
