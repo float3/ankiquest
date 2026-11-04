@@ -255,7 +255,7 @@ class RefreshTests(unittest.TestCase):
 
     def with_board(self):
         self.standings = [
-            {"user": "cerro", "display": "Cerro", "level": 3, "streak": 2, "week_xp": 90},
+            {"user": "cerro", "display": "Cerro", "level": 3, "streak": 2, "periods": {"week": 90}},
         ]
         self.inbox = [
             {"id": 4, "title": "Deck complete", "body": "Hill finished Spanish.",

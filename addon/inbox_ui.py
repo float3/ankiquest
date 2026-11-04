@@ -39,13 +39,13 @@ def _plain(text, bold=False, muted=False):
     return label
 
 
-def _meta(entry, legacy):
+def _meta(entry):
     parts = []
     if entry.get("sender"):
         parts.append(tr("From %s") % entry["sender"])
     if inbox.when(entry.get("created_at")):
         parts.append(inbox.when(entry.get("created_at")))
-    if inbox.unread(entry, legacy):
+    if inbox.unread(entry):
         parts.append(tr("Unread"))
     if entry.get("replied"):
         parts.append(tr("Reply sent"))
@@ -58,7 +58,6 @@ class Context:
     def __init__(self, dialog, api, companion, current_client, run, open_path, on_replied):
         self.dialog, self.api, self.companion = dialog, api, companion
         self.current_client, self.run, self.open_path, self.on_replied = current_client, run, open_path, on_replied
-        self.legacy = False
 
     def owned(self, status):
         if share_ui.same_account(self.api, self.current_client()):
@@ -68,7 +67,7 @@ class Context:
 
     def mark_read(self, entry, after):
         """Marks a row read in the background; `after()` runs once the server agreed."""
-        if self.legacy or entry.get("read_at"):
+        if entry.get("read_at"):
             return
 
         def done(future):
@@ -112,15 +111,13 @@ def _reply_panel(entry, context, status, finished):
             return
         panel.setEnabled(False)
         status.setText(tr("Sending…"))
-        legacy = context.legacy
 
         def work():
             who = inbox.reply(context.api, entry["id"], message)
-            if not legacy:
-                try:
-                    inbox.mark_read(context.api, [entry["id"]])
-                except Exception as error:
-                    print("ankiquest mark read:", error)
+            try:
+                inbox.mark_read(context.api, [entry["id"]])
+            except Exception as error:
+                print("ankiquest mark read:", error)
             return who
 
         context.run(work, lambda future: sent(future, message))
@@ -151,7 +148,7 @@ def _row(entry, context):
     layout = QVBoxLayout(frame)
     title, body = inbox.headline(entry)
     layout.addWidget(_plain(title, bold=True))
-    meta = _plain(_meta(entry, context.legacy), muted=True)
+    meta = _plain(_meta(entry), muted=True)
     layout.addWidget(meta)
     original = entry.get("reply_to") or {}
     if original.get("body"):
@@ -166,11 +163,11 @@ def _row(entry, context):
     read = None
 
     def refreshed():
-        meta.setText(_meta(entry, context.legacy))
+        meta.setText(_meta(entry))
         if read is not None:
-            read.setVisible(inbox.unread(entry, context.legacy))
+            read.setVisible(inbox.unread(entry))
 
-    found = inbox.actions(entry, context.legacy)
+    found = inbox.actions(entry)
     if "reply" in found:
         reply = QPushButton(tr("Reply"))
 
@@ -354,13 +351,13 @@ def _build(parent, api, companion, current_client, run, open_path, on_replied):
         if not view["items"]:
             rows.addWidget(_plain(tr("Nothing in your inbox yet."), muted=True))
         rows.addStretch(1)
-        every.setVisible(not context.legacy and any(inbox.unread(entry) for entry in view["items"]))
+        every.setVisible(any(inbox.unread(entry) for entry in view["items"]))
 
     def loaded(future):
         view["loading"] = False
         again.setEnabled(True)
         try:
-            view["items"], context.legacy = future.result()
+            view["items"] = future.result()
         except Exception as error:
             status.setText(tr("Could not load your inbox (%s).") % inbox.error_text(error))
             return

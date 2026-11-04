@@ -101,10 +101,9 @@ class ActionTests(unittest.TestCase):
         self.assertFalse(inbox.shareable({"id": 9, "kind": "completion"}))
         self.assertFalse(inbox.shareable({"kind": "celebration"}))
 
-    def test_legacy_rows_have_no_read_state(self):
-        self.assertEqual(["open"], inbox.actions({"id": 1, "kind": "message"}, legacy=True))
-        self.assertFalse(inbox.unread({"id": 1}, legacy=True))
+    def test_rows_without_a_read_time_are_unread(self):
         self.assertTrue(inbox.unread({"id": 1, "read_at": None}))
+        self.assertFalse(inbox.unread({"id": 1, "read_at": 1790000000}))
 
     def test_times_are_local_and_missing_ones_are_blank(self):
         self.assertRegex(inbox.when(1790000000), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
@@ -113,11 +112,10 @@ class ActionTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
-    def test_the_inbox_comes_from_activity_and_falls_back_to_the_legacy_list(self):
+    def test_the_inbox_comes_from_activity(self):
         api = FakeApi({"/api/activity/hill": {"items": [{"id": 3}, {"id": 2}], "unread_count": 1}})
-        self.assertEqual(([{"id": 3}, {"id": 2}], False), inbox.load(api))
-        old = FakeApi({"/api/activity/hill": Refused(404), "/api/notifications/hill": [{"id": 1}, {"id": 2}]})
-        self.assertEqual(([{"id": 2}, {"id": 1}], True), inbox.load(old))
+        self.assertEqual([{"id": 3}, {"id": 2}], inbox.load(api))
+        self.assertEqual([], inbox.load(FakeApi({"/api/activity/hill": {}})))
         broken = FakeApi({"/api/activity/hill": Refused(500)})
         with self.assertRaises(Refused):
             inbox.load(broken)

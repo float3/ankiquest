@@ -432,13 +432,13 @@ class DeckDayTests(unittest.TestCase):
 
 class LeaderboardTests(unittest.TestCase):
     board = [
-        {"user": "a", "display": "Ana", "xp_total": 900, "week_xp": 50, "periods": {"day": 5, "week": 50, "all": 900}},
-        {"user": "b", "display": "Bo", "xp_total": 100, "week_xp": 70, "periods": {"day": 30, "week": 70, "all": 100}},
-        {"user": "c", "display": "Cy", "xp_total": 50, "week_xp": 10},
-        {"user": "d", "display": "Di", "xp_total": 40, "week_xp": 9, "periods": {"week": 9}},
-        {"user": "e", "display": "Ed", "xp_total": 30, "week_xp": 8, "periods": {"week": 8}},
-        {"user": "f", "display": "Fa", "xp_total": 20, "week_xp": 7, "periods": {"week": 7}},
-        {"user": "hill", "display": "Hill", "xp_total": 10, "week_xp": 1, "periods": {"week": 1, "day": 1}},
+        {"user": "a", "display": "Ana", "xp_total": 900, "periods": {"day": 5, "week": 50, "all": 900}},
+        {"user": "b", "display": "Bo", "xp_total": 100, "periods": {"day": 30, "week": 70, "all": 100}},
+        {"user": "c", "display": "Cy", "xp_total": 50, "periods": {"day": 10, "week": 10, "all": 50}},
+        {"user": "d", "display": "Di", "xp_total": 40, "periods": {"day": 9, "week": 9, "all": 40}},
+        {"user": "e", "display": "Ed", "xp_total": 30, "periods": {"day": 8, "week": 8, "all": 30}},
+        {"user": "f", "display": "Fa", "xp_total": 20, "periods": {"day": 7, "week": 7, "all": 20}},
+        {"user": "hill", "display": "Hill", "xp_total": 10, "periods": {"day": 1, "week": 1, "all": 10}},
     ]
 
     def test_periods_reorder_the_board(self):
@@ -586,7 +586,7 @@ class HomeTests(unittest.TestCase):
         self.settings = {"url": "https://example.test", "user": "hill", "token": "secret"}
         self.api = SimpleNamespace(
             configured=True, base="https://example.test", user="hill", name="hill", token="secret",
-            leaderboard=Mock(return_value=[{"user": "hill", "display": "Hill", "xp_total": 5, "week_xp": 5}]),
+            leaderboard=Mock(return_value=[{"user": "hill", "display": "Hill", "xp_total": 5, "periods": {"week": 5}}]),
             rank=Mock(return_value={"order": ["hill"]}), notifications=Mock(return_value=[]),
             profile=Mock(return_value={"level": 2, "streak": 1, "today": {"streak_minutes": 0, "reviews": 0}}),
             companion=Mock(return_value="ankilope"),
