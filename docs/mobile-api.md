@@ -21,6 +21,8 @@ these additions preserve bearer authentication and the existing notification arr
 | `share_cards` | server-drawn cards and public pages under `/w/` |
 | `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |
 
+An account without a password (signed up with a provider) has to sign in with that provider again before it can be deleted or set its first password: those requests answer `403` with `"reauth": true` until it has, and a device token never counts. Apps send the player to Settings in their web view, which offers **Sign in again** (`/auth/oauth/{provider}?reauth=1`); it counts for ten minutes in that web view's session. See `docs/server.md`.
+
 A name is never removed or renamed. New names are added as their features land. A server without this endpoint (`404`) has none of them. Clients ignore names they don't know. `version` changes only if the shape of this answer changes.
 
 Real responses for the endpoints the Android app uses are in [api/examples](api/examples/README.md).

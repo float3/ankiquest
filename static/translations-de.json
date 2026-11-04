@@ -1214,7 +1214,6 @@
   "Link another sign-in before unlinking this one.": "Verknüpfen Sie zuerst eine andere Anmeldung, bevor Sie diese trennen.",
   "Unlinked.": "Getrennt.",
   "Shown once. Copy it now.": "Wird nur einmal angezeigt. Kopieren Sie es jetzt.",
-  "Type your username to confirm": "Geben Sie zur Bestätigung Ihren Benutzernamen ein",
   "Sign in · ankiquest": "Anmelden · ankiquest",
   "Choose a username": "Wählen Sie einen Benutzernamen",
   "Back to settings": "Zurück zu den Einstellungen",
@@ -1334,5 +1333,10 @@
   "Sign out all other devices": "Alle anderen Geräte abmelden",
   "Signed out.": "Abgemeldet.",
   "Your other devices were signed out.": "Deine anderen Geräte wurden abgemeldet.",
-  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet."
+  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet.",
+  "Sign in again with {0}": "Erneut mit {0} anmelden",
+  "To set a password, link another sign-in or delete your account, first sign in again with a sign-in you linked. It counts for ten minutes in this browser.": "Um ein Passwort festzulegen, eine weitere Anmeldung zu verknüpfen oder dein Konto zu löschen, melde dich zuerst erneut mit einer verknüpften Anmeldung an. Das gilt zehn Minuten lang in diesem Browser.",
+  "You signed in again, so for a few minutes you can delete your account here.": "Du hast dich erneut angemeldet und kannst dein Konto deshalb für ein paar Minuten hier löschen.",
+  "Sign in with your provider again first.": "Melde dich zuerst erneut bei deinem Anbieter an.",
+  "That is not the account you linked. Sign in with the one linked to this player.": "Das ist nicht das Konto, das du verknüpft hast. Melde dich mit dem an, das mit diesem Spieler verknüpft ist."
 }

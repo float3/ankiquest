@@ -269,14 +269,15 @@ pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> 
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Deletion {
     #[serde(default)]
     password: Option<String>,
-    /// The username, typed again, for accounts without a password.
-    #[serde(default)]
-    confirm: Option<String>,
+    /// The username older pages sent for accounts without a password. It proves nothing,
+    /// so it is accepted and ignored.
+    #[serde(default, rename = "confirm")]
+    _confirm: Option<serde::de::IgnoredAny>,
 }
 
 async fn download(
@@ -323,10 +324,11 @@ async fn account(
         [&user],
         |r| Ok((r.get(0)?, r.get(1)?)),
     );
+    let confirmed_until = app.access.reauthenticated_until(&headers, &user, now_ms());
     match created {
         Ok((created_at, password)) => reply(
             StatusCode::OK,
-            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at, "password": password}),
+            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at, "password": password, "confirmed_until": confirmed_until}),
         ),
         Err(_) => refuse(
             StatusCode::NOT_FOUND,
@@ -335,8 +337,9 @@ async fn account(
     }
 }
 
-/// Deletes the account. The password is asked for again, or for an account without one,
-/// the username is typed out.
+/// Deletes the account. The password is asked for again, or an account without one must
+/// have signed in with its provider again from this browser in the last few minutes, so
+/// someone who only holds a signed-in device cannot do it.
 async fn delete(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -353,7 +356,12 @@ async fn delete(
             "This player comes from the server configuration. Ask whoever runs the server to remove it.",
         );
     }
-    let Ok(request) = serde_json::from_slice::<Deletion>(&body) else {
+    let parsed = if body.iter().all(u8::is_ascii_whitespace) {
+        Ok(Deletion::default())
+    } else {
+        serde_json::from_slice::<Deletion>(&body)
+    };
+    let Ok(request) = parsed else {
         return refuse(
             StatusCode::BAD_REQUEST,
             "Enter your password to delete your account.",
@@ -369,11 +377,12 @@ async fn delete(
     }
     let has_password = has_password(&app.store.lock().unwrap().conn, &user).unwrap_or(true);
     if !has_password {
-        if request.confirm.as_deref().map(str::trim) != Some(user.as_str()) {
-            return refuse(
-                StatusCode::BAD_REQUEST,
-                "Type your username to delete your account.",
-            );
+        if app
+            .access
+            .reauthenticated_until(&headers, &user, now)
+            .is_none()
+        {
+            return access::reauth_first();
         }
     } else if let Some(password) = &request.password {
         if !password_matches(&app, &user, password).await {
