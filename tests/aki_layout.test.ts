@@ -42,7 +42,7 @@ async function main() {
       await page.waitForFunction(()=>[...document.querySelectorAll<HTMLImageElement>('.aki-art')].every(img=>img.complete&&img.naturalWidth>0));
       assert.equal(await page.locator('[data-aki-companion="streak"] .aki-art').count(),1);
       assert.equal(await page.locator('.page-hero > .aki-art').count(),1,'repeat decoration is idempotent');
-      assert.equal(await page.locator('.brand img').getAttribute('src'),'/aki/face.png');
+      assert.equal(await page.locator('.brand img').getAttribute('src'),'/aki/face-192.png');
       assert.equal(await page.locator('.brand img').evaluate(el=>getComputedStyle(el).width),'38px');
       assert.equal(await page.locator('.aki-art:not([alt=""])').count(),0);
       assert.equal(await page.locator('.aki-art[tabindex], .aki-art[role="button"]').count(),0);

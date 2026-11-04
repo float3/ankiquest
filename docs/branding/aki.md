@@ -32,6 +32,7 @@ the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi
 | `freeze.png` | Confirmed protection; contextual settings illustration |
 | `winner.png` | Records, trophies, winners and tamed leeches |
 | `face.png` | Compact branding and installed app icon |
+| `face-192.png`, `face-32.png` | `face.png` scaled down for the website's brand mark, touch icon and favicon (also `ankilope/face-192.png`); scale them again if the face changes |
 
 ### moment art (#88)
 

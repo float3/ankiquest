@@ -8,7 +8,9 @@ import {escape} from "./common";
   const ankilopePoses: Record<string, string> = {welcome:"welcome", review:"study", celebrate:"celebrate", streak:"study", freeze:"study", winner:"celebrate", face:"face"};
   const choices = new Set<string>(["aki", "ankilope", "none"]);
   let choice = "aki", identity: string | null | undefined = null, identityEpoch = 0;
-  const source = (pose: string) => choice === "ankilope" ? `/ankilope/${ankilopePoses[pose] || "welcome"}.png` : `/aki/${pose}.png`;
+  // The face is only ever drawn small, as the brand icon, so it uses the small copy.
+  const file = (pose: string) => pose === "face" ? "face-192" : pose;
+  const source = (pose: string) => choice === "ankilope" ? `/ankilope/${file(ankilopePoses[pose] || "welcome")}.png` : `/aki/${file(pose)}.png`;
   const image = (pose = "welcome", extra = "") => {
     pose = poses.has(pose) ? pose : "welcome";
     return `<img class="aki-art ${escape(extra)}" data-companion-pose="${pose}" src="${source(pose)}" width="128" height="128" alt="" aria-hidden="true" decoding="async" loading="lazy">`;

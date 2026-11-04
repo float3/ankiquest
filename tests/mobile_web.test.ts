@@ -51,11 +51,11 @@ async function main() {
   }
   db.exec('COMMIT');db.close();
   server=await startServer(run,{private_site:true,site_password_file:path.join(run,'password'),week_timezone:'UTC',week_rollover_hour:4,users:{alice:{display:'Alice <team>',token},bob:{display:'Bob Rivera',token:bobToken},cleo:{display:'Cléo Martín',token:'test-cleo-token'}}});base=server.base;
-  for(const name of ['welcome','review','celebrate','streak','freeze','winner','face']) {
+  for(const name of ['welcome','review','celebrate','streak','freeze','winner','face','face-192','face-32']) {
     const art=await fetch(base+'/aki/'+name+'.png');assert.equal(art.status,200);assert.equal(art.headers.get('content-type'),'image/png');
   }
   assert.equal((await fetch(base+'/aki/unknown.png',{redirect:'manual'})).status,303,'unknown art paths do not bypass private access');
-  checks.push('only the seven Aki images are available before private sign-in');
+  checks.push('only the Aki images and icons are available before private sign-in');
   const history=new DatabaseSync(path.join(run,'ankiquest.db'));
   history.exec('PRAGMA busy_timeout=5000');
   history.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','','An earlier study update','Your activity stays available after a notification is dismissed.',Math.floor(Date.now()/86400000)-10,Date.now()-10*86400000,'message');
