@@ -28,7 +28,7 @@ from .client import (
     sign_up,
 )
 from .deck_completion import deck_snapshots, study_day
-from . import copies_ui, preferences, preview
+from . import copies_ui, preferences, preview, review_offsets
 
 MARK_KEY = "ankiquestUploadedThrough"
 RECENT_KEY = "ankiquestRecentUploads"
@@ -102,6 +102,7 @@ def refresh(show_feedback, resync=False):
     window_start = int(time.time() * 1000) - UNDO_WINDOW_MS
     recent = {i for i in mw.pm.profile.get(RECENT_KEY, []) if i > window_start}
     shared = set(mw.pm.profile.get(SHARED_KEY, []))
+    stamps = review_offsets.journal(mw.pm.profile)
 
     def work():
         window = mw.col.db.all(PENDING_SQL, window_start)
@@ -129,7 +130,7 @@ def refresh(show_feedback, resync=False):
                 except Exception as e:
                     print("ankiquest deck progress:", e)
             profile = api.upload(
-                rows_to_reviews(sent), rollover, initial_sync or full, deleted if first else (),
+                review_offsets.stamp(rows_to_reviews(sent), stamps), rollover, initial_sync or full, deleted if first else (),
                 decks=decks, clock_offset=clock_offset,
             )
             first = False
@@ -142,6 +143,7 @@ def refresh(show_feedback, resync=False):
             mw.pm.profile[MARK_KEY], mw.pm.profile[RECENT_KEY], profile = future.result()
             mw.pm.profile[BASELINE_KEY] = account
             mw.pm.profile[preferences.LAST_UPLOAD_KEY] = int(time.time() * 1000)
+            review_offsets.prune(mw.pm.profile, mw.pm.profile[MARK_KEY], int(time.time() * 1000))
         except Exception as e:
             print("ankiquest:", e)
             return
@@ -596,6 +598,16 @@ def install_update(path):
     showInfo(tr("ankiquest was updated. Restart Anki to use the new version."))
 
 
+def on_answer(_reviewer, card, _ease):
+    """Remembers the time zone the answer was made in, then uploads it."""
+    try:
+        answered = mw.col.db.scalar("select max(id) from revlog where cid = ?", card.id)
+        review_offsets.record(mw.pm.profile, answered, int(time.time() * 1000))
+    except Exception as e:
+        print("ankiquest review offset:", e)
+    refresh(True)
+
+
 def on_sync():
     refresh_shared_decks()
     refresh(False, resync=True)
@@ -621,7 +633,7 @@ add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=Fa
 copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
 
 
-gui_hooks.reviewer_did_answer_card.append(lambda *_: refresh(True))
+gui_hooks.reviewer_did_answer_card.append(on_answer)
 gui_hooks.operation_did_execute.append(on_operation)
 gui_hooks.state_did_change.append(on_state_change)
 gui_hooks.sync_did_finish.append(on_sync)

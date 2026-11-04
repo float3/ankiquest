@@ -423,5 +423,34 @@ class RefreshTests(unittest.TestCase):
         self.assertIsNone(self.api.upload.call_args.kwargs["decks"])
 
 
+    def test_only_reviews_answered_here_carry_their_offset(self):
+        # 101 was answered on this computer an hour east of UTC; 102 came in through AnkiWeb.
+        self.mw.pm.profile["ankiquestReviewOffsets"] = {101: -60}
+        self.pending = [[(101, 1, 1, 3, 1000, 1), (102, 2, 1, 3, 1000, 1)]]
+        self.addon.refresh(False)
+        stamped, synced = self.api.upload.call_args.args[0]
+        self.assertEqual(stamped["offset_west_min"], -60)
+        self.assertNotIn("offset_west_min", synced)
+        self.assertEqual(self.mw.pm.profile["ankiquestReviewOffsets"], {}, "uploaded entries are dropped")
+
+    def test_a_failed_upload_keeps_the_offsets(self):
+        self.mw.pm.profile["ankiquestReviewOffsets"] = {101: -60}
+        self.api.upload.side_effect = OSError("offline")
+        with patch("builtins.print"):
+            self.addon.refresh(False)
+        self.assertEqual(self.mw.pm.profile["ankiquestReviewOffsets"], {101: -60})
+
+    def test_answering_a_card_records_the_offset_of_that_answer(self):
+        answered = int(time.time() * 1000)
+        self.mw.col.db.scalar = Mock(return_value=answered)
+        self.addon.on_answer(None, SimpleNamespace(id=7), 3)
+        self.mw.col.db.scalar.assert_called_once_with("select max(id) from revlog where cid = ?", 7)
+        self.assertEqual(
+            self.mw.pm.profile["ankiquestReviewOffsets"],
+            {answered: self.addon.review_offsets.offset_at(answered)},
+            "kept until a later upload sends it",
+        )
+        self.api.upload.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()
