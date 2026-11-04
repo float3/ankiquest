@@ -103,6 +103,17 @@ class Client:
             headers["Authorization"] = "Bearer " + self.token
         return request_json(self.base + path, body, headers, method=method)
 
+    def capabilities(self):
+        """The features this server names at /api/capabilities; none for a server without it."""
+        try:
+            answer = request_json(self.base + "/api/capabilities")
+        except ServerError as error:
+            if error.status == 404:
+                return frozenset()
+            raise
+        features = answer.get("features") if isinstance(answer, dict) else None
+        return frozenset(name for name in features or () if isinstance(name, str))
+
     def rank(self, previous):
         """The weekly order, and how this player moved since `previous`."""
         return self._request("/api/rank/" + self.user, {"previous": list(previous or [])})

@@ -10,7 +10,6 @@ from aqt.qt import (
     QHBoxLayout,
     QImage,
     QLabel,
-    QMimeData,
     QPixmap,
     QPushButton,
     QVBoxLayout,
@@ -44,25 +43,27 @@ def picture(png):
 
 
 def copy_card(found):
-    """Puts the server's card and its invitation on the clipboard together."""
+    """Puts the server's card on the clipboard. Nothing is published."""
     image = picture(found["png"])
     if image is None:
         return tr("Could not read the picture.")
-    data = QMimeData()
-    data.setImageData(image)
-    data.setText(found["text"])
-    QApplication.clipboard().setMimeData(data)
-    return tr("The picture and an invitation are on the clipboard.")
+    QApplication.clipboard().setImage(image)
+    return tr("The picture is on the clipboard.")
 
 
 def save_card(path, found):
-    """Writes the server's card to `path`, with its invitation on the clipboard."""
+    """Writes the server's card to `path`. Nothing is published."""
     try:
         Path(path).write_bytes(found["png"])
     except OSError:
         return tr("Could not save the picture.")
-    QApplication.clipboard().setText(found["text"])
-    return tr("Picture saved. An invitation is on the clipboard.")
+    return tr("Picture saved.")
+
+
+def copy_link(linked):
+    """Puts the public link, in the server's invitation, on the clipboard."""
+    QApplication.clipboard().setText(linked["text"] or linked["url"])
+    return tr("A public link is on the clipboard. Anyone with it can see this card.")
 
 
 def ask_path(parent):
@@ -171,6 +172,24 @@ class Sharing:
         if path:
             self.with_card(lambda found: self.status.setText(save_card(path, found)))
 
+    def to_link(self, button):
+        """Makes the win's public page, only because the player asked for a link."""
+        if not self.owned():
+            return
+        button.setEnabled(False)
+        self.status.setText(tr("Making a public link…"))
+
+        def linked(future):
+            button.setEnabled(True)
+            try:
+                found = future.result()
+            except Exception as error:
+                self.status.setText(tr("Couldn't make a link (%s).") % error_text(error))
+                return
+            self.status.setText(copy_link(found))
+
+        self.run(lambda: share.link(self.api, self.win), linked)
+
     def to_text(self):
         self.status.setText(copy_text(self.win, self.api.base))
 
@@ -184,9 +203,12 @@ def _buttons(sharing):
         return [friends, text]
     copy = QPushButton(tr("Copy as image"))
     save = QPushButton(tr("Save image…"))
+    public = QPushButton(tr("Copy public link"))
+    public.setToolTip(tr("Makes a public page for this card. Anyone with the link can see it."))
     copy.clicked.connect(sharing.to_clipboard)
     save.clicked.connect(sharing.to_file)
-    return [friends, copy, save]
+    public.clicked.connect(lambda: sharing.to_link(public))
+    return [friends, copy, save, public]
 
 
 def win_dialog(parent, api, win, companion, current_client, run):

@@ -79,6 +79,25 @@ pub(crate) async fn health(State(app): State<Arc<App>>) -> Response {
         .into_response()
 }
 
+/// How close to the end of the player's day securing the streak counts as saving it.
+const LATE_SAVE_MS: i64 = 3 * 3_600_000;
+
+/// Whether "Streak secured!" deserves a push: the streak was at risk and saved in the
+/// last hours of the day, or after an urgent streak reminder. Securing it on an ordinary
+/// study day only reaches the inbox; milestone streaks push their own celebration.
+fn streak_saved_late(
+    store: &Store,
+    user: &str,
+    profile: &Profile,
+    now_ms: i64,
+) -> Result<bool, Error> {
+    if profile.streak <= 1 {
+        return Ok(false);
+    }
+    Ok(profile.day_ends_at - now_ms <= LATE_SAVE_MS
+        || store.is_seen(user, &format!("reminder:urgent:{}", profile.day))?)
+}
+
 pub(crate) fn push_destination<'a>(config: &'a Config, user: &str) -> Option<(&'a str, &'a str)> {
     let base = config.ntfy.as_deref()?.trim();
     let topic = config.users.get(user)?.ntfy_topic.as_deref()?.trim();
@@ -279,12 +298,14 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
             let push_enabled = push_destination(&app.config, user).is_some();
             let mut events = profile.events.clone();
             events.extend(goals::event(&store.conn, user, profile)?);
+            let push_secured = streak_saved_late(&store, user, profile, now_ms())?;
             store.queue_moments(
                 user,
                 &events,
                 profile.day,
                 now_ms(),
                 push_enabled,
+                push_secured,
                 &wins::stats(profile),
             )?;
             if store.nudges_enabled(user)? {
@@ -645,6 +666,33 @@ mod tests {
             String::from_utf8(request).unwrap()
         });
         (address, server)
+    }
+
+    #[test]
+    fn streak_secured_is_pushed_only_when_saved_late() {
+        let (app, path) = fixture();
+        with_reviews(&app, "hill", 1);
+        let mut profile = app.profile("hill").unwrap();
+        let store = app.store.lock().unwrap();
+        profile.streak = 5;
+        let early = profile.day_ends_at - 10 * 3_600_000;
+        assert!(!streak_saved_late(&store, "hill", &profile, early).unwrap());
+        let late = profile.day_ends_at - 3_600_000;
+        assert!(streak_saved_late(&store, "hill", &profile, late).unwrap());
+        store
+            .mark_seen("hill", &format!("reminder:urgent:{}", profile.day))
+            .unwrap();
+        assert!(
+            streak_saved_late(&store, "hill", &profile, early).unwrap(),
+            "saved after an urgent reminder"
+        );
+        profile.streak = 1;
+        assert!(
+            !streak_saved_late(&store, "hill", &profile, late).unwrap(),
+            "a first day had nothing at risk"
+        );
+        drop(store);
+        std::fs::remove_dir_all(path).ok();
     }
 
     #[test]

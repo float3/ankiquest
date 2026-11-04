@@ -218,7 +218,10 @@ trait Expiring {
 struct Started {
     provider: Provider,
     verifier: String,
+    /// The signed-in player, when they link the provider or sign in with it again.
     link: Option<String>,
+    /// Signing in again as `link`, to prove who is at the keyboard, rather than linking.
+    reauth: bool,
     next: String,
     expires: i64,
 }
@@ -706,9 +709,24 @@ struct StartQuery {
     next: Option<String>,
     #[serde(default)]
     link: Option<String>,
+    #[serde(default)]
+    reauth: Option<String>,
 }
 
-/// Sends the browser to the provider. With `?link=1`, the signed-in player links it instead.
+/// Whether `user` has no password and has not signed in with a provider again lately, so
+/// changing how they sign in has to wait until they do.
+fn unconfirmed(app: &App, headers: &HeaderMap, user: &str) -> bool {
+    app.accounts.contains(user)
+        && !crate::accounts::has_password(&app.store.lock().unwrap().conn, user).unwrap_or(true)
+        && app
+            .access
+            .reauthenticated_until(headers, user, now_ms())
+            .is_none()
+}
+
+/// Sends the browser to the provider. With `?link=1`, the signed-in player links it instead;
+/// with `?reauth=1`, they sign in with a provider they already linked, which lets an account
+/// without a password delete itself or set a password for a few minutes.
 async fn start(
     State(app): State<Arc<App>>,
     Path(key): Path<String>,
@@ -721,7 +739,8 @@ async fn start(
             "This server does not offer that sign-in.",
         );
     };
-    let link = if query.link.as_deref() == Some("1") {
+    let reauth = query.reauth.as_deref() == Some("1");
+    let link = if reauth || query.link.as_deref() == Some("1") {
         match access::viewer(&app, &headers).member {
             Some(member) => Some(member),
             None => return see_other("/login?next=%2Fsettings", &[]),
@@ -729,6 +748,19 @@ async fn start(
     } else {
         None
     };
+    if !reauth
+        && let Some(me) = &link
+        && unconfirmed(&app, &headers, me)
+    {
+        // Otherwise someone holding a signed-in device could add their own provider and
+        // use it to confirm a deletion.
+        return message(
+            StatusCode::FORBIDDEN,
+            "Sign in with your provider again first.",
+            "/settings",
+            &[],
+        );
+    }
     let (Ok(state), Ok(verifier)) = (random(), random()) else {
         return refuse(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -764,6 +796,7 @@ async fn start(
             provider,
             verifier,
             link,
+            reauth,
             next,
             expires: now + FLOW_MS,
         },
@@ -855,6 +888,36 @@ async fn callback(
             "/login",
             &[clear],
         );
+    }
+    if started.reauth
+        && let Some(me) = &started.link
+    {
+        let owner = {
+            let store = app.store.lock().unwrap();
+            owner(&app, &store.conn, provider, &identity.subject)
+        };
+        return match owner {
+            Ok(Some(owner))
+                if owner == *me && app.access.reauthenticate(&headers, me, now_ms()) =>
+            {
+                see_other("/settings#your-data", &[clear])
+            }
+            Ok(_) => message(
+                StatusCode::FORBIDDEN,
+                "That is not the account you linked. Sign in with the one linked to this player.",
+                back,
+                &[clear],
+            ),
+            Err(error) => {
+                log_error!("{} sign-in could not be checked: {error}", provider.name());
+                message(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Sign-in failed. Try again.",
+                    back,
+                    &[clear],
+                )
+            }
+        };
     }
     let outcome = match decide(&app, provider, &identity.subject, started.link.as_deref()) {
         Ok(outcome) => outcome,
@@ -1493,6 +1556,7 @@ mod tests {
             provider: Provider::Github,
             verifier: "v".into(),
             link: None,
+            reauth: false,
             next: "/".into(),
             expires,
         };
@@ -1780,14 +1844,82 @@ mod tests {
             }
         };
         assert_eq!(
-            delete(r#"{"password":"anything"}"#).await,
-            StatusCode::BAD_REQUEST
+            delete(r#"{"confirm":"ana"}"#).await,
+            StatusCode::FORBIDDEN,
+            "typing the username proves nothing"
+        );
+        assert_eq!(delete("").await, StatusCode::FORBIDDEN);
+        let first_password = change(
+            &app,
+            "ana",
+            &session,
+            serde_json::json!({"action": "password", "password": "long enough pw"}),
+        )
+        .await;
+        assert_eq!(first_password.status(), StatusCode::FORBIDDEN);
+        assert_eq!(json(first_password).await["reauth"], true);
+        assert_eq!(
+            send(
+                &app,
+                "GET",
+                "/auth/oauth/github?link=1",
+                &[("cookie", &session)],
+                ""
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN,
+            "no provider is added before signing in again"
+        );
+        let signed_out = send(&app, "GET", "/auth/oauth/gitlab?reauth=1", &[], "").await;
+        assert_eq!(location(&signed_out), "/login?next=%2Fsettings");
+        let other = round_trip(&app, "github", "?reauth=1", "good-code", Some(&session)).await;
+        assert_eq!(
+            other.status(),
+            StatusCode::FORBIDDEN,
+            "only a linked identity counts"
+        );
+        assert_eq!(delete("").await, StatusCode::FORBIDDEN);
+        let again = round_trip(&app, "gitlab", "?reauth=1", "good-code", Some(&session)).await;
+        assert_eq!(location(&again), "/settings#your-data");
+        assert!(
+            cookie(&again, "ankiquest_session").is_none(),
+            "the session stays the same"
+        );
+        let account = json(
+            send(
+                &app,
+                "GET",
+                "/api/accounts/ana",
+                &[("cookie", &session)],
+                "",
+            )
+            .await,
+        )
+        .await;
+        assert!(account["confirmed_until"].as_i64().unwrap() > now_ms());
+        let other_browser = bearer_session(&app, &app.issue_token("ana", "Pixel").unwrap()).await;
+        let elsewhere = send(
+            &app,
+            "DELETE",
+            "/api/accounts/ana",
+            &[
+                ("cookie", &other_browser),
+                ("x-ankiquest-csrf", "1"),
+                ("content-type", "application/json"),
+            ],
+            "",
+        )
+        .await;
+        assert_eq!(
+            elsewhere.status(),
+            StatusCode::FORBIDDEN,
+            "the fresh sign-in counts for its own browser only"
         );
         assert_eq!(
-            delete(r#"{"confirm":"bob"}"#).await,
-            StatusCode::BAD_REQUEST
+            delete(r#"{"password":"anything"}"#).await,
+            StatusCode::NO_CONTENT
         );
-        assert_eq!(delete(r#"{"confirm":"ana"}"#).await, StatusCode::NO_CONTENT);
         let links: i64 = app
             .store
             .lock()

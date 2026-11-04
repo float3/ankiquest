@@ -113,9 +113,14 @@ SPANISH.update({
     "Shared with %d friend": "Compartido con %d amigo", "Shared with %d friends": "Compartido con %d amigos",
     "%s: %s\nStudy with me on AnkiQuest: %s": "%s: %s\nEstudia conmigo en AnkiQuest: %s",
     "%s: %s\nI study with AnkiQuest.": "%s: %s\nEstudio con AnkiQuest.",
-    "The picture and an invitation are on the clipboard.": "La imagen y una invitación están en el portapapeles.",
+    "The picture is on the clipboard.": "La imagen está en el portapapeles.",
     "Could not save the picture.": "No se pudo guardar la imagen.",
-    "Picture saved. An invitation is on the clipboard.": "Imagen guardada. Hay una invitación en el portapapeles.",
+    "Picture saved.": "Imagen guardada.",
+    "Copy public link": "Copiar enlace público",
+    "Makes a public page for this card. Anyone with the link can see it.": "Crea una página pública para esta tarjeta. Cualquiera con el enlace puede verla.",
+    "Making a public link…": "Creando un enlace público…",
+    "Couldn't make a link (%s).": "No se pudo crear el enlace (%s).",
+    "A public link is on the clipboard. Anyone with it can see this card.": "Hay un enlace público en el portapapeles. Cualquiera con él puede ver esta tarjeta.",
 })
 
 GERMAN = {
@@ -600,9 +605,14 @@ GERMAN.update({
     "Shared with %d friend": "Mit %d Freund geteilt", "Shared with %d friends": "Mit %d Freunden geteilt",
     "%s: %s\nStudy with me on AnkiQuest: %s": "%s: %s\nLern mit mir auf AnkiQuest: %s",
     "%s: %s\nI study with AnkiQuest.": "%s: %s\nIch lerne mit AnkiQuest.",
-    "The picture and an invitation are on the clipboard.": "Das Bild und eine Einladung sind in der Zwischenablage.",
+    "The picture is on the clipboard.": "Das Bild ist in der Zwischenablage.",
     "Could not save the picture.": "Das Bild konnte nicht gespeichert werden.",
-    "Picture saved. An invitation is on the clipboard.": "Bild gespeichert. Eine Einladung ist in der Zwischenablage.",
+    "Picture saved.": "Bild gespeichert.",
+    "Copy public link": "Öffentlichen Link kopieren",
+    "Makes a public page for this card. Anyone with the link can see it.": "Erstellt eine öffentliche Seite für diese Karte. Alle mit dem Link können sie sehen.",
+    "Making a public link…": "Öffentlicher Link wird erstellt…",
+    "Couldn't make a link (%s).": "Der Link konnte nicht erstellt werden (%s).",
+    "A public link is on the clipboard. Anyone with it can see this card.": "Ein öffentlicher Link ist in der Zwischenablage. Alle mit dem Link können diese Karte sehen.",
 })
 
 FRENCH.update({
@@ -628,9 +638,14 @@ FRENCH.update({
     "Shared with %d friend": "Partagé avec %d ami", "Shared with %d friends": "Partagé avec %d amis",
     "%s: %s\nStudy with me on AnkiQuest: %s": "%s : %s\nÉtudie avec moi sur AnkiQuest : %s",
     "%s: %s\nI study with AnkiQuest.": "%s : %s\nJ’étudie avec AnkiQuest.",
-    "The picture and an invitation are on the clipboard.": "L’image et une invitation sont dans le presse-papiers.",
+    "The picture is on the clipboard.": "L’image est dans le presse-papiers.",
     "Could not save the picture.": "Impossible d’enregistrer l’image.",
-    "Picture saved. An invitation is on the clipboard.": "Image enregistrée. Une invitation est dans le presse-papiers.",
+    "Picture saved.": "Image enregistrée.",
+    "Copy public link": "Copier le lien public",
+    "Makes a public page for this card. Anyone with the link can see it.": "Crée une page publique pour cette carte. Toute personne ayant le lien peut la voir.",
+    "Making a public link…": "Création d’un lien public…",
+    "Couldn't make a link (%s).": "Impossible de créer le lien (%s).",
+    "A public link is on the clipboard. Anyone with it can see this card.": "Un lien public est dans le presse-papiers. Toute personne ayant le lien peut voir cette carte.",
 })
 
 PORTUGUESE.update({
@@ -656,9 +671,14 @@ PORTUGUESE.update({
     "Shared with %d friend": "Partilhado com %d amigo", "Shared with %d friends": "Partilhado com %d amigos",
     "%s: %s\nStudy with me on AnkiQuest: %s": "%s: %s\nEstuda comigo no AnkiQuest: %s",
     "%s: %s\nI study with AnkiQuest.": "%s: %s\nEstudo com o AnkiQuest.",
-    "The picture and an invitation are on the clipboard.": "A imagem e um convite estão na área de transferência.",
+    "The picture is on the clipboard.": "A imagem está na área de transferência.",
     "Could not save the picture.": "Não foi possível guardar a imagem.",
-    "Picture saved. An invitation is on the clipboard.": "Imagem guardada. Há um convite na área de transferência.",
+    "Picture saved.": "Imagem guardada.",
+    "Copy public link": "Copiar ligação pública",
+    "Makes a public page for this card. Anyone with the link can see it.": "Cria uma página pública para este cartão. Qualquer pessoa com a ligação o pode ver.",
+    "Making a public link…": "A criar uma ligação pública…",
+    "Couldn't make a link (%s).": "Não foi possível criar a ligação (%s).",
+    "A public link is on the clipboard. Anyone with it can see this card.": "Há uma ligação pública na área de transferência. Qualquer pessoa com ela pode ver este cartão.",
 })
 
 

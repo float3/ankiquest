@@ -23,6 +23,9 @@ const MAX_SESSIONS: usize = 4096;
 const FAILURE_WINDOW_MS: i64 = 60_000;
 pub(crate) const MAX_FAILURES: u32 = 30;
 const MAX_FAILURE_CLIENTS: usize = 4096;
+/// How long a fresh sign-in with a provider lets a passwordless account make changes
+/// that need proof of who is at the keyboard.
+pub(crate) const REAUTH_MS: i64 = 10 * 60 * 1000;
 
 #[derive(Default)]
 struct Sessions {
@@ -37,6 +40,8 @@ struct Session {
     member: Option<String>,
     /// The hash of the account token this session was opened with, if any.
     token: Option<String>,
+    /// When its member last signed in with a provider again from it, or 0.
+    reauthenticated: i64,
 }
 
 /// A browser session a member opened on the website, without a device token.
@@ -151,6 +156,42 @@ impl Access {
             .collect()
     }
 
+    /// Records on the browser session behind `headers` that `user` just signed in with a
+    /// provider again. False when that is not a live session of theirs.
+    pub(crate) fn reauthenticate(&self, headers: &HeaderMap, user: &str, now: i64) -> bool {
+        let Some(cookie) = session_cookie(headers) else {
+            return false;
+        };
+        let mut sessions = self.sessions.lock().unwrap();
+        match sessions.expires.get_mut(cookie) {
+            Some(session) if session.expires > now && session.member.as_deref() == Some(user) => {
+                session.reauthenticated = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Until when the browser session behind `headers` counts as freshly signed in as `user`.
+    pub(crate) fn reauthenticated_until(
+        &self,
+        headers: &HeaderMap,
+        user: &str,
+        now: i64,
+    ) -> Option<i64> {
+        if headers.contains_key(header::AUTHORIZATION) {
+            return None;
+        }
+        let sessions = self.sessions.lock().unwrap();
+        let session = sessions.expires.get(session_cookie(headers)?)?;
+        let until = session.reauthenticated + REAUTH_MS;
+        (session.expires > now
+            && session.reauthenticated > 0
+            && until > now
+            && session.member.as_deref() == Some(user))
+        .then_some(until)
+    }
+
     /// Ends the sessions of `user` for which `ends(key, token hash)` holds, and says how many.
     pub(crate) fn end_sessions(
         &self,
@@ -225,10 +266,19 @@ impl Access {
                 expires: now + SESSION_SECONDS * 1000,
                 member,
                 token: opened_with,
+                reauthenticated: 0,
             },
         );
         Ok(token)
     }
+}
+
+/// The refusal for a passwordless account that has to sign in with its provider again first.
+pub(crate) fn reauth_first() -> Response {
+    crate::accounts::reply(
+        StatusCode::FORBIDDEN,
+        serde_json::json!({"error": "Sign in with your provider again first.", "reauth": true}),
+    )
 }
 
 /// Compares digests, so neither the contents nor the length of a secret leak through timing.
@@ -696,6 +746,36 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 mod tests {
     use super::*;
     use crate::game::Week;
+
+    #[test]
+    fn signing_in_again_counts_briefly_for_its_own_session_only() {
+        let access = Access::default();
+        let ana = access
+            .create_session(&HeaderMap::new(), Some("ana".into()), None, 0)
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, format!("{COOKIE}={ana}").parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&headers, "ana", 1), None);
+        assert!(
+            !access.reauthenticate(&headers, "bo", 1000),
+            "not bo's session"
+        );
+        assert!(access.reauthenticate(&headers, "ana", 1000));
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 2000),
+            Some(1000 + REAUTH_MS)
+        );
+        assert_eq!(access.reauthenticated_until(&headers, "bo", 2000), None);
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 1000 + REAUTH_MS),
+            None,
+            "it runs out"
+        );
+        let mut bearer = headers.clone();
+        bearer.insert(header::AUTHORIZATION, "Bearer x".parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&bearer, "ana", 2000), None);
+        assert!(!access.reauthenticate(&HeaderMap::new(), "ana", 1000));
+    }
 
     #[test]
     fn revoking_a_member_ends_only_their_sessions() {
