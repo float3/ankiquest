@@ -1,6 +1,7 @@
 {
   "features": [
     "activity",
+    "app_sign_in",
     "cookie_session",
     "deck_share",
     "devices",

@@ -14,6 +14,7 @@ pub(crate) const PATH: &str = "/api/capabilities";
 /// new ones are added as features land.
 pub(crate) const FEATURES: &[&str] = &[
     "activity",
+    "app_sign_in",
     "cookie_session",
     "deck_share",
     "devices",

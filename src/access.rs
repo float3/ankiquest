@@ -31,6 +31,9 @@ pub(crate) const REAUTH_MS: i64 = 10 * 60 * 1000;
 struct Sessions {
     expires: HashMap<String, Session>,
     failures: HashMap<IpAddr, Attempts>,
+    /// Device tokens, by hash, whose member last signed in with a provider again in a browser
+    /// the device opened for it: the member and when.
+    tokens: HashMap<String, (String, i64)>,
 }
 
 #[derive(Clone)]
@@ -172,7 +175,21 @@ impl Access {
         }
     }
 
-    /// Until when the browser session behind `headers` counts as freshly signed in as `user`.
+    /// Records that `user` just signed in with a provider again in a browser that the device
+    /// holding the token hashed as `token` opened for it (see `oauth`, app sign-ins).
+    pub(crate) fn reauthenticate_token(&self, token: &str, user: &str, now: i64) {
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.tokens.retain(|_, (_, at)| *at + REAUTH_MS > now);
+        if sessions.tokens.len() < MAX_SESSIONS {
+            sessions
+                .tokens
+                .insert(token.to_string(), (user.to_string(), now));
+        }
+    }
+
+    /// Until when the browser session behind `headers`, or the device token it carries, counts
+    /// as freshly signed in as `user`. A token counts only after its member signed in with a
+    /// provider again in a browser it opened, never on its own.
     pub(crate) fn reauthenticated_until(
         &self,
         headers: &HeaderMap,
@@ -180,7 +197,11 @@ impl Access {
         now: i64,
     ) -> Option<i64> {
         if headers.contains_key(header::AUTHORIZATION) {
-            return None;
+            let token = crate::accounts::token_hash(bearer(headers)?);
+            let sessions = self.sessions.lock().unwrap();
+            let (member, at) = sessions.tokens.get(&token)?;
+            let until = at + REAUTH_MS;
+            return (member == user && until > now).then_some(until);
         }
         let sessions = self.sessions.lock().unwrap();
         let session = sessions.expires.get(session_cookie(headers)?)?;
@@ -767,6 +788,28 @@ mod tests {
         bearer.insert(header::AUTHORIZATION, "Bearer x".parse().unwrap());
         assert_eq!(access.reauthenticated_until(&bearer, "ana", 2000), None);
         assert!(!access.reauthenticate(&HeaderMap::new(), "ana", 1000));
+    }
+
+    #[test]
+    fn a_token_counts_only_after_a_browser_it_opened_signed_in_again() {
+        let access = Access::default();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer x".parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&headers, "ana", 1), None);
+        access.reauthenticate_token(&crate::accounts::token_hash("x"), "ana", 1000);
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 2000),
+            Some(1000 + REAUTH_MS)
+        );
+        assert_eq!(access.reauthenticated_until(&headers, "bo", 2000), None);
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 1000 + REAUTH_MS),
+            None,
+            "it runs out"
+        );
+        let mut other = HeaderMap::new();
+        other.insert(header::AUTHORIZATION, "Bearer y".parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&other, "ana", 2000), None);
     }
 
     #[test]
