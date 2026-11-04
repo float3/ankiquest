@@ -29,6 +29,11 @@ Policies:
 The player still sees their own celebration in every case, as today (`celebrations_enabled` decides
 whether it is pushed).
 
+`streak_secured` happens on every study day, so it is pushed only when the streak was saved late:
+in the last three hours of the player's day, or after an urgent streak reminder that day. Otherwise
+its inbox row carries `quiet: true` and clients show it without announcing it. Streak milestones
+are pushed as their own `streak` celebration.
+
 ## Daily goal
 
 The goal lives on the server so every client agrees.
