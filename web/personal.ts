@@ -311,7 +311,7 @@ import {failure, refused, request as call, send} from "./http";
       !win.shared_with_friends && !win.link && win.policy === "private" ? html`<span class="chip">${tr("Only you")}</span>` : "",
     ].join("");
     const linkBox = win.link ? html`<div class="win-link"><label class="field"><span>${tr("Public link")}</span><input readonly value="${esc(win.link.url)}" data-win-url></label><button type="button" data-win-action="unlink" data-win="${id}">${tr("Remove link")}</button></div>` : "";
-    return html`<article class="win-item" data-win-id="${id}"><div class="win-thumb"><img data-win-card="${id}" alt="${esc(tr`Card: ${win.title}`)}" width="96" height="96" hidden></div><div class="win-text"><strong>${esc(win.title)}</strong>${win.body ? html`<span>${esc(win.body)}</span>` : ""}<small>${esc(when(Number(win.created_at) * 1000))}</small>${chips ? html`<div class="win-chips">${chips}</div>` : ""}</div><div class="win-actions"><button type="button" class="primary" data-win-action="friends" data-win="${id}">${tr("Share with friends")}</button><button type="button" data-win-action="link" data-win="${id}">${tr("Get link")}</button><button type="button" data-win-action="download" data-win="${id}">${tr("Download image")}</button></div>${linkBox}<p class="status${status?.error ? " error" : ""}" role="status" data-win-status>${esc(status?.text || "")}</p></article>`;
+    return html`<article class="win-item" data-win-id="${id}"><div class="win-thumb"><img data-win-card="${id}" alt="${esc(tr`Card: ${win.title}`)}" width="96" height="96" hidden></div><div class="win-text"><strong>${esc(win.title)}</strong>${win.body ? html`<span>${esc(win.body)}</span>` : ""}<small>${esc(when(Number(win.created_at) * 1000))}</small>${chips ? html`<div class="win-chips">${chips}</div>` : ""}</div><div class="win-actions"><button type="button" class="primary" data-win-action="friends" data-win="${id}">${tr("Share with friends")}</button><button type="button" data-win-action="link" data-win="${id}" title="${esc(tr("Makes a public page for this card. Anyone with the link can see it."))}">${win.link ? tr("Copy link") : tr("Create public link")}</button><button type="button" data-win-action="download" data-win="${id}">${tr("Download image")}</button></div>${linkBox}<p class="status${status?.error ? " error" : ""}" role="status" data-win-status>${esc(status?.text || "")}</p></article>`;
   }
   function renderWins() {
     const section = document.getElementById("today-wins");
@@ -390,7 +390,7 @@ import {failure, refused, request as call, send} from "./http";
         renderWins();
         let copied = false;
         try { await navigator.clipboard.writeText(result.url); copied = true; } catch (_) {}
-        sayWin(id, copied ? tr("Link copied.") : tr("Copy the link below to share it."));
+        sayWin(id, copied ? tr("Link copied. Anyone with the link can see this card.") : tr("Copy the link below to share it. Anyone with the link can see this card."));
       } else if (action === "unlink") {
         await request(`/api/wins/${encodeURIComponent(session.user)}/${id}/link`, undefined, session, "DELETE");
         if (state.session !== session) return;

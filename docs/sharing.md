@@ -205,7 +205,10 @@ Cards are drawn by the server:
 
 - `GET /w/{token}.png`: a 1080×1080 PNG
 - `GET /w/{token}.wide.png`: 1200×630, for link previews
-- `GET /api/wins/{user}/{id}/card.png`: the same square card for the owner before any link exists
+- `GET /api/wins/{user}/{id}/card.png`: the same square card for the owner before any link exists.
+  Clients use it to copy or save the picture, so that doing so publishes nothing; they ask for
+  `{ "win", "to": "link" }` only when the player chooses to share a link, and say that anyone
+  with the link can see the card.
 
 Card contents:
 - art for the kind, in the player's companion (Aki, Ankilope, or none). The poses are:
