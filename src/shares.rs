@@ -247,7 +247,7 @@ pub(crate) fn localize(
     if crate::i18n::normalize(language) == "en" {
         return Ok(());
     }
-    let system = |value: &str| crate::i18n::system(value, language);
+    let system = |value: &str| crate::i18n::system_text(value, language);
     match notice.kind.as_str() {
         "share" => {
             let wins = conn
@@ -320,8 +320,8 @@ fn invitation(
     Ok(crate::i18n::substitute(
         &crate::i18n::text("{0}: {1} Join me on AnkiQuest: {2}", language),
         &[
-            &crate::i18n::system(&title, language),
-            &crate::i18n::system(&body, language),
+            &crate::i18n::system_text(&title, language),
+            &crate::i18n::system_text(&body, language),
             url,
         ],
     ))

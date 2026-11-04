@@ -502,8 +502,8 @@ async fn get_wins(
             link: win.link_token.as_deref().map(|token| link(&base, token)),
             id: win.id,
             created_at: win.created_at / 1000,
-            title: crate::i18n::system(&win.title, &language),
-            body: crate::i18n::system(&win.body, &language),
+            title: crate::i18n::system_text(&win.title, &language),
+            body: crate::i18n::system_text(&win.body, &language),
             kind: win.kind,
             key: win.key,
             day: win.day,
@@ -743,7 +743,7 @@ pub(crate) mod tests {
             "another conquest's label is not used"
         );
         assert_eq!(
-            crate::i18n::system(&shared_words(&store.conn, &conquered).unwrap().1, "de"),
+            crate::i18n::system_text(&shared_words(&store.conn, &conquered).unwrap().1, "de"),
             "Ich habe „der Hund“ 5-mal vergessen, und jetzt bleibt es mir wochenlang im Gedächtnis."
         );
         let level = make("level:3", "Level 3!", "You reached level 3.");
