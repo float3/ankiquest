@@ -355,17 +355,9 @@ fn member(app: &App, headers: &HeaderMap) -> Option<String> {
     if headers.contains_key(header::AUTHORIZATION) {
         return bearer(headers).and_then(|given| token_owner(app, given));
     }
-    let owner = app.access.member(headers, now_ms())?;
-    if app.accounts.contains(&owner) {
-        return Some(owner);
-    }
-    app.config
-        .users
-        .get(&owner)?
-        .token
-        .as_ref()
-        .filter(|token| !token.is_empty())?;
-    Some(owner)
+    app.access
+        .member(headers, now_ms())
+        .filter(|owner| app.can_sign_in(owner))
 }
 
 /// The signed-in member, or the shared community password, behind a request.
@@ -378,13 +370,16 @@ pub(crate) fn viewer(app: &App, headers: &HeaderMap) -> crate::social::Viewer {
 }
 
 pub(crate) fn authorized(app: &App, user: &str, headers: &HeaderMap) -> bool {
-    if headers.contains_key(header::AUTHORIZATION) {
-        return bearer(headers)
-            .and_then(|given| token_owner(app, given))
-            .as_deref()
-            == Some(user);
-    }
     member(app, headers).as_deref() == Some(user)
+}
+
+/// [`authorized`] as a handler's first step: 401 unless `headers` belong to `user`.
+pub(crate) fn require_owner(app: &App, user: &str, headers: &HeaderMap) -> Result<(), StatusCode> {
+    if authorized(app, user, headers) {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 fn authenticated(app: &App, headers: &HeaderMap) -> bool {

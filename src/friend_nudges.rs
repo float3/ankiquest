@@ -1,6 +1,7 @@
+use crate::access::require_owner;
 use crate::notifications::Outgoing;
 use crate::store::{Error, Store};
-use crate::{access::authorized, app::App, app::now_ms, web_util::store_error};
+use crate::{app::App, app::now_ms, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -68,9 +69,7 @@ async fn settings(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let day = store.clock(&user).map_err(store_error)?.day(now_ms());
     let mut friends = Vec::new();
@@ -112,9 +111,7 @@ async fn nudge(
     headers: HeaderMap,
     Json(request): Json<Request>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     if request.recipient == user
         || !app.is_user(&request.recipient)
@@ -150,9 +147,7 @@ async fn receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     app.store
         .lock()
         .unwrap()
@@ -167,9 +162,7 @@ async fn automatic_receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     app.store
         .lock()
         .unwrap()
@@ -184,9 +177,7 @@ async fn sender_receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if sender == user || !app.is_user(&sender) {
         return Err(StatusCode::BAD_REQUEST);
     }

@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::decks;
 use crate::decks::{IncomingSettings, valid_incoming_settings};
@@ -211,9 +211,7 @@ pub(crate) async fn get_incoming_preferences(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     incoming_preferences(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(store_error)
@@ -225,9 +223,7 @@ async fn set_deck_subscriptions(
     headers: HeaderMap,
     Json(update): Json<Settings>,
 ) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if !update.valid(&user) {
         return Err(StatusCode::BAD_REQUEST);
     }

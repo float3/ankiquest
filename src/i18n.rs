@@ -1,6 +1,7 @@
 //! Device-selected language, with English fallback and shared interface catalogs.
+use crate::access::require_owner;
 use crate::{
-    App, authorized,
+    App,
     store::{Error, Store},
 };
 pub use ankiquest_i18n::{normalize, substitute, text};
@@ -69,9 +70,7 @@ pub async fn get(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     Ok(Json(Preference {
         language: app
             .store
@@ -88,9 +87,7 @@ pub async fn set(
     headers: HeaderMap,
     Json(preference): Json<Preference>,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if preference.language.is_empty()
         || preference.language.len() > 64
         || !preference

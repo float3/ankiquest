@@ -2,7 +2,7 @@
 //! friends in AnkiQuest or go anywhere as a card behind an unguessable link. Each kind has
 //! a sharing policy the player chooses. See `docs/sharing.md`.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::game::Profile;
 use crate::notifications::Notification;
@@ -483,9 +483,7 @@ async fn get_wins(
     Query(page): Query<Page>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let limit = page.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) || page.before.is_some_and(|id| id <= 0) {
         return Err(StatusCode::BAD_REQUEST);
@@ -520,9 +518,7 @@ async fn delete_link(
     Path((user, id)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     if revoke_link(&store.conn, &user, id).map_err(store_error)? {
         Ok(StatusCode::NO_CONTENT)
@@ -536,9 +532,7 @@ async fn get_sharing(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Sharing>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     Ok(Json(sharing(&store.conn, &user).map_err(store_error)?))
 }
@@ -586,9 +580,7 @@ async fn set_sharing(
     headers: HeaderMap,
     Json(update): Json<SharingUpdate>,
 ) -> Result<Json<Sharing>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     update_sharing(&store.conn, &user, update)
         .map_err(store_error)?

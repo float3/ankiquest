@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::game::Clock;
 use crate::notifications::{INBOX_AGE_MS, Outgoing, insert_notification};
@@ -678,9 +678,7 @@ pub(crate) async fn get_decks(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     deck_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(failed_for("deck settings for", &user))
@@ -692,9 +690,7 @@ pub(crate) async fn set_decks(
     headers: HeaderMap,
     Json(update): Json<SettingsUpdate>,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if update.decks.len() > MAX_DECKS {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
@@ -801,9 +797,7 @@ pub(crate) async fn share_deck(
     headers: HeaderMap,
     Json(finished): Json<Finished>,
 ) -> Result<Json<Told>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     share_finished(&app, &mut store, &user, &finished, crate::app::now_ms())
         .map_err(failed_for("sharing a finished deck for", &user))?

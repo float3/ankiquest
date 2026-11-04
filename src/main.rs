@@ -50,7 +50,6 @@ mod weekly_challenges;
 mod wins;
 mod worker;
 
-use access::authorized;
 use app::{App, load_player, now_ms};
 use axum::Router;
 use axum::extract::Path as UrlPath;
@@ -290,6 +289,7 @@ fn router(app: Arc<App>) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::authorized;
     use crate::decks::{get_decks, set_decks};
     use crate::inbox::{ReplyRequest, get_notifications, reply};
     use crate::study::{profile, upload};

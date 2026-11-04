@@ -3,11 +3,12 @@
 //! notification they can reply to and cheer, with the same topic so it shows the same art.
 //! A win can also leave AnkiQuest as a link to its card.
 
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::notifications::{Outgoing, insert_notification};
 use crate::store::{Error, Store, clock_in};
 use crate::wins::{self, Win as Moment};
-use crate::{access::authorized, boards::standings, web_util::base_url, web_util::store_error};
+use crate::{boards::standings, web_util::base_url, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -373,9 +374,7 @@ async fn share(
     headers: HeaderMap,
     Json(request): Json<Request>,
 ) -> Result<Json<Value>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let win = match (request.notification, request.place, request.win, request.to) {
         (None, None, Some(id), Some(to)) => {
             return share_win(&app, &user, id, &to, &headers).map(Json);
@@ -500,9 +499,7 @@ async fn react_to(
     headers: HeaderMap,
     Json(reaction): Json<Reaction>,
 ) -> Result<Json<Reacted>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let display = app.display(&user);
     let already = react(
         &mut app.store.lock().unwrap().conn,

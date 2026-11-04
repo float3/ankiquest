@@ -2,6 +2,7 @@
 //! Only what [`Conquest`] carries is shared, never the card itself, unless its owner
 //! chooses to add a label saying what the card was. The label also appears on the card and
 //! page of the matching `conquered` win (see `wins::shared_words`).
+use crate::access::require_owner;
 use crate::game::{self, Conquest};
 use crate::notifications::Outgoing;
 use crate::store::Error;
@@ -132,9 +133,7 @@ pub(crate) async fn tell(
     Path((user, at)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<Json<Told>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let conquest = find(&app, &user, at).ok_or(StatusCode::NOT_FOUND)?;
     let display = app.display(&user);
     let title = if conquest.leech {
@@ -189,9 +188,7 @@ pub(crate) async fn set_label(
     headers: HeaderMap,
     Json(update): Json<LabelUpdate>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let label = clean_label(&update.label).ok_or(StatusCode::BAD_REQUEST)?;
     find(&app, &user, at).ok_or(StatusCode::NOT_FOUND)?;
     app.store
@@ -213,9 +210,7 @@ pub(crate) async fn remove_label(
     Path((user, at)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     app.store
         .lock()
         .unwrap()

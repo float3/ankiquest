@@ -127,18 +127,26 @@ impl App {
         self.config.users.contains_key(user) || self.accounts.contains(user)
     }
 
+    /// Whether `user` can sign in: an account, or a configured user with a token.
+    pub(crate) fn can_sign_in(&self, user: &str) -> bool {
+        self.accounts.contains(user) || self.configured_with_token(user)
+    }
+
+    fn configured_with_token(&self, user: &str) -> bool {
+        self.config
+            .users
+            .get(user)
+            .and_then(|config| config.token.as_deref())
+            .is_some_and(|token| !token.is_empty())
+    }
+
     /// Players who can sign in: configured users with a token, and every account.
     pub(crate) fn members(&self) -> BTreeSet<String> {
         self.config
             .users
-            .iter()
-            .filter(|(_, config)| {
-                config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-            })
-            .map(|(user, _)| user.clone())
+            .keys()
+            .filter(|user| self.configured_with_token(user))
+            .cloned()
             .chain(self.accounts.users())
             .collect()
     }

@@ -1,7 +1,7 @@
 //! The daily goal, kept on the server so every client agrees on it. Reviews and minutes are
 //! judged from uploads; only clients know due counts, so they report a reached backlog goal.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::game::{Event, Profile, goal_event};
 use crate::store::{Error, clock_in};
@@ -192,9 +192,7 @@ async fn get_goal(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Goal>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
     Ok(Json(
@@ -208,9 +206,7 @@ async fn set_goal(
     headers: HeaderMap,
     Json(setting): Json<Setting>,
 ) -> Result<Json<Goal>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let setting = setting.checked().ok_or(StatusCode::BAD_REQUEST)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
@@ -232,9 +228,7 @@ async fn reached(
     headers: HeaderMap,
     Json(reached): Json<Reached>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
     if report(&store.conn, &user, reached.day, today).map_err(store_error)? {

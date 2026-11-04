@@ -1,6 +1,7 @@
 //! A player's own study: profile, history, previews, and uploading reviews.
 
 use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, Player, mark_events_seen, now_ms};
 use crate::game::{Clock, Profile, Review};
 use crate::web_util::{failed_for, store_error};
@@ -111,9 +112,7 @@ async fn study_history(
     Query(query): Query<StudyQuery>,
     headers: HeaderMap,
 ) -> Result<Json<StudyHistory>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let (current_year, latest_session) = {
         let players = app.players.read().unwrap();
         let player = players.get(&user);
@@ -246,9 +245,7 @@ pub(crate) async fn upload(
     headers: HeaderMap,
     Json(upload): Json<Upload>,
 ) -> Result<Json<UploadResponse>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if upload.reviews.len() > MAX_PENDING || upload.deleted.len() > MAX_PENDING {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }

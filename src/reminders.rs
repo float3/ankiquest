@@ -1,5 +1,5 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
 use crate::notifications::{Notification, Outgoing};
@@ -643,9 +643,7 @@ async fn get_reminders(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     settings(&app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(store_error)
@@ -657,9 +655,7 @@ async fn set_reminders(
     headers: HeaderMap,
     Json(settings): Json<Settings>,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if !settings.valid() {
         return Err(StatusCode::BAD_REQUEST);
     }

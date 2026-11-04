@@ -575,16 +575,6 @@ fn can_unlink(account: bool, password: bool, other_links: usize) -> bool {
     !account || password || other_links > 0
 }
 
-fn exists(app: &App, user: &str) -> bool {
-    app.accounts.contains(user)
-        || app
-            .config
-            .users
-            .get(user)
-            .and_then(|config| config.token.as_deref())
-            .is_some_and(|token| !token.is_empty())
-}
-
 /// The player linked to this identity, if they can still sign in.
 fn owner(
     app: &App,
@@ -599,7 +589,7 @@ fn owner(
             |r| r.get(0),
         )
         .optional()?;
-    Ok(linked.filter(|user| exists(app, user)))
+    Ok(linked.filter(|user| app.can_sign_in(user)))
 }
 
 fn linked_providers(conn: &Connection, user: &str) -> Result<Vec<Provider>, Error> {

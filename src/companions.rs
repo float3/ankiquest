@@ -1,6 +1,7 @@
 //! A player's visual study companion, shared by the website and installed clients.
+use crate::access::require_owner;
 use crate::{
-    App, authorized,
+    App,
     store::{Error, Store},
 };
 use axum::{
@@ -62,9 +63,7 @@ pub async fn get(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let companion = app
         .store
         .lock()
@@ -80,9 +79,7 @@ pub async fn set(
     headers: HeaderMap,
     Json(preference): Json<Preference>,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if !valid(&preference.companion) {
         return Err(StatusCode::BAD_REQUEST);
     }

@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::game;
 use crate::game::{FreezePolicy, FreezePreference};
@@ -210,9 +210,7 @@ async fn get_freezes(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<FreezeSettings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     freeze_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(failed_for("streak freeze settings for", &user))
@@ -224,9 +222,7 @@ pub(crate) async fn set_freezes(
     headers: HeaderMap,
     Json(update): Json<FreezeUpdate>,
 ) -> Result<Json<FreezeSettings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store_error = failed_for("streak freeze settings for", &user);
     let mut store = app.store.lock().unwrap();
     store

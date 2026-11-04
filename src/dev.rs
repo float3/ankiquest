@@ -48,9 +48,7 @@ impl App {
 
 /// 401 without the player's own credentials, 403 when they are not a dev.
 fn check(app: &App, user: &str, headers: &HeaderMap) -> Result<(), StatusCode> {
-    if !access::authorized(app, user, headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    access::require_owner(app, user, headers)?;
     if !app.is_dev(user) {
         return Err(StatusCode::FORBIDDEN);
     }
