@@ -50,6 +50,7 @@ pub(crate) struct App {
     pub(crate) players: RwLock<HashMap<String, Player>>,
     pub(crate) standings: StandingCache,
     pub(crate) heartbeat: worker::Heartbeat,
+    pub(crate) rank_weeks: crate::boards::RankWeeks,
 }
 
 impl App {

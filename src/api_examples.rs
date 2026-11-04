@@ -312,7 +312,7 @@ async fn examples_match_the_handlers() {
             "rank",
             "POST",
             "/api/rank/hill",
-            json!({"previous": ["cerro", "hill"]}),
+            json!({"previous": ["cerro", "hill"], "week": 1_792_987_200_000_i64}),
         ),
         (
             "notifications",

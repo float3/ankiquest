@@ -44,6 +44,7 @@ pub(crate) fn app_from(store: Store, config: Config) -> App {
         players: RwLock::new(HashMap::new()),
         standings: Default::default(),
         heartbeat: Default::default(),
+        rank_weeks: Default::default(),
     }
 }
 
