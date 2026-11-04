@@ -112,12 +112,23 @@ impl Serialize for Message {
 pub struct Notice {
     pub title: Message,
     pub body: Message,
+    /// The same news in the player's own words, for sharing it with friends. Only news
+    /// worth sharing has it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_title: Option<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_body: Option<Message>,
 }
 
 impl Notice {
     pub fn localize(&mut self, language: &str) {
-        self.title.localize(language);
-        self.body.localize(language);
+        for message in [&mut self.title, &mut self.body]
+            .into_iter()
+            .chain(self.share_title.as_mut())
+            .chain(self.share_body.as_mut())
+        {
+            message.localize(language);
+        }
     }
 }
 
@@ -180,6 +191,8 @@ pub fn streak_warning(
     Notice {
         title: title.into(),
         body: body.into(),
+        share_title: None,
+        share_body: None,
     }
 }
 
@@ -322,24 +335,37 @@ pub fn rank_change(previous: &[String], board: &[Place], me: &str) -> Option<Not
             .join(", ")
     };
     let now_at = |user: &str| board.iter().position(|place| place.user == user);
-    let gap = (rank > 0).then(|| {
-        let ahead = &board[rank - 1];
-        say("{0} XP behind {1}.")
-            .value(grouped(ahead.week_xp.saturating_sub(board[rank].week_xp)))
-            .value(ahead.display)
-    });
+    let gap = |text: Text| {
+        (rank > 0).then(|| {
+            let ahead = &board[rank - 1];
+            text.value(grouped(ahead.week_xp.saturating_sub(board[rank].week_xp)))
+                .value(ahead.display)
+        })
+    };
+    // Climbs can be shared, so they are also worded the way the player tells friends.
+    let mut share = None;
     let (title, mut body) = if rank < before {
         let passed: Vec<&str> = previous[..before]
             .iter()
             .map(String::as_str)
             .filter(|user| now_at(user).is_some_and(|at| at > rank))
             .collect();
-        let title = if rank == 0 {
-            say("👑 You took the crown")
+        let (title, shared_title) = if rank == 0 {
+            (say("👑 You took the crown"), say("👑 I took the crown"))
         } else {
-            say("▲ You're now #{0}").value(rank + 1)
+            (
+                say("▲ You're now #{0}").value(rank + 1),
+                say("▲ I'm now #{0}").value(rank + 1),
+            )
         };
-        let passed = (!passed.is_empty()).then(|| say("You passed {0}.").value(names(passed)));
+        let passed = (!passed.is_empty()).then(|| names(passed));
+        let shared_body = passed
+            .iter()
+            .map(|names| say("I passed {0}.").value(names))
+            .chain(gap(say("I'm {0} XP behind {1}.")))
+            .collect();
+        share = Some((shared_title, Text::Joined(" ", shared_body)));
+        let passed = passed.map(|names| say("You passed {0}.").value(names));
         (title, passed.into_iter().collect::<Vec<_>>())
     } else {
         let overtakers: Vec<&str> = board[..rank]
@@ -360,10 +386,15 @@ pub fn rank_change(previous: &[String], board: &[Place], me: &str) -> Option<Not
         };
         (title, vec![say("You're now #{0}.").value(rank + 1)])
     };
-    body.extend(gap);
+    body.extend(gap(say("{0} XP behind {1}.")));
+    let (share_title, share_body) = share
+        .map(|(title, body)| (title.into(), body.into()))
+        .unzip();
     Some(Notice {
         title: title.into(),
         body: Text::Joined(" ", body).into(),
+        share_title,
+        share_body,
     })
 }
 
@@ -389,6 +420,49 @@ mod tests {
         let notice = rank_change(&order(&["ana", "me", "bo"]), &board, "me").unwrap();
         assert_eq!(notice.title, "👑 You took the crown");
         assert_eq!(notice.body, "You passed ana.");
+        assert_eq!(notice.share_title.unwrap(), "👑 I took the crown");
+        assert_eq!(notice.share_body.unwrap(), "I passed ana.");
+    }
+
+    #[test]
+    fn a_shared_climb_is_told_in_the_players_own_words() {
+        let board = [place("ana", 3000), place("me", 1500), place("bo", 10)];
+        let mut notice = rank_change(&order(&["ana", "bo", "me"]), &board, "me").unwrap();
+        assert_eq!(
+            notice.share_title.as_ref().unwrap().to_string(),
+            "▲ I'm now #2"
+        );
+        assert_eq!(
+            notice.share_body.as_ref().unwrap().to_string(),
+            "I passed bo. I'm 1,500 XP behind ana."
+        );
+        notice.localize("es");
+        assert_eq!(notice.title, "▲ Ahora estás en el puesto 2");
+        assert_eq!(
+            notice.share_title.as_ref().unwrap().to_string(),
+            "▲ Ahora estoy en el puesto 2"
+        );
+        assert_eq!(
+            notice.share_body.as_ref().unwrap().to_string(),
+            "He adelantado a bo. Me faltan 1,500 XP para alcanzar a ana."
+        );
+        let json = serde_json::to_value(&notice).unwrap();
+        assert_eq!(json["share_title"], "▲ Ahora estoy en el puesto 2");
+
+        let board = [place("me", 1500), place("ana", 1200)];
+        let mut notice = rank_change(&order(&["ana", "me"]), &board, "me").unwrap();
+        notice.localize("de");
+        assert_eq!(notice.share_title.unwrap(), "👑 Ich habe die Krone geholt");
+        assert_eq!(notice.share_body.unwrap(), "Ich habe ana überholt.");
+    }
+
+    #[test]
+    fn a_drop_is_not_worded_for_sharing() {
+        let board = [place("ana", 3000), place("me", 1500)];
+        let notice = rank_change(&order(&["me", "ana"]), &board, "me").unwrap();
+        assert!(notice.share_title.is_none() && notice.share_body.is_none());
+        let json = serde_json::to_value(&notice).unwrap();
+        assert!(json.get("share_title").is_none() && json.get("share_body").is_none());
     }
 
     #[test]
