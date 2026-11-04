@@ -109,9 +109,27 @@ pub async fn set(
     Ok(Json(Preference { language }))
 }
 
+/// The catalog entry for `key` in `language`, or `key` itself. Unlike [`text`], this never
+/// matches `key` against other templates.
+pub fn template<'a>(key: &'a str, language: &str) -> &'a str {
+    ankiquest_i18n::catalog(language)
+        .and_then(|catalog| catalog.get(key))
+        .unwrap_or(key)
+}
+
+/// Marks a catalog key that is stored or sent as it is, and translated when it is read.
+pub const fn phrase(key: &'static str) -> &'static str {
+    key
+}
+
+/// A catalog key written in English with its values. Texts stored before anyone reads them
+/// are written this way, so each reader's catalog has the template that matches them.
+pub fn english(key: &str, values: &[&str]) -> String {
+    substitute(key, values)
+}
+
 pub fn notice(notice: &mut crate::feedback::Notice, language: &str) {
-    notice.title = system_text(&notice.title, language);
-    notice.body = system_text(&notice.body, language);
+    notice.localize(language);
 }
 
 /// A server-written title or body in `language`.
@@ -124,53 +142,16 @@ pub(crate) fn system_text(value: &str, language: &str) -> String {
     if language == "en" {
         return value.into();
     }
+    // Stored achievement events: the title inside is translated on its own.
     if let Some(title) = value.strip_prefix("Achievement: ") {
-        let title = text(title, language);
-        return if language == "es" {
-            format!("Logro: {title}")
-        } else {
-            substitute(&text("Achievement: {0}", language), &[&title])
-        };
-    }
-    if let Some(title) = value.strip_prefix("Quest complete: ") {
-        let title = text(title, language);
-        return if language == "es" {
-            format!("Misión completada: {title}")
-        } else {
-            substitute(&text("Quest complete: {0}", language), &[&title])
-        };
-    }
-    if let Some(streak) = value
-        .strip_prefix("Today counts toward your ")
-        .and_then(|rest| rest.strip_suffix("-day streak."))
-    {
         return substitute(
-            &text("Today counts toward your {0}-day streak.", language),
-            &[streak],
+            template("Achievement: {0}", language),
+            &[&text(title, language)],
         );
     }
-    if let Some((cards, minutes)) = value
-        .split_once(" cards today in ")
-        .and_then(|(cards, rest)| Some((cards, rest.strip_suffix(" minutes.")?)))
-    {
-        return substitute(
-            &text("{0} cards today in {1} minutes.", language),
-            &[cards, minutes],
-        );
-    }
+    // Stored quest and achievement bodies: the description inside is translated on its own.
     if let Some((description, xp)) = value.rsplit_once(" (+") {
         return format!("{} (+{xp}", text(description, language));
-    }
-    // Rank updates combine independently generated sentences, each with its own names.
-    if let Some((placing, gap)) = value.rsplit_once(". ")
-        && gap.ends_with('.')
-        && gap.contains(" XP behind ")
-    {
-        return format!(
-            "{}. {}",
-            text(&format!("{placing}."), language).trim_end_matches('.'),
-            text(gap, language)
-        );
     }
     text(value, language)
 }
@@ -197,40 +178,7 @@ pub fn community(value: &mut serde_json::Value, language: &str) {
 }
 
 pub fn feedback(feedback: &mut crate::feedback::Feedback, language: &str) {
-    let language = normalize(language);
-    for headline in &mut feedback.headlines {
-        if language != "en"
-            && let Some((deck, people)) = headline.rsplit_once(" — told ")
-        {
-            let count = people.split_whitespace().next().unwrap_or("");
-            *headline = if language == "es" {
-                format!(
-                    "{deck} — se avisó a {count} {}",
-                    if count == "1" { "amigo" } else { "amigos" }
-                )
-            } else {
-                let key = if count == "1" {
-                    "{0} — told {1} friend"
-                } else {
-                    "{0} — told {1} friends"
-                };
-                substitute(&text(key, language), &[deck, count])
-            };
-        } else {
-            *headline = system_text(headline, language);
-        }
-    }
-    if let Some(status) = &mut feedback.status {
-        let prefix = match language {
-            "es" | "pt" => "Nv. ",
-            "fr" => "Niv. ",
-            "de" => "Stufe ",
-            _ => "Lv ",
-        };
-        if prefix != "Lv " {
-            *status = status.replacen("Lv ", prefix, 1);
-        }
-    }
+    feedback.localize(language);
 }
 
 pub fn profile(profile: &mut crate::game::Profile, language: &str) {
@@ -242,7 +190,7 @@ pub fn profile(profile: &mut crate::game::Profile, language: &str) {
         achievement.description = text(&achievement.description, language);
     }
     if let Some(warning) = &mut profile.streak_warning {
-        notice(warning, language);
+        warning.localize(language);
     }
 }
 
@@ -293,6 +241,89 @@ pub fn notification(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The calls whose first argument is a catalog key the server writes.
+    const MARKERS: [&str; 5] = ["english(", "phrase(", "say(", "template(", "i18n::text("];
+
+    /// Every literal key passed to one of [`MARKERS`] outside the tests, with its file.
+    fn server_keys() -> std::collections::BTreeSet<(String, String)> {
+        let mut keys = std::collections::BTreeSet::new();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| extension != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let code = source.split("\n#[cfg(test)]\nmod tests").next().unwrap();
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            for marker in MARKERS {
+                for (at, _) in code.match_indices(marker) {
+                    let before = code[..at].chars().next_back();
+                    if marker != "i18n::text("
+                        && before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    {
+                        continue;
+                    }
+                    if let Some(key) = literal(code[at + marker.len()..].trim_start()) {
+                        keys.insert((file.clone(), key));
+                    }
+                }
+            }
+        }
+        keys
+    }
+
+    /// The string a Rust literal at the start of `code` spells, if one starts there.
+    fn literal(code: &str) -> Option<String> {
+        let mut chars = code.strip_prefix('"')?.chars();
+        let mut out = String::new();
+        loop {
+            match chars.next()? {
+                '"' => return Some(out),
+                '\\' => out.push(match chars.next()? {
+                    'n' => '\n',
+                    other => other,
+                }),
+                other => out.push(other),
+            }
+        }
+    }
+
+    fn placeholders(text: &str) -> Vec<&str> {
+        let mut found: Vec<&str> = text
+            .match_indices('{')
+            .filter_map(|(at, _)| Some(&text[at..at + text[at..].find('}')? + 1]))
+            .collect();
+        found.sort_unstable();
+        found
+    }
+
+    #[test]
+    fn every_server_text_is_translated() {
+        let keys = server_keys();
+        assert!(keys.iter().any(|(file, _)| file == "feedback.rs"));
+        assert!(keys.iter().any(|(file, _)| file == "shares.rs"));
+        let mut missing = Vec::new();
+        for language in ["es", "de", "fr", "pt"] {
+            let catalog = ankiquest_i18n::catalog(language).unwrap();
+            for (file, key) in &keys {
+                match catalog.get(key) {
+                    Some(target) if placeholders(target) == placeholders(key) => {}
+                    Some(target) => {
+                        missing.push(format!("{language} {file}: {key:?} → {target:?}"))
+                    }
+                    None => missing.push(format!("{language} {file}: {key:?}")),
+                }
+            }
+            for written in crate::game::written_texts() {
+                if !ankiquest_i18n::translates(&written, language) {
+                    missing.push(format!("{language} game.rs: {written:?}"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "untranslated:\n{}", missing.join("\n"));
+    }
     #[test]
     fn celebrations_speak_spanish() {
         let mut notice = crate::notifications::Notification {
@@ -326,14 +357,29 @@ mod tests {
     }
 
     #[test]
-    fn new_moment_texts_keep_their_numbers_without_a_translation() {
+    fn stored_moment_texts_translate_with_their_numbers() {
         assert_eq!(
             system("Today counts toward your 12-day streak.", "de"),
-            "Today counts toward your 12-day streak."
+            "Heute zählt für deine Lernserie von 12 Tagen."
         );
         assert_eq!(
             system("120 cards today in 35 minutes.", "fr"),
-            "120 cards today in 35 minutes."
+            "120 cartes aujourd’hui en 35 minutes."
+        );
+        assert_eq!(
+            system("1 card today in 1 minute.", "es"),
+            "1 tarjeta hoy en 1 minuto."
+        );
+        assert_eq!(
+            system("Achievement: Card Shark", "pt"),
+            substitute(
+                template("Achievement: {0}", "pt"),
+                &[&text("Card Shark", "pt")]
+            )
+        );
+        assert_eq!(
+            system("Review 15 cards (+50 XP)", "es"),
+            "Repasa 15 tarjetas (+50 XP)"
         );
     }
 

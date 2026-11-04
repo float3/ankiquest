@@ -784,7 +784,8 @@ mod tests {
             response
                 .feedback
                 .headlines
-                .contains(&"🏆 Card conquered after 4 lapses".to_string()),
+                .iter()
+                .any(|h| *h == "🏆 Card conquered after 4 lapses"),
             "{:?}",
             response.feedback
         );
@@ -794,7 +795,7 @@ mod tests {
                 .feedback
                 .headlines
                 .iter()
-                .any(|h| h.starts_with('🏆')),
+                .any(|h| h.to_string().starts_with('🏆')),
             "resending history does not announce it again"
         );
 

@@ -1,3 +1,4 @@
+use crate::i18n::{english, phrase};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
@@ -701,6 +702,27 @@ impl Totals {
             Metric::Years => self.years,
         }
     }
+}
+
+/// Every quest, achievement and record text the server writes, for the translation tests.
+#[cfg(test)]
+pub(crate) fn written_texts() -> Vec<String> {
+    use QuestKind::*;
+    let mut texts: Vec<String> = [
+        Reviews, Minutes, Combo, Mature, NewCards, Sessions, BeforeNoon,
+    ]
+    .into_iter()
+    .map(|kind| Quest { kind, target: 12 }.title())
+    .collect();
+    for def in ACHIEVEMENTS {
+        texts.push(def.title.into());
+        texts.push(describe(def.metric, def.threshold));
+    }
+    texts.extend(Records::TITLES.map(String::from));
+    texts.extend(
+        Records::SPANS.map(|span| format!("120 XP in {span}, beating your old best of 90 XP.")),
+    );
+    texts
 }
 
 fn describe(metric: Metric, n: u64) -> String {
@@ -1563,7 +1585,7 @@ pub fn compute_with_rules(
                 if view.done {
                     events.push(Event {
                         key: format!("quest:{day}:{i}"),
-                        title: "Quest complete".into(),
+                        title: english("Quest complete", &[]),
                         body: format!("{} (+{QUEST_XP} XP)", view.title),
                     });
                 }
@@ -1591,8 +1613,11 @@ pub fn compute_with_rules(
     if level > 1 {
         events.push(Event {
             key: format!("level:{level}"),
-            title: format!("Level {level}"),
-            body: format!("You reached level {level} with {xp_total} XP."),
+            title: english("Level {0}", &[&level.to_string()]),
+            body: english(
+                "You reached level {0} with {1} XP.",
+                &[&level.to_string(), &xp_total.to_string()],
+            ),
         });
     }
 
@@ -1708,15 +1733,21 @@ pub fn compute_with_rules(
     {
         events.push(Event {
             key: format!("streak:{}:{streak}", today - streak as i64 + 1),
-            title: format!("{streak}-day streak!"),
-            body: format!("You have studied {streak} days in a row."),
+            title: english("{0}-day streak!", &[&streak.to_string()]),
+            body: english(
+                "You have studied {0} days in a row.",
+                &[&streak.to_string()],
+            ),
         });
     }
     if today_counts {
         events.push(Event {
             key: format!("secured:{today}"),
-            title: "Streak secured!".into(),
-            body: format!("Today counts toward your {streak}-day streak."),
+            title: english("Streak secured!", &[]),
+            body: english(
+                "Today counts toward your {0}-day streak.",
+                &[&streak.to_string()],
+            ),
         });
     }
 
@@ -1819,11 +1850,15 @@ pub fn compute_with_rules(
 pub fn goal_event(day: i64, reviews: u64, minutes: u64) -> Event {
     Event {
         key: format!("goal:{day}"),
-        title: "Daily goal reached!".into(),
-        body: format!(
-            "{reviews} {} today in {minutes} {}.",
-            if reviews == 1 { "card" } else { "cards" },
-            if minutes == 1 { "minute" } else { "minutes" }
+        title: english("Daily goal reached!", &[]),
+        body: english(
+            match (reviews == 1, minutes == 1) {
+                (true, true) => phrase("{0} card today in {1} minute."),
+                (true, false) => phrase("{0} card today in {1} minutes."),
+                (false, true) => phrase("{0} cards today in {1} minute."),
+                (false, false) => phrase("{0} cards today in {1} minutes."),
+            },
+            &[&reviews.to_string(), &minutes.to_string()],
         ),
     }
 }
@@ -1910,14 +1945,13 @@ fn conquest_event(c: &Conquest) -> Event {
     Event {
         key: format!("conquered:{}", c.at),
         title: if c.leech {
-            "Leech tamed"
+            english("Leech tamed", &[])
         } else {
-            "Card conquered"
-        }
-        .into(),
-        body: format!(
-            "A card you forgot {} times now stays with you for weeks.",
-            c.lapses
+            english("Card conquered", &[])
+        },
+        body: english(
+            "A card you forgot {0} times now stays with you for weeks.",
+            &[&c.lapses.to_string()],
         ),
     }
 }

@@ -481,6 +481,11 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
         }
         let sender_display = app.display(&delivery.notification.sender);
         i18n::notification(&mut delivery.notification, &language, &sender_display);
+        crate::shares::localize(
+            &app.store.lock().unwrap().conn,
+            &mut delivery.notification,
+            &language,
+        )?;
         let push_body = if let Some(original) = &delivery.notification.reply_to {
             format!(
                 "{}\n\n{}: {}",

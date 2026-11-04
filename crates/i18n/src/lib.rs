@@ -90,6 +90,17 @@ pub fn text(value: &str, language: &str) -> String {
     value.into()
 }
 
+/// Whether the catalog for `language` has an entry for `value`, exactly or as a template.
+pub fn translates(value: &str, language: &str) -> bool {
+    catalog(language).is_some_and(|catalog| {
+        catalog.get(value).is_some()
+            || catalog
+                .templates
+                .iter()
+                .any(|(source, _)| capture(source, value).is_some())
+    })
+}
+
 fn capture<'a>(pattern: &str, mut value: &'a str) -> Option<Vec<&'a str>> {
     let mut parts = pattern.split('{');
     value = value.strip_prefix(parts.next()?)?;
