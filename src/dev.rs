@@ -540,14 +540,12 @@ pub fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::game::{Clock, ClockHistory, FreezePolicy};
-    use crate::test_support::cleanup;
-    use axum::body::{Body, to_bytes};
-    use axum::extract::connect_info::MockConnectInfo;
-    use axum::http::Request;
-    use std::net::SocketAddr;
-    use std::path::PathBuf;
+    use crate::test_support::{cleanup, json_response, route_from};
+    use axum::body::Body;
 
-    use tower::ServiceExt;
+    use axum::http::Request;
+
+    use std::path::PathBuf;
 
     const NOW: i64 = 1_790_000_000_000;
 
@@ -591,19 +589,7 @@ mod tests {
                 body.to_string()
             }))
             .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.7:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        (
-            status,
-            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        )
+        json_response(route_from(app, request, "192.0.2.7:40000").await).await
     }
 
     fn get<'a>(

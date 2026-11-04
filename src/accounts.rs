@@ -756,8 +756,8 @@ pub(crate) async fn change_password(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::cleanup;
-    use axum::body::{Body, to_bytes};
+    use crate::test_support::{cleanup, json_response, route_from};
+    use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
     use axum::http::header;
@@ -783,19 +783,8 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                format!("{ip}:40000").parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        (
-            status,
-            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        )
+        let request = request.body(Body::from(body.to_string())).unwrap();
+        json_response(route_from(app, request, &format!("{ip}:40000")).await).await
     }
 
     fn json_headers() -> [(&'static str, &'static str); 1] {

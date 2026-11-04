@@ -8,13 +8,10 @@
 use crate::app::App;
 use crate::game::{Clock, Event};
 use axum::body::{Body, to_bytes};
-use axum::extract::connect_info::MockConnectInfo;
 use axum::http::Request;
 use serde_json::{Value, json};
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tower::ServiceExt;
 
 const PASSWORD: &str = "long enough pw";
 
@@ -62,13 +59,7 @@ impl Fixture {
         } else {
             Body::from(body.to_string())
         };
-        let response = crate::router(self.app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.1:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request.body(body).unwrap())
-            .await
-            .unwrap();
+        let response = crate::test_support::route(&self.app, request.body(body).unwrap()).await;
         let status = response.status();
         let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
         assert!(

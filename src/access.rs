@@ -795,8 +795,6 @@ mod tests {
     use axum::http::Request;
     use std::path::PathBuf;
 
-    use tower::ServiceExt;
-
     fn fixture(private_site: bool) -> (Arc<App>, PathBuf) {
         let (store, path) = crate::test_support::temporary_store();
         let config = serde_json::from_value(serde_json::json!({
@@ -844,10 +842,7 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        crate::router(app.clone())
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap()
+        crate::test_support::route(app, request.body(Body::from(body.to_string())).unwrap()).await
     }
 
     async fn sign_in(app: &Arc<App>, password: &str) -> Response {

@@ -1248,8 +1248,6 @@ mod tests {
     use axum::http::Request;
     use axum::routing::post;
 
-    use tower::ServiceExt;
-
     const ORIGIN: &str = "https://anki.example.test";
     const FORM: &str = "application/x-www-form-urlencoded";
 
@@ -1358,10 +1356,7 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        crate::router(app.clone())
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap()
+        crate::test_support::route(app, request.body(Body::from(body.to_string())).unwrap()).await
     }
 
     fn location(response: &Response) -> String {

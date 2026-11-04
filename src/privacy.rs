@@ -509,14 +509,12 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::cleanup;
+    use crate::test_support::{cleanup, route_from};
     use axum::body::{Body, to_bytes};
-    use axum::extract::connect_info::MockConnectInfo;
+
     use axum::http::Request;
     use std::collections::BTreeSet;
     use std::path::PathBuf;
-
-    use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
         crate::test_support::app_with(serde_json::json!({
@@ -544,13 +542,7 @@ mod tests {
                 body.to_string()
             }))
             .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.9:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
+        let response = route_from(app, request, "192.0.2.9:40000").await;
         let status = response.status();
         (
             status,

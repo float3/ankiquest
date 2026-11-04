@@ -66,6 +66,43 @@ pub(crate) fn fixture() -> (Arc<App>, PathBuf) {
     }))
 }
 
+/// `request` through the whole router, from `peer` unless it names its own `ConnectInfo`.
+pub(crate) async fn route_from(
+    app: &Arc<App>,
+    request: axum::http::Request<axum::body::Body>,
+    peer: &str,
+) -> axum::response::Response {
+    use tower::ServiceExt;
+    crate::router(app.clone())
+        .layer(axum::extract::connect_info::MockConnectInfo(
+            peer.parse::<std::net::SocketAddr>().unwrap(),
+        ))
+        .oneshot(request)
+        .await
+        .unwrap()
+}
+
+pub(crate) async fn route(
+    app: &Arc<App>,
+    request: axum::http::Request<axum::body::Body>,
+) -> axum::response::Response {
+    route_from(app, request, "192.0.2.1:40000").await
+}
+
+/// A response's status and JSON body, or null when the body is not JSON.
+pub(crate) async fn json_response(
+    response: axum::response::Response,
+) -> (StatusCode, serde_json::Value) {
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
 pub(crate) fn headers(user: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
