@@ -1,0 +1,57 @@
+{
+  "days": [
+    {
+      "at": 1792900800000,
+      "date": "2026-10-25",
+      "frozen": false,
+      "new_cards": 0,
+      "reviews": 4,
+      "streak": 1,
+      "time_ms": 36000,
+      "xp": 41
+    },
+    {
+      "at": 1792987200000,
+      "date": "2026-10-26",
+      "frozen": false,
+      "new_cards": 0,
+      "reviews": 6,
+      "streak": 2,
+      "time_ms": 54000,
+      "xp": 62
+    },
+    {
+      "at": 1793073600000,
+      "date": "2026-10-27",
+      "frozen": false,
+      "new_cards": 0,
+      "reviews": 0,
+      "streak": 0,
+      "time_ms": 0,
+      "xp": 0
+    },
+    {
+      "at": 1793160000000,
+      "date": "2026-10-28",
+      "frozen": false,
+      "new_cards": 0,
+      "reviews": 5,
+      "streak": 1,
+      "time_ms": 40000,
+      "xp": 101
+    }
+  ],
+  "last_received_at": 1793183400000,
+  "last_review_at": 1793182204000,
+  "latest_session": {
+    "ended_at": 1793182204000,
+    "new_cards": 0,
+    "reviews": 5,
+    "started_at": 1793182200000,
+    "time_ms": 40000
+  },
+  "year": 2026,
+  "years": [
+    2026
+  ]
+}

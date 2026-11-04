@@ -23,6 +23,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `react.json` | `POST /api/react/{user}` |
 | `profile.json` | `GET /api/profile/{user}`, owner view with `goal` |
 | `leaderboard.json` | `GET /api/leaderboard` |
+| `leaderboard_day.json` | `GET /api/leaderboard?period=day` |
+| `week.json` | `GET /api/week` |
+| `player_profile.json` | `GET /api/profile/{user}` for another player, as the leaderboard opens it: no `goal` |
 | `rank.json` | `POST /api/rank/{user}` |
 | `notifications.json` | `GET /api/notifications/{user}`: a celebration with `win`, a friend's `share` with `image` and `reacted`, a `reaction` |
 | `goal.json` | `GET /api/goal/{user}` |
@@ -35,6 +38,8 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
 | `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
+| `records.json` | `GET /api/records` |
+| `study.json` | `GET /api/study/{user}`: three study days and a day off |
 | `sign_in_methods.json` | `GET /api/sign-in/{user}`: a password and a linked GitHub |
 | `account.json` | `GET /api/accounts/{user}` |
 | `password_change.json` | `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others": false}` |
