@@ -1,0 +1,577 @@
+{
+  "awards": [],
+  "calendar": [
+    {
+      "end": "2026-10-26",
+      "key": "2026-10-25",
+      "kind": "day",
+      "partial": false,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 4,
+          "time_ms": 36000,
+          "user": "hill",
+          "xp": 41
+        }
+      ],
+      "start": "2026-10-25",
+      "status": "final",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 41
+    },
+    {
+      "end": "2026-10-27",
+      "key": "2026-10-26",
+      "kind": "day",
+      "partial": false,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 2,
+          "days_active": 1,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 6,
+          "time_ms": 54000,
+          "user": "hill",
+          "xp": 62
+        }
+      ],
+      "start": "2026-10-26",
+      "status": "final",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 62
+    },
+    {
+      "end": "2026-10-28",
+      "key": "2026-10-27",
+      "kind": "day",
+      "partial": false,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 0,
+          "days_active": 0,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 0,
+          "time_ms": 0,
+          "user": "hill",
+          "xp": 0
+        }
+      ],
+      "start": "2026-10-27",
+      "status": "provisional",
+      "winners": [],
+      "winning_margin": 0
+    },
+    {
+      "end": "2026-10-29",
+      "key": "2026-10-28",
+      "kind": "day",
+      "partial": false,
+      "reconstructed": false,
+      "standings": [
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 5,
+          "time_ms": 40000,
+          "user": "hill",
+          "xp": 101
+        },
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Cerro",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 3,
+          "time_ms": 24000,
+          "user": "cerro",
+          "xp": 31
+        },
+        {
+          "best_streak": 0,
+          "days_active": 0,
+          "display": "Friend",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 0,
+          "time_ms": 0,
+          "user": "friend",
+          "xp": 0
+        }
+      ],
+      "start": "2026-10-28",
+      "status": "ongoing",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 70
+    }
+  ],
+  "head_to_head": [
+    {
+      "a": "cerro",
+      "b": "friend",
+      "days_a": 0,
+      "days_b": 0,
+      "days_tied": 0,
+      "weeks_a": 0,
+      "weeks_b": 0,
+      "weeks_tied": 0
+    },
+    {
+      "a": "cerro",
+      "b": "hill",
+      "days_a": 0,
+      "days_b": 0,
+      "days_tied": 0,
+      "weeks_a": 0,
+      "weeks_b": 0,
+      "weeks_tied": 0
+    },
+    {
+      "a": "friend",
+      "b": "hill",
+      "days_a": 0,
+      "days_b": 0,
+      "days_tied": 0,
+      "weeks_a": 0,
+      "weeks_b": 0,
+      "weeks_tied": 0
+    }
+  ],
+  "meta": {
+    "grace_hours": 24,
+    "initialized_at": 1793183400000,
+    "month": 10,
+    "rollover_hour": 4,
+    "scoring_note": "Each full Anki day's XP counts toward the shared competition date containing that Anki day's start, matching the weekly leaderboard. Results accept syncs for 24 hours after the common cutoff, then remain fixed. Later syncs still count on the live leaderboard. Reconstructed results use the review history available when archived; coverage begins with the earliest retained history and may predate this server.",
+    "start_date": "2026-10-25",
+    "start_source": "available_history",
+    "time_zone": "UTC",
+    "year": 2026
+  },
+  "players": [
+    {
+      "day_wins": 0,
+      "display": "Cerro",
+      "longest_winning_streak": 0,
+      "season_wins": 0,
+      "shared_wins": 0,
+      "trophies": [],
+      "user": "cerro",
+      "week_wins": 0,
+      "year_review": {
+        "best_streak": 1,
+        "days_won": 0,
+        "months": [
+          {
+            "month": "2026-10",
+            "reviews": 3,
+            "study_days": 1,
+            "xp": 31
+          }
+        ],
+        "reviews": 3,
+        "strongest_month": "2026-10",
+        "study_days": 1,
+        "trophies": 0,
+        "weeks_won": 0,
+        "xp": 31,
+        "year": 2026
+      }
+    },
+    {
+      "day_wins": 0,
+      "display": "Friend",
+      "longest_winning_streak": 0,
+      "season_wins": 0,
+      "shared_wins": 0,
+      "trophies": [],
+      "user": "friend",
+      "week_wins": 0,
+      "year_review": {
+        "best_streak": 0,
+        "days_won": 0,
+        "months": [
+          {
+            "month": "2026-10",
+            "reviews": 0,
+            "study_days": 0,
+            "xp": 0
+          }
+        ],
+        "reviews": 0,
+        "strongest_month": null,
+        "study_days": 0,
+        "trophies": 0,
+        "weeks_won": 0,
+        "xp": 0,
+        "year": 2026
+      }
+    },
+    {
+      "day_wins": 2,
+      "display": "Hill",
+      "longest_winning_streak": 2,
+      "season_wins": 0,
+      "shared_wins": 0,
+      "trophies": [
+        {
+          "date": "2026-10-25",
+          "id": "first_daily_win",
+          "title": "First daily victory"
+        },
+        {
+          "date": "2026-10-19",
+          "id": "first_weekly_win",
+          "title": "Weekly champion"
+        }
+      ],
+      "user": "hill",
+      "week_wins": 1,
+      "year_review": {
+        "best_streak": 2,
+        "days_won": 2,
+        "months": [
+          {
+            "month": "2026-10",
+            "reviews": 15,
+            "study_days": 3,
+            "xp": 204
+          }
+        ],
+        "reviews": 15,
+        "strongest_month": "2026-10",
+        "study_days": 3,
+        "trophies": 2,
+        "weeks_won": 1,
+        "xp": 204,
+        "year": 2026
+      }
+    }
+  ],
+  "records": [
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "streak",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 2
+    },
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "streak",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 2
+    },
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "daily_reviews",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 6
+    },
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "daily_reviews",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 6
+    },
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "daily_xp",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 62
+    },
+    {
+      "date": "2026-10-26",
+      "display": "Hill",
+      "metric": "daily_xp",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 62
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "streak",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 1
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "streak",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 1
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "daily_reviews",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 4
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "daily_reviews",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 4
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "daily_xp",
+      "reconstructed": true,
+      "scope": "server",
+      "user": "hill",
+      "value": 41
+    },
+    {
+      "date": "2026-10-25",
+      "display": "Hill",
+      "metric": "daily_xp",
+      "reconstructed": true,
+      "scope": "personal",
+      "user": "hill",
+      "value": 41
+    }
+  ],
+  "seasons": [
+    {
+      "end": "2026-11-01",
+      "key": "2026-10",
+      "kind": "month",
+      "partial": true,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 2,
+          "days_active": 3,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 15,
+          "time_ms": 130000,
+          "user": "hill",
+          "xp": 204
+        },
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Cerro",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 3,
+          "time_ms": 24000,
+          "user": "cerro",
+          "xp": 31
+        },
+        {
+          "best_streak": 0,
+          "days_active": 0,
+          "display": "Friend",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 0,
+          "time_ms": 0,
+          "user": "friend",
+          "xp": 0
+        }
+      ],
+      "start": "2026-10-01",
+      "status": "ongoing",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 173
+    }
+  ],
+  "weeks": [
+    {
+      "end": "2026-10-26",
+      "key": "2026-10-19",
+      "kind": "week",
+      "partial": true,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 4,
+          "time_ms": 36000,
+          "user": "hill",
+          "xp": 41
+        }
+      ],
+      "start": "2026-10-19",
+      "status": "final",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 41
+    },
+    {
+      "end": "2026-11-02",
+      "key": "2026-10-26",
+      "kind": "week",
+      "partial": false,
+      "reconstructed": true,
+      "standings": [
+        {
+          "best_streak": 2,
+          "days_active": 2,
+          "display": "Hill",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 11,
+          "time_ms": 94000,
+          "user": "hill",
+          "xp": 163
+        },
+        {
+          "best_streak": 1,
+          "days_active": 1,
+          "display": "Cerro",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 3,
+          "time_ms": 24000,
+          "user": "cerro",
+          "xp": 31
+        },
+        {
+          "best_streak": 0,
+          "days_active": 0,
+          "display": "Friend",
+          "freezes_used": 0,
+          "new_cards": 0,
+          "reviews": 0,
+          "time_ms": 0,
+          "user": "friend",
+          "xp": 0
+        }
+      ],
+      "start": "2026-10-26",
+      "status": "ongoing",
+      "winners": [
+        "hill"
+      ],
+      "winning_margin": 132
+    }
+  ],
+  "winner_history": {
+    "lifetime": {
+      "players": [
+        {
+          "day_wins": 0,
+          "display": "Cerro",
+          "history_start": "2026-10-28",
+          "month_wins": 0,
+          "user": "cerro",
+          "week_wins": 0
+        },
+        {
+          "day_wins": 0,
+          "display": "Friend",
+          "history_start": null,
+          "month_wins": 0,
+          "user": "friend",
+          "week_wins": 0
+        },
+        {
+          "day_wins": 2,
+          "display": "Hill",
+          "history_start": "2026-10-25",
+          "month_wins": 0,
+          "user": "hill",
+          "week_wins": 1
+        }
+      ]
+    },
+    "meta": {
+      "rollover_hour": 4,
+      "start_date": "2026-10-25",
+      "start_source": "available_history",
+      "time_zone": "UTC"
+    },
+    "shared": {
+      "periods": {
+        "day": 0,
+        "month": 0,
+        "week": 0
+      },
+      "player_count": 2,
+      "players": [
+        {
+          "day_wins": 0,
+          "display": "Cerro",
+          "history_start": "2026-10-28",
+          "month_wins": 0,
+          "user": "cerro",
+          "week_wins": 0
+        },
+        {
+          "day_wins": 0,
+          "display": "Hill",
+          "history_start": "2026-10-25",
+          "month_wins": 0,
+          "user": "hill",
+          "week_wins": 0
+        }
+      ],
+      "start_date": "2026-10-28"
+    },
+    "waiting_players": [
+      {
+        "display": "Friend",
+        "user": "friend"
+      }
+    ]
+  }
+}

@@ -595,6 +595,111 @@ async fn examples_match_the_handlers() {
     f.keep_secret(&Value::from(ticket.unwrap()), "example-ticket");
     examples.push(("sign_in_browser", browser));
 
+    // Community reminders, the competition calendar and a conquered card, which the app's own
+    // screens read. Hill keeps the defaults until saving his choice.
+    examples.push((
+        "reminders",
+        f.call(
+            "GET",
+            "/api/community/reminders/hill",
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+    examples.push((
+        "reminders_save",
+        f.call(
+            "POST",
+            "/api/community/reminders/hill",
+            Some("hill-secret"),
+            json!({
+                "gentle_daily": true,
+                "urgent_streak": true,
+                "freeze_used": false,
+                "freeze_refill": false,
+                "milestone": true,
+                "weekly_closing": false,
+                "weekly_recap": true,
+                "reminder_hour": 19,
+                "quiet_start": 22,
+                "quiet_end": 8,
+                "daily_limit": 2
+            }),
+        )
+        .await,
+    ));
+    examples.push((
+        "community",
+        f.call(
+            "GET",
+            "/api/community?year=2026&month=10",
+            None,
+            Value::Null,
+        )
+        .await,
+    ));
+    // One card Hill forgot four times over the past weeks before it earned a 25-day interval
+    // yesterday: a review failed into relearning, then the relearning step, four times. He says
+    // what the card was.
+    let answers: Vec<(i64, i64, i64)> = std::iter::once((0, 0, 1))
+        .chain((0..4).flat_map(|_| [(1, 3, -600), (2, -600, 1)]))
+        .chain([(1, 1, 8), (1, 8, 25)])
+        .collect();
+    let first = NOW_MS - answers.len() as i64 * 86_400_000;
+    let card: Vec<Value> = answers
+        .iter()
+        .enumerate()
+        .map(|(index, &(kind, last_ivl, ivl))| {
+            json!({
+                "id": first + index as i64 * 86_400_000,
+                "cid": 9_000,
+                "last_ivl": last_ivl,
+                "ivl": ivl,
+                "time_ms": 7_000,
+                "kind": kind
+            })
+        })
+        .collect();
+    let conquered = first + (answers.len() as i64 - 1) * 86_400_000;
+    f.call(
+        "POST",
+        "/api/reviews/hill",
+        Some("hill-secret"),
+        json!({"reviews": card, "clock": {"offset_west_min": 0, "rollover_hour": 4}}),
+    )
+    .await;
+    f.app
+        .store
+        .lock()
+        .unwrap()
+        .conn
+        .execute(
+            "insert into conquest_labels (user, at, label) values ('hill', ?1, 'el murciélago')",
+            [conquered],
+        )
+        .unwrap();
+    examples.push((
+        "conquest",
+        f.call(
+            "GET",
+            &format!("/api/conquests/hill/{conquered}"),
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+    examples.push((
+        "conquest_tell",
+        f.call(
+            "POST",
+            &format!("/api/conquests/hill/{conquered}/tell"),
+            Some("hill-secret"),
+            json!({}),
+        )
+        .await,
+    ));
+
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
     // and belongs to one of Friend's.
