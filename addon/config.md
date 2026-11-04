@@ -28,7 +28,7 @@ the daily goal lives on the server, so every device agrees. pick it with **Daily
 - `goal_setup_shown`: the accounts the goal dialog already opened for by itself
 - `deck_status`: mark decks in the deck list as done today, learning later today, or ready
 - `session_summary`: show a recap with your reviews, time and cards left when you leave a study session
-- `goal_celebrations`: once a day, celebrate when today counts for your streak and when you reach your daily goal; that popup replaces the recap for that session
+- `goal_celebrations`: once a day, celebrate when today counts for your streak and when you reach your daily goal; that popup replaces the recap for that session. a server with wins celebrates the daily goal itself (it arrives like your other celebrations), so the add-on then only celebrates the streak
 
 to give friends a copy of a deck, open **Tools → ankiquest: send a deck to friends…**, pick the deck and the friends. they get an independent `.apkg` with cards, notes, media and deck options, never your review history; copies over 25 MB are refused, so use Anki's normal export for those. decks friends send you wait under **Tools → ankiquest: decks offered to me…** (the number shows how many) for 30 days, where **Import** opens Anki's usual import dialog and **Dismiss** removes the offer.
 
