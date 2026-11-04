@@ -1,6 +1,6 @@
 //! The inbox endpoints: notifications, the activity feed, what a player sent, and replies.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::web_util::{base_url, failed_for, store_error};
 use crate::{challenges, decks, i18n, notifications, reminders, shares, wins};
@@ -16,9 +16,7 @@ pub(crate) async fn get_notifications(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<notifications::Notification>>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     let now = now_ms();
     challenges::refresh(&mut store, &app.participants(), now).map_err(store_error)?;
@@ -74,9 +72,7 @@ async fn activity(
     headers: HeaderMap,
     Query(query): Query<ActivityQuery>,
 ) -> Result<Json<notifications::Activity>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let days = query.days.unwrap_or(notifications::ACTIVITY_DAYS);
     let limit = query.limit.unwrap_or(100);
     if !matches!(days, 30 | 90) || !valid_page(limit, query.before) {
@@ -122,9 +118,7 @@ async fn read_activity(
     headers: HeaderMap,
     Json(request): Json<ActivityRead>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if request.ids.len() > 200
         || request.ids.iter().any(|id| *id <= 0)
         || request
@@ -155,9 +149,7 @@ async fn sent_activity(
     headers: HeaderMap,
     Query(query): Query<SentQuery>,
 ) -> Result<Json<notifications::SentPage>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let limit = query.limit.unwrap_or(100);
     if !valid_page(limit, query.before) {
         return Err(StatusCode::BAD_REQUEST);
@@ -193,9 +185,7 @@ pub(crate) async fn reply(
     headers: HeaderMap,
     Json(request): Json<ReplyRequest>,
 ) -> Result<Json<ReplyResponse>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let message = request.message.trim();
     if !decks::valid_message(message) {
         return Err(StatusCode::BAD_REQUEST);
@@ -418,7 +408,6 @@ mod tests {
                 StatusCode::BAD_REQUEST
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

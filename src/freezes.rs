@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::game;
 use crate::game::{FreezePolicy, FreezePreference};
@@ -210,9 +210,7 @@ async fn get_freezes(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<FreezeSettings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     freeze_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(failed_for("streak freeze settings for", &user))
@@ -224,9 +222,7 @@ pub(crate) async fn set_freezes(
     headers: HeaderMap,
     Json(update): Json<FreezeUpdate>,
 ) -> Result<Json<FreezeSettings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store_error = failed_for("streak freeze settings for", &user);
     let mut store = app.store.lock().unwrap();
     store
@@ -253,9 +249,9 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use crate::app::load_player;
-    use crate::decks::tests::temporary_store;
     use crate::freezes::{FreezeUpdate, get_freezes, set_freezes};
     use crate::study::{Pending, Upload, preview, upload};
+    use crate::test_support::temporary_store;
     use crate::test_support::*;
 
     #[test]
@@ -272,8 +268,7 @@ mod tests {
         drop(store);
         let store = crate::store::Store::open(&path).unwrap();
         assert!(store.freeze_policy("cerro").unwrap().legacy_until.is_none());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -322,8 +317,7 @@ mod tests {
                 .legacy_until
                 .is_none()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -357,8 +351,7 @@ mod tests {
                 .unwrap()
                 .enabled_at(crate::app::now_ms())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -374,8 +367,7 @@ mod tests {
         let store = crate::store::Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap(), before);
         assert!(store.freeze_preferences("hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -396,8 +388,7 @@ mod tests {
         drop(store);
         let store = crate::store::Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap(), before);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -409,8 +400,7 @@ mod tests {
         let changes = store.freeze_preferences("cerro").unwrap();
         assert_eq!(changes.len(), 3);
         assert!(changes[2].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -443,8 +433,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -475,8 +464,7 @@ mod tests {
         let store = Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap().len(), 1);
         assert!(!store.freeze_preferences("cerro").unwrap()[0].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -523,8 +511,7 @@ mod tests {
             "repeated saves cannot change the activation time"
         );
         assert!(history.last().unwrap().enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -630,20 +617,15 @@ mod tests {
         drop(app);
         let store = Store::open(&path).unwrap();
         let player = load_player(&store, "cerro").unwrap();
-        let reloaded = App {
-            config,
-            access: access::Access::default(),
-            accounts: Default::default(),
-            week: Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::from([("cerro".into(), player)])),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        };
+        let reloaded = app_from(store, config);
+        reloaded
+            .players
+            .write()
+            .unwrap()
+            .insert("cerro".into(), player);
         assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
         assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);
         assert!(!reloaded.profile("cerro").unwrap().freezes_enabled);
-        drop(reloaded);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(reloaded, path);
     }
 }

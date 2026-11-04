@@ -2,9 +2,10 @@
 //! Each provider's stable user id is linked to one player. A first sign-in creates an account
 //! once the person has picked a username; later ones sign into the linked player.
 
-use crate::accounts::{clean_device, clean_display, refuse, reply, valid_username};
-use crate::privacy::escape;
+use crate::accounts::{clean_device, clean_display, valid_username};
+use crate::web_util::escape;
 use crate::web_util::{base64url, hex, hex_cookie, normalize_user, random_bytes, set_cookie};
+use crate::web_util::{refuse, reply};
 use crate::{Error, access, app::App, app::now_ms};
 use axum::Router;
 use axum::body::Bytes;
@@ -211,10 +212,6 @@ impl Settings {
     }
 }
 
-trait Expiring {
-    fn expires(&self) -> i64;
-}
-
 struct Started {
     provider: Provider,
     verifier: String,
@@ -236,18 +233,6 @@ struct Signup {
     expires: i64,
 }
 
-impl Expiring for Started {
-    fn expires(&self) -> i64 {
-        self.expires
-    }
-}
-
-impl Expiring for Signup {
-    fn expires(&self) -> i64 {
-        self.expires
-    }
-}
-
 /// Sign-ins in progress, each found through the random value in its browser's cookie.
 #[derive(Default)]
 pub(crate) struct Flows {
@@ -255,12 +240,13 @@ pub(crate) struct Flows {
     signups: Mutex<HashMap<String, Signup>>,
 }
 
-fn keep<T: Expiring>(map: &mut HashMap<String, T>, key: String, value: T, now: i64) {
-    map.retain(|_, entry| entry.expires() > now);
+/// Adds a flow to `map` after dropping expired ones, and the oldest when it is full.
+fn keep<T>(map: &mut HashMap<String, T>, key: String, value: T, now: i64, expires: fn(&T) -> i64) {
+    map.retain(|_, entry| expires(entry) > now);
     if map.len() >= MAX_FLOWS
         && let Some(oldest) = map
             .iter()
-            .min_by_key(|(_, entry)| entry.expires())
+            .min_by_key(|(_, entry)| expires(entry))
             .map(|(key, _)| key.clone())
     {
         map.remove(&oldest);
@@ -270,7 +256,13 @@ fn keep<T: Expiring>(map: &mut HashMap<String, T>, key: String, value: T, now: i
 
 impl Flows {
     fn start(&self, state: String, started: Started, now: i64) {
-        keep(&mut self.started.lock().unwrap(), state, started, now);
+        keep(
+            &mut self.started.lock().unwrap(),
+            state,
+            started,
+            now,
+            |s| s.expires,
+        );
     }
 
     /// The flow behind a callback, at most once.
@@ -283,7 +275,9 @@ impl Flows {
     }
 
     fn add_signup(&self, key: String, signup: Signup, now: i64) {
-        keep(&mut self.signups.lock().unwrap(), key, signup, now);
+        keep(&mut self.signups.lock().unwrap(), key, signup, now, |s| {
+            s.expires
+        });
     }
 
     fn signup(&self, key: &str, now: i64) -> Option<Signup> {
@@ -575,16 +569,6 @@ fn can_unlink(account: bool, password: bool, other_links: usize) -> bool {
     !account || password || other_links > 0
 }
 
-fn exists(app: &App, user: &str) -> bool {
-    app.accounts.contains(user)
-        || app
-            .config
-            .users
-            .get(user)
-            .and_then(|config| config.token.as_deref())
-            .is_some_and(|token| !token.is_empty())
-}
-
 /// The player linked to this identity, if they can still sign in.
 fn owner(
     app: &App,
@@ -599,7 +583,7 @@ fn owner(
             |r| r.get(0),
         )
         .optional()?;
-    Ok(linked.filter(|user| exists(app, user)))
+    Ok(linked.filter(|user| app.can_sign_in(user)))
 }
 
 fn linked_providers(conn: &Connection, user: &str) -> Result<Vec<Provider>, Error> {
@@ -1259,11 +1243,10 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use axum::routing::post;
-    use std::sync::RwLock;
-    use tower::ServiceExt;
 
     const ORIGIN: &str = "https://anki.example.test";
     const FORM: &str = "application/x-www-form-urlencoded";
@@ -1338,8 +1321,7 @@ mod tests {
     }
 
     fn fixture(registration: bool, base: &str) -> (Arc<App>, std::path::PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": registration,
             "public_url": ORIGIN,
             "devs": ["hill"],
@@ -1355,26 +1337,6 @@ mod tests {
                 }
             }
         }))
-        .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
-    }
-
-    fn cleanup(app: Arc<App>, path: std::path::PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     async fn send(
@@ -1394,10 +1356,7 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        crate::router(app.clone())
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap()
+        crate::test_support::route(app, request.body(Body::from(body.to_string())).unwrap()).await
     }
 
     fn location(response: &Response) -> String {
@@ -2363,21 +2322,9 @@ mod tests {
 
     #[tokio::test]
     async fn servers_without_providers_say_nothing_about_them() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(
+        let (app, path) = crate::test_support::app_with(
             serde_json::json!({"users": {"alice": {"token": "alice-token"}}}),
-        )
-        .unwrap();
-        let app = Arc::new(App {
-            config,
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        );
         let status = json(send(&app, "GET", "/auth/status", &[], "").await).await;
         assert!(status.get("oauth").is_none(), "{status}");
         assert_eq!(

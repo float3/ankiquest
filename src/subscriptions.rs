@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::decks;
 use crate::decks::{IncomingSettings, valid_incoming_settings};
@@ -211,39 +211,8 @@ pub(crate) async fn get_incoming_preferences(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     incoming_preferences(&app, &app.store.lock().unwrap(), &user)
-        .map(Json)
-        .map_err(store_error)
-}
-
-pub(crate) async fn set_incoming_preferences(
-    State(app): State<Arc<App>>,
-    UrlPath(user): UrlPath<String>,
-    headers: HeaderMap,
-    Json(update): Json<decks::IncomingSettings>,
-) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    if !decks::valid_incoming_settings(&update) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let mut store = app.store.lock().unwrap();
-    let current = incoming_preferences(&app, &store, &user).map_err(store_error)?;
-    if update
-        .muted_senders
-        .iter()
-        .any(|user| !current.senders.iter().any(|sender| sender.user == *user))
-    {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    store
-        .set_incoming_settings(&user, &update)
-        .map_err(store_error)?;
-    incoming_preferences(&app, &store, &user)
         .map(Json)
         .map_err(store_error)
 }
@@ -254,9 +223,7 @@ async fn set_deck_subscriptions(
     headers: HeaderMap,
     Json(update): Json<Settings>,
 ) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if !update.valid(&user) {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -278,27 +245,22 @@ async fn set_deck_subscriptions(
 }
 
 pub(crate) fn routes() -> Router<Arc<App>> {
-    Router::new()
-        .route(
-            "/api/notification-preferences/{user}",
-            get(get_incoming_preferences).post(set_incoming_preferences),
-        )
-        .route(
-            "/api/deck-subscriptions/{user}",
-            get(get_incoming_preferences).post(set_deck_subscriptions),
-        )
+    Router::new().route(
+        "/api/deck-subscriptions/{user}",
+        get(get_incoming_preferences).post(set_deck_subscriptions),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decks::tests::temporary_store;
     use crate::decks::{Preference, Snapshot, get_decks, set_decks};
     use crate::game::Clock;
     use crate::inbox::get_notifications;
     use crate::notifications::Outgoing;
     use crate::router;
     use crate::study::upload;
+    use crate::test_support::temporary_store;
     use crate::test_support::*;
 
     fn settings(enabled: bool, senders: &[&str]) -> Settings {
@@ -437,8 +399,7 @@ mod tests {
         assert_eq!(decks[0].recipients, ["friend", "hill"]);
         assert_eq!(decks[1].recipients, ["hill"]);
         assert!(decks.iter().all(|deck| deck.enabled));
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -491,8 +452,7 @@ mod tests {
         assert_eq!(ids(&store), [other, message, reply]);
         let future = notice(&mut store, "hill", "cerro", "completion", now + 1);
         assert!(store.begin_push(future, now + 1).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -555,8 +515,7 @@ mod tests {
                 .recipients,
             ["friend"]
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -586,8 +545,7 @@ mod tests {
                 deck.id == "unchanged"
             );
         }
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -652,8 +610,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tomorrow[0].recipients, 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -693,8 +650,7 @@ mod tests {
             )
             .unwrap();
         assert!(store.sharing_senders("hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -729,8 +685,7 @@ mod tests {
         );
         assert_eq!(decks[2].recipients, ["friend"]);
         assert!(!decks[2].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -761,8 +716,7 @@ mod tests {
                 .unwrap(),
             0
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -849,8 +803,7 @@ mod tests {
             app.store.lock().unwrap().decks("cerro").unwrap()[0].recipients,
             ["friend", "hill"]
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -965,108 +918,7 @@ mod tests {
                 assert!(!body.to_string().contains("deck_id"));
             }
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
-    #[tokio::test]
-    async fn incoming_preferences_are_private_validated_and_available_before_studying() {
-        let (app, path) = fixture();
-        let settings =
-            get_incoming_preferences(State(app.clone()), UrlPath("hill".into()), headers("hill"))
-                .await
-                .unwrap()
-                .0;
-        assert!(settings.settings.enabled);
-        assert!(settings.settings.muted_senders.is_empty());
-        assert_eq!(
-            settings
-                .senders
-                .iter()
-                .map(|p| p.user.as_str())
-                .collect::<Vec<_>>(),
-            vec!["cerro", "friend"]
-        );
-        assert!(app.profile("hill").is_none());
-        for muted_senders in [
-            vec!["hill".into()],
-            vec!["unknown".into()],
-            vec!["cerro".into(), "cerro".into()],
-        ] {
-            assert_eq!(
-                set_incoming_preferences(
-                    State(app.clone()),
-                    UrlPath("hill".into()),
-                    headers("hill"),
-                    Json(decks::IncomingSettings {
-                        enabled: false,
-                        muted_senders
-                    })
-                )
-                .await
-                .unwrap_err(),
-                StatusCode::BAD_REQUEST
-            );
-        }
-        assert!(
-            app.store
-                .lock()
-                .unwrap()
-                .incoming_settings("hill")
-                .unwrap()
-                .enabled
-        );
-        assert!(
-            serde_json::from_value::<decks::IncomingSettings>(serde_json::json!({
-                "enabled":false,"muted_senders":[],"user":"cerro"
-            }))
-            .is_err()
-        );
-        {
-            let mut store = app.store.lock().unwrap();
-            store
-                .send(
-                    &notifications::Outgoing {
-                        to: "hill",
-                        from: "former-player",
-                        title: "Deck complete",
-                        body: "Private deck name",
-                        kind: "completion",
-                    },
-                    0,
-                    now_ms(),
-                )
-                .unwrap();
-        }
-        let saved = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: false,
-                muted_senders: vec!["former-player".into()],
-            }),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert!(!saved.settings.enabled);
-        assert_eq!(saved.settings.muted_senders, vec!["former-player"]);
-        assert!(
-            !serde_json::to_string(&saved)
-                .unwrap()
-                .contains("Private deck name")
-        );
-        assert!(
-            app.store
-                .lock()
-                .unwrap()
-                .incoming_settings("cerro")
-                .unwrap()
-                .enabled
-        );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1088,17 +940,17 @@ mod tests {
         )
         .await
         .unwrap();
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: true,
-                muted_senders: vec!["cerro".into()],
-            }),
-        )
-        .await
-        .unwrap();
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: true,
+                    muted_senders: vec!["cerro".into()],
+                },
+            )
+            .unwrap();
         let completion = upload(
             State(app.clone()),
             UrlPath("cerro".into()),
@@ -1138,17 +990,17 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(outgoing.decks[0].recipients, vec!["friend", "hill"]);
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: true,
-                muted_senders: vec![],
-            }),
-        )
-        .await
-        .unwrap();
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: true,
+                    muted_senders: vec![],
+                },
+            )
+            .unwrap();
         assert!(
             upload(
                 State(app.clone()),
@@ -1169,18 +1021,18 @@ mod tests {
                 .0
                 .is_empty()
         );
-        // Old clients save only outgoing preferences; recipient choices survive.
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: false,
-                muted_senders: vec!["cerro".into()],
-            }),
-        )
-        .await
-        .unwrap();
+        // Saving only outgoing preferences keeps the recipient's choices.
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: false,
+                    muted_senders: vec!["cerro".into()],
+                },
+            )
+            .unwrap();
         let _ = set_decks(
             State(app.clone()),
             UrlPath("hill".into()),
@@ -1200,7 +1052,6 @@ mod tests {
                 .0;
         assert!(!settings.settings.enabled);
         assert_eq!(settings.settings.muted_senders, vec!["cerro"]);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

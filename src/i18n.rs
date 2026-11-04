@@ -1,6 +1,7 @@
 //! Device-selected language, with English fallback and shared interface catalogs.
+use crate::access::require_owner;
 use crate::{
-    App, authorized,
+    App,
     store::{Error, Store},
 };
 pub use ankiquest_i18n::{normalize, substitute, text};
@@ -69,9 +70,7 @@ pub async fn get(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     Ok(Json(Preference {
         language: app
             .store
@@ -88,9 +87,7 @@ pub async fn set(
     headers: HeaderMap,
     Json(preference): Json<Preference>,
 ) -> Result<Json<Preference>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if preference.language.is_empty()
         || preference.language.len() > 64
         || !preference
@@ -133,10 +130,6 @@ pub fn notice(notice: &mut crate::feedback::Notice, language: &str) {
 }
 
 /// A server-written title or body in `language`.
-pub fn system(value: &str, language: &str) -> String {
-    system_text(value, language)
-}
-
 pub(crate) fn system_text(value: &str, language: &str) -> String {
     let language = normalize(language);
     if language == "en" {
@@ -210,14 +203,10 @@ pub fn notification(
             .strip_prefix(&format!("{sender_display} has finished their "))
             .and_then(|body| body.strip_suffix(" studies for today."))
         {
-            notice.body = if language == "es" {
-                format!("{sender_display} ha terminado su estudio de {deck} por hoy.")
-            } else {
-                substitute(
-                    &text("{0} has finished their {1} studies for today.", language),
-                    &[sender_display, deck],
-                )
-            };
+            notice.body = substitute(
+                &text("{0} has finished their {1} studies for today.", language),
+                &[sender_display, deck],
+            );
         } else {
             notice.body = text(&notice.body, language);
         }
@@ -359,26 +348,26 @@ mod tests {
     #[test]
     fn stored_moment_texts_translate_with_their_numbers() {
         assert_eq!(
-            system("Today counts toward your 12-day streak.", "de"),
+            system_text("Today counts toward your 12-day streak.", "de"),
             "Heute zählt für deine Lernserie von 12 Tagen."
         );
         assert_eq!(
-            system("120 cards today in 35 minutes.", "fr"),
+            system_text("120 cards today in 35 minutes.", "fr"),
             "120 cartes aujourd’hui en 35 minutes."
         );
         assert_eq!(
-            system("1 card today in 1 minute.", "es"),
+            system_text("1 card today in 1 minute.", "es"),
             "1 tarjeta hoy en 1 minuto."
         );
         assert_eq!(
-            system("Achievement: Card Shark", "pt"),
+            system_text("Achievement: Card Shark", "pt"),
             substitute(
                 template("Achievement: {0}", "pt"),
                 &[&text("Card Shark", "pt")]
             )
         );
         assert_eq!(
-            system("Review 15 cards (+50 XP)", "es"),
+            system_text("Review 15 cards (+50 XP)", "es"),
             "Repasa 15 tarjetas (+50 XP)"
         );
     }
@@ -396,6 +385,11 @@ mod tests {
     #[test]
     fn completion_notifications_keep_names_and_deck_titles_verbatim() {
         for (language, title, body) in [
+            (
+                "es",
+                "Mazo completado",
+                "Aldana ha terminado su estudio de Spanish::{0} por hoy.",
+            ),
             (
                 "fr",
                 "Paquet terminé",
@@ -472,7 +466,7 @@ mod tests {
     }
     #[test]
     fn saved_language_is_per_owner_and_persists() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         assert_eq!(store.language("hill").unwrap(), "en");
         store.set_language("hill", "es-MX").unwrap();
         assert_eq!(store.language("friend").unwrap(), "en");

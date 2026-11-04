@@ -2,7 +2,7 @@
 //! friends in AnkiQuest or go anywhere as a card behind an unguessable link. Each kind has
 //! a sharing policy the player chooses. See `docs/sharing.md`.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::game::Profile;
 use crate::notifications::Notification;
@@ -483,9 +483,7 @@ async fn get_wins(
     Query(page): Query<Page>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let limit = page.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) || page.before.is_some_and(|id| id <= 0) {
         return Err(StatusCode::BAD_REQUEST);
@@ -502,8 +500,8 @@ async fn get_wins(
             link: win.link_token.as_deref().map(|token| link(&base, token)),
             id: win.id,
             created_at: win.created_at / 1000,
-            title: crate::i18n::system(&win.title, &language),
-            body: crate::i18n::system(&win.body, &language),
+            title: crate::i18n::system_text(&win.title, &language),
+            body: crate::i18n::system_text(&win.body, &language),
             kind: win.kind,
             key: win.key,
             day: win.day,
@@ -520,9 +518,7 @@ async fn delete_link(
     Path((user, id)): Path<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     if revoke_link(&store.conn, &user, id).map_err(store_error)? {
         Ok(StatusCode::NO_CONTENT)
@@ -536,9 +532,7 @@ async fn get_sharing(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Sharing>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     Ok(Json(sharing(&store.conn, &user).map_err(store_error)?))
 }
@@ -586,9 +580,7 @@ async fn set_sharing(
     headers: HeaderMap,
     Json(update): Json<SharingUpdate>,
 ) -> Result<Json<Sharing>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     update_sharing(&store.conn, &user, update)
         .map_err(store_error)?
@@ -648,7 +640,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_win_is_made_once_and_its_link_is_unguessable_reusable_and_revocable() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         store.set_companion("hill", "ankilope").unwrap();
         let id = moment(&store, "hill", "record:day:20000");
         assert_eq!(
@@ -692,13 +684,12 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_none()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
     fn a_shared_conquered_card_speaks_for_its_player_and_names_the_card_only_when_labelled() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let make = |key: &str, title: &str, body: &str| {
             let id = create(&store.conn, "hill", key, 1, 1, title, body, &json!({}))
                 .unwrap()
@@ -743,7 +734,7 @@ pub(crate) mod tests {
             "another conquest's label is not used"
         );
         assert_eq!(
-            crate::i18n::system(&shared_words(&store.conn, &conquered).unwrap().1, "de"),
+            crate::i18n::system_text(&shared_words(&store.conn, &conquered).unwrap().1, "de"),
             "Ich habe „der Hund“ 5-mal vergessen, und jetzt bleibt es mir wochenlang im Gedächtnis."
         );
         let level = make("level:3", "Level 3!", "You reached level 3.");
@@ -751,13 +742,12 @@ pub(crate) mod tests {
             shared_words(&store.conn, &level).unwrap(),
             ("Level 3!".into(), "You reached level 3.".into())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
     fn sharing_settings_default_merge_and_reject_unknowns() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let defaults = sharing(&store.conn, "hill").unwrap();
         assert_eq!(defaults.daily_cap, 3);
         assert_eq!(defaults.policies.len(), KINDS.len());
@@ -792,13 +782,12 @@ pub(crate) mod tests {
             assert!(update_sharing(&store.conn, "hill", bad).unwrap().is_none());
         }
         assert_eq!(sharing(&store.conn, "cerro").unwrap(), defaults);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
     fn automatic_wins_wait_in_a_queue_taken_once() {
-        let (store, path) = decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         update_sharing(
             &store.conn,
             "hill",
@@ -813,8 +802,7 @@ pub(crate) mod tests {
         let taken = take_automatic(&store.conn, "hill").unwrap();
         assert_eq!(taken.iter().map(|w| w.id).collect::<Vec<_>>(), [auto]);
         assert!(take_automatic(&store.conn, "hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -896,7 +884,6 @@ pub(crate) mod tests {
             page("hill", Some(1), None).await.unwrap()[0]["link"],
             Value::Null
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

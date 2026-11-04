@@ -1,8 +1,10 @@
 //! What a player can do about their data: download all of it, or delete their account and everything with it.
 //! Every table is listed in `OWNED` or `SHARED`, and a test fails when a new one is not, so nothing new escapes deletion or export.
 
-use crate::accounts::{has_password, password_matches, refuse, reply};
+use crate::accounts::{has_password, password_matches};
 use crate::web_util::base64;
+use crate::web_util::escape;
+use crate::web_util::{refuse, reply};
 use crate::{access, app::App, app::now_ms};
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
@@ -421,13 +423,6 @@ async fn delete(
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub(crate) fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
 /// The privacy notice, filled in with who runs this server.
 pub fn notice_page(
     notice: &Notice,
@@ -514,36 +509,19 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{cleanup, route_from};
     use axum::body::{Body, to_bytes};
-    use axum::extract::connect_info::MockConnectInfo;
+
     use axum::http::Request;
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
-    use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": true,
             "users": {"alice": {"token": "alice-token"}},
             "privacy": {"operator": "Ada <Operator>", "contact": "privacy@example.org"}
         }))
-        .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     async fn call(
@@ -564,13 +542,7 @@ mod tests {
                 body.to_string()
             }))
             .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.9:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
+        let response = route_from(app, request, "192.0.2.9:40000").await;
         let status = response.status();
         (
             status,
@@ -646,8 +618,7 @@ mod tests {
             tables, known,
             "decide how deletion and export treat every new table"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -705,8 +676,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -837,8 +807,7 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "the old token stops working"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -855,8 +824,7 @@ mod tests {
             anonymous.contains("the person who runs this AnkiQuest server")
                 && !anonymous.contains("{{")
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -902,8 +870,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

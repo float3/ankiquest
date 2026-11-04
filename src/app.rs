@@ -127,18 +127,26 @@ impl App {
         self.config.users.contains_key(user) || self.accounts.contains(user)
     }
 
+    /// Whether `user` can sign in: an account, or a configured user with a token.
+    pub(crate) fn can_sign_in(&self, user: &str) -> bool {
+        self.accounts.contains(user) || self.configured_with_token(user)
+    }
+
+    fn configured_with_token(&self, user: &str) -> bool {
+        self.config
+            .users
+            .get(user)
+            .and_then(|config| config.token.as_deref())
+            .is_some_and(|token| !token.is_empty())
+    }
+
     /// Players who can sign in: configured users with a token, and every account.
     pub(crate) fn members(&self) -> BTreeSet<String> {
         self.config
             .users
-            .iter()
-            .filter(|(_, config)| {
-                config
-                    .token
-                    .as_deref()
-                    .is_some_and(|token| !token.is_empty())
-            })
-            .map(|(user, _)| user.clone())
+            .keys()
+            .filter(|user| self.configured_with_token(user))
+            .cloned()
             .chain(self.accounts.users())
             .collect()
     }
@@ -256,15 +264,8 @@ impl App {
     }
 
     pub(crate) fn participants(&self) -> Vec<competition::Participant> {
+        let users = self.known_users();
         let players = self.players.read().unwrap();
-        let users: BTreeSet<_> = self
-            .config
-            .users
-            .keys()
-            .chain(players.keys())
-            .cloned()
-            .chain(self.accounts.users())
-            .collect();
         users
             .into_iter()
             .map(|user| {
@@ -423,8 +424,7 @@ mod tests {
         ));
         assert!(upload(&[], &[3]));
         assert!(!upload(&[], &[9]));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -448,7 +448,6 @@ mod tests {
             "new reviews replace the cached standing"
         );
         assert!(second.today.reviews > first.today.reviews);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

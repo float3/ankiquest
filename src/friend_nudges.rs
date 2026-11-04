@@ -1,6 +1,7 @@
+use crate::access::require_owner;
 use crate::notifications::Outgoing;
 use crate::store::{Error, Store};
-use crate::{access::authorized, app::App, app::now_ms, web_util::store_error};
+use crate::{app::App, app::now_ms, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -68,28 +69,21 @@ async fn settings(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let day = store.clock(&user).map_err(store_error)?.day(now_ms());
     let mut friends = Vec::new();
-    for recipient in app
-        .circle(&store.conn, &user)
-        .map_err(store_error)?
-        .iter()
-        .filter(|recipient| **recipient != user && app.is_user(recipient))
-    {
+    for recipient in crate::shares::friends(&app, &store.conn, &user).map_err(store_error)? {
         friends.push(Friend {
-            user: recipient.clone(),
-            display: app.display(recipient),
+            display: app.display(&recipient),
             enabled: store
-                .friend_nudges_enabled(recipient, &user)
+                .friend_nudges_enabled(&recipient, &user)
                 .map_err(store_error)?,
-            sent_today: sent(&store, &user, recipient, day).map_err(store_error)?,
+            sent_today: sent(&store, &user, &recipient, day).map_err(store_error)?,
             muted_by_me: store
-                .friend_nudge_muted(&user, recipient)
+                .friend_nudge_muted(&user, &recipient)
                 .map_err(store_error)?,
+            user: recipient,
         });
     }
     friends.sort_by(|a, b| a.display.cmp(&b.display).then(a.user.cmp(&b.user)));
@@ -112,9 +106,7 @@ async fn nudge(
     headers: HeaderMap,
     Json(request): Json<Request>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     if request.recipient == user
         || !app.is_user(&request.recipient)
@@ -150,9 +142,7 @@ async fn receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     app.store
         .lock()
         .unwrap()
@@ -167,9 +157,7 @@ async fn automatic_receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     app.store
         .lock()
         .unwrap()
@@ -184,9 +172,7 @@ async fn sender_receiving(
     headers: HeaderMap,
     Json(request): Json<Receiving>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if sender == user || !app.is_user(&sender) {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -215,28 +201,17 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn sender_routes_require_owner_auth_and_reject_self_or_unknown_recipients() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({"users": {
+        let (app, path) = crate::test_support::app_with(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
-        }}))
-        .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        }}));
         for (owner, token, recipient, expected) in [
             ("cerro", "", "hill", StatusCode::UNAUTHORIZED),
             ("cerro", "hill-secret", "hill", StatusCode::UNAUTHORIZED),
@@ -278,28 +253,18 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), expected);
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
     async fn changing_friend_nudges_does_not_disable_automatic_progress_nudges() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         store.set_nudges("hill", true).unwrap();
         let config = serde_json::from_value(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
         }}))
         .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        let app = Arc::new(crate::test_support::app_from(store, config));
         let response = routes()
             .with_state(app.clone())
             .oneshot(
@@ -316,27 +281,14 @@ mod tests {
             app.store.lock().unwrap().nudges_enabled("hill").unwrap(),
             "automatic progress reminders remain on when friend nudges are disabled"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
     async fn only_the_recipient_can_change_a_specific_friend_nudge_choice() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({"users": {
+        let (app, path) = crate::test_support::app_with(serde_json::json!({"users": {
             "cerro":{"token":"cerro-secret"},"hill":{"token":"hill-secret"}
-        }}))
-        .unwrap();
-        let app = Arc::new(App {
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            config,
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(Default::default()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        }}));
         for (owner, sender, token, expected) in [
             ("hill", "cerro", "cerro-secret", StatusCode::UNAUTHORIZED),
             ("hill", "hill", "hill-secret", StatusCode::BAD_REQUEST),
@@ -363,13 +315,12 @@ mod tests {
                 .friend_nudge_muted("hill", "cerro")
                 .unwrap()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
     fn nudges_require_opt_in_and_limit_each_friend_until_the_next_anki_day() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let now = 1_800_000_000_000;
         assert_eq!(
             send(&mut store, "cerro", "Cerro", "hill", now).unwrap(),
@@ -416,13 +367,12 @@ mod tests {
             send(&mut store, "cerro", "Cerro", "hill", now + 86_400_000).unwrap(),
             StatusCode::OK
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
     fn muting_one_friend_preserves_other_friends_and_automatic_nudges() {
-        let (mut store, path) = crate::decks::tests::temporary_store();
+        let (mut store, path) = crate::test_support::temporary_store();
         let now = 1_800_000_000_000;
         store.set_nudges("hill", true).unwrap();
         store.set_friend_nudges("hill", true).unwrap();
@@ -456,7 +406,6 @@ mod tests {
             send(&mut store, "cerro", "Cerro", "hill", now + 86_400_000).unwrap(),
             StatusCode::OK,
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

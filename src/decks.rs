@@ -1,4 +1,4 @@
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
 use crate::game::Clock;
 use crate::notifications::{INBOX_AGE_MS, Outgoing, insert_notification};
@@ -257,6 +257,8 @@ impl Store {
 
     /// Suppression consumes existing history as well as pending pushes. Re-enabling
     /// affects future completions; it never revives announcements cancelled here.
+    /// Clients now save these through /api/deck-subscriptions; tests still seed with it.
+    #[cfg(test)]
     pub fn set_incoming_settings(
         &mut self,
         user: &str,
@@ -523,28 +525,25 @@ impl Store {
         Ok(())
     }
 
-    pub fn nudges_enabled(&self, user: &str) -> Result<bool, Error> {
+    /// A `player_settings` switch, or `default` before the player saved any.
+    fn player_setting(&self, user: &str, column: &str, default: bool) -> Result<bool, Error> {
         Ok(self
             .conn
             .query_row(
-                "select nudges from player_settings where user = ?1",
+                &format!("select {column} from player_settings where user = ?1"),
                 [user],
                 |r| r.get(0),
             )
             .optional()?
-            .unwrap_or(false))
+            .unwrap_or(default))
+    }
+
+    pub fn nudges_enabled(&self, user: &str) -> Result<bool, Error> {
+        self.player_setting(user, "nudges", false)
     }
 
     pub fn friend_nudges_receiving(&self, user: &str) -> Result<bool, Error> {
-        Ok(self
-            .conn
-            .query_row(
-                "select friend_nudges from player_settings where user = ?1",
-                [user],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(false))
+        self.player_setting(user, "friend_nudges", false)
     }
 
     pub fn friend_nudge_muted(&self, recipient: &str, sender: &str) -> Result<bool, Error> {
@@ -607,15 +606,7 @@ impl Store {
     }
 
     pub fn celebrations_enabled(&self, user: &str) -> Result<bool, Error> {
-        Ok(self
-            .conn
-            .query_row(
-                "select celebrations from player_settings where user = ?1",
-                [user],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or(true))
+        self.player_setting(user, "celebrations", true)
     }
 
     pub fn set_celebrations(&mut self, user: &str, enabled: bool) -> Result<(), Error> {
@@ -676,9 +667,7 @@ pub(crate) async fn get_decks(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     deck_settings(&app, &app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(failed_for("deck settings for", &user))
@@ -690,9 +679,7 @@ pub(crate) async fn set_decks(
     headers: HeaderMap,
     Json(update): Json<SettingsUpdate>,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if update.decks.len() > MAX_DECKS {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
@@ -799,9 +786,7 @@ pub(crate) async fn share_deck(
     headers: HeaderMap,
     Json(finished): Json<Finished>,
 ) -> Result<Json<Told>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let mut store = app.store.lock().unwrap();
     share_finished(&app, &mut store, &user, &finished, crate::app::now_ms())
         .map_err(failed_for("sharing a finished deck for", &user))?
@@ -822,7 +807,6 @@ pub(crate) mod tests {
     use crate::notifications::PUSH_LEASE_MS;
     use crate::study::upload;
     use crate::test_support::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     pub(crate) const DAY: i64 = 20_000;
     pub(crate) const NOW: i64 = DAY * 86_400_000 + 12 * 3_600_000;
@@ -908,8 +892,7 @@ pub(crate) mod tests {
         let unchanged = store.incoming_settings("hill").unwrap();
         assert!(unchanged.enabled);
         assert_eq!(unchanged.muted_senders, ["cerro"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -956,8 +939,7 @@ pub(crate) mod tests {
         assert!(store.notifications("hill", NOW).unwrap().is_empty());
         let future = queue_kind(&mut store, "hill", "cerro", "completion", NOW + 1);
         assert_eq!(store.notifications("hill", NOW + 1).unwrap()[0].id, future);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -989,8 +971,7 @@ pub(crate) mod tests {
                 .is_empty()
         );
         assert_eq!(store.decks("cerro").unwrap()[0].recipients, ["hill"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1057,8 +1038,7 @@ pub(crate) mod tests {
             store.notifications("hill", NOW).unwrap().len(),
             unrelated.len() + 1
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1088,8 +1068,7 @@ pub(crate) mod tests {
         assert_eq!(activity.unread_count, 1);
         assert_eq!(activity.items.len(), 1);
         assert_eq!(activity.items[0].id, message);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1129,8 +1108,7 @@ pub(crate) mod tests {
             .set_incoming_settings("hill", &incoming(true, &[]))
             .unwrap();
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1201,8 +1179,7 @@ pub(crate) mod tests {
                 .len(),
             1
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1221,8 +1198,7 @@ pub(crate) mod tests {
             .set_incoming_settings("hill", &incoming(true, &[]))
             .unwrap();
         assert_eq!(store.notifications("hill", NOW).unwrap()[0].id, visible);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1247,8 +1223,7 @@ pub(crate) mod tests {
         assert!(!store.begin_push(muted, NOW).unwrap());
         assert!(!store.begin_push(global, NOW).unwrap());
         assert!(store.begin_push(visible, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1272,8 +1247,7 @@ pub(crate) mod tests {
         assert_eq!(settings.muted_senders, ["cerro"]);
         assert_eq!(store.notifications("hill", NOW).unwrap()[0].id, id);
         assert!(store.begin_push(id, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1326,8 +1300,7 @@ pub(crate) mod tests {
         assert_eq!(ready, ids[2..]);
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 4);
         assert_eq!(store.notifications("friend", NOW).unwrap().len(), 1);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1354,8 +1327,7 @@ pub(crate) mod tests {
         store.set_nudges("hill", false).unwrap();
         assert!(store.begin_push(another_friend, NOW).unwrap());
         assert!(!store.begin_push(another_automatic, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1377,8 +1349,7 @@ pub(crate) mod tests {
         let store = Store::open(&path).unwrap();
         assert!(store.nudges_enabled("hill").unwrap());
         assert!(!store.friend_nudges_receiving("hill").unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1416,19 +1387,7 @@ pub(crate) mod tests {
         store.set_nudges("hill", true).unwrap();
         assert_eq!(store.take_deck_deliveries(NOW).unwrap().len(), 1);
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 1);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
-    pub fn temporary_store() -> (Store, std::path::PathBuf) {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "ankiquest-decks-{}-{}-{}",
-            std::process::id(),
-            crate::app::now_ms(),
-            NEXT.fetch_add(1, Ordering::Relaxed),
-        ));
-        (Store::open(&path).unwrap(), path)
+        cleanup(store, path);
     }
 
     fn snapshot(id: &str, remaining: u64, reviewed_today: u64, day: i64) -> Snapshot {
@@ -1532,8 +1491,7 @@ pub(crate) mod tests {
         for recipient in ["hill", "friend"] {
             assert_completion_inbox(&store, recipient, &["Spanish::Verbs"]);
         }
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1562,8 +1520,7 @@ pub(crate) mod tests {
                 "upload order {order:?}"
             );
             assert_completion_inbox(&store, "hill", &[names[2]]);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1593,8 +1550,7 @@ pub(crate) mod tests {
         assert_completion_inbox(&store, "grandchild_only", &["Spanish::Verbs::Present"]);
         assert_completion_inbox(&store, "cerro", &[]);
         assert_completion_inbox(&store, "stranger", &[]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1614,8 +1570,7 @@ pub(crate) mod tests {
             [("Spanish".into(), 1), ("Spanish::Verbs".into(), 1)]
         );
         assert_completion_inbox(&store, "hill", &["Spanish", "Spanish::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1644,8 +1599,7 @@ pub(crate) mod tests {
                 "child enabled={enabled}, remaining={remaining}, reviewed={reviewed}, day={day}"
             );
             assert_completion_inbox(&store, "hill", &["Spanish"]);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1678,8 +1632,7 @@ pub(crate) mod tests {
                 vec!["Spanish", "Spanish::Verbs"]
             };
             assert_completion_inbox(&store, "hill", &expected);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1703,8 +1656,7 @@ pub(crate) mod tests {
             );
             assert_eq!(announcements.len(), 2, "deck names {names:?}");
             assert_completion_inbox(&store, "hill", &names);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1729,8 +1681,7 @@ pub(crate) mod tests {
             [("Spanish:".into(), 1), ("Spanish:::Verbs".into(), 1)]
         );
         assert_completion_inbox(&store, "hill", &["Spanish:", "Spanish:::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1754,8 +1705,7 @@ pub(crate) mod tests {
         assert!(record_completions(&mut store, &snapshots).is_empty());
         assert_completion_inbox(&store, "hill", &["Spanish::Verbs"]);
         assert_eq!(store.decks("cerro").unwrap().len(), 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1783,8 +1733,7 @@ pub(crate) mod tests {
                 .all(|deck| deck.enabled && deck.recipients == ["hill"])
         );
         assert_completion_inbox(&store, "hill", &["Spanish", "Spanish::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1807,8 +1756,7 @@ pub(crate) mod tests {
                 .iter()
                 .all(|d| !d.enabled && d.recipients.is_empty())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1882,8 +1830,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1923,8 +1870,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1977,8 +1923,7 @@ pub(crate) mod tests {
         assert_eq!(inbox[0].day, DAY - 1);
         assert_eq!(inbox[1].day, DAY);
         assert_eq!(store.decks("cerro").unwrap()[0].name, "Spanish::Verbs");
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -2100,8 +2045,7 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>(),
             vec!["friend", "hill"]
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2143,8 +2087,7 @@ pub(crate) mod tests {
                 .nudges,
             "the setting belongs to one player"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2252,7 +2195,6 @@ pub(crate) mod tests {
             .unwrap_err(),
             StatusCode::PAYLOAD_TOO_LARGE
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

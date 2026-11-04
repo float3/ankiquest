@@ -2,15 +2,16 @@
 //! Configured users keep working; accounts only exist when registration is on.
 
 use crate::access::Credential;
+use crate::game::HOUR_MS;
 use crate::web_util::{bearer, hex, normalize_user, random_bytes};
+use crate::web_util::{refuse, reply};
 use crate::{Error, app::App, app::now_ms};
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,6 @@ pub const MAX_PASSWORD: usize = 256;
 const MAX_DISPLAY: usize = 40;
 const MAX_DEVICE: usize = 60;
 const SIGNUPS_PER_HOUR: usize = 5;
-const HOUR_MS: i64 = 3_600_000;
 const RESERVED: &[&str] = &[
     "admin",
     "administrator",
@@ -344,14 +344,6 @@ impl App {
     }
 }
 
-pub(crate) fn reply(status: StatusCode, body: serde_json::Value) -> Response {
-    (status, [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
-}
-
-pub(crate) fn refuse(status: StatusCode, message: &str) -> Response {
-    reply(status, serde_json::json!({"error": message}))
-}
-
 fn internal(error: Error) -> Response {
     log_error!("accounts: {error}");
     refuse(
@@ -516,10 +508,10 @@ pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
             "Send the device token to sign out.",
         );
     };
-    let hash = token_hash(token);
-    let Some(owner) = app.accounts.tokens.read().unwrap().get(&hash).cloned() else {
+    let Some(owner) = app.accounts.token_owner(token) else {
         return refuse(StatusCode::UNAUTHORIZED, "Token not recognized.");
     };
+    let hash = token_hash(token);
     if let Err(error) = app
         .store
         .lock()
@@ -764,33 +756,19 @@ pub(crate) async fn change_password(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::{Body, to_bytes};
+    use crate::test_support::{cleanup, json_response, route_from};
+    use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
+    use axum::http::header;
     use std::path::PathBuf;
     use tower::ServiceExt;
 
     fn fixture(registration: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": registration,
             "users": {"alice": {"token": "alice-token"}}
         }))
-        .unwrap();
-        let accounts = Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: std::sync::Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     async fn call(
@@ -805,19 +783,8 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                format!("{ip}:40000").parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        (
-            status,
-            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        )
+        let request = request.body(Body::from(body.to_string())).unwrap();
+        json_response(route_from(app, request, &format!("{ip}:40000")).await).await
     }
 
     fn json_headers() -> [(&'static str, &'static str); 1] {
@@ -854,8 +821,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -970,8 +936,7 @@ mod tests {
             "tokens survive a restart"
         );
         assert!(reloaded.token_owner(&token).is_none());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1044,8 +1009,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "and only to the account");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1087,8 +1051,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn sign_up(app: &Arc<App>, user: &str, device: &str) -> String {
@@ -1333,8 +1296,7 @@ mod tests {
         let reloaded = Directory::load(&app.store.lock().unwrap().conn).unwrap();
         assert!(reloaded.token_owner(&laptop).is_none());
         assert_eq!(reloaded.token_owner(&phone).as_deref(), Some("ana"));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1379,8 +1341,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "only that address waits");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1447,8 +1408,7 @@ mod tests {
             "a signed-out token's time goes with it"
         );
         assert!(saved(&laptop_hash).is_some());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1524,8 +1484,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1682,8 +1641,7 @@ mod tests {
             web_works(&app, "bea", &bo_web).await,
             "other players stay signed in"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1705,8 +1663,7 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert!(!web_works(&app, "ana", &phone_web).await);
         assert!(web_works(&app, "ana", &browser).await);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1739,7 +1696,6 @@ mod tests {
             StatusCode::OK,
             "the configured token keeps working"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

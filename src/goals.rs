@@ -1,7 +1,7 @@
 //! The daily goal, kept on the server so every client agrees on it. Reviews and minutes are
 //! judged from uploads; only clients know due counts, so they report a reached backlog goal.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::game::{Event, Profile, goal_event};
 use crate::store::{Error, clock_in};
@@ -192,9 +192,7 @@ async fn get_goal(
     Path(user): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Goal>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
     Ok(Json(
@@ -208,9 +206,7 @@ async fn set_goal(
     headers: HeaderMap,
     Json(setting): Json<Setting>,
 ) -> Result<Json<Goal>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let setting = setting.checked().ok_or(StatusCode::BAD_REQUEST)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
@@ -232,9 +228,7 @@ async fn reached(
     headers: HeaderMap,
     Json(reached): Json<Reached>,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let store = app.store.lock().unwrap();
     let today = today_of(&store.conn, &user).map_err(store_error)?;
     if report(&store.conn, &user, reached.day, today).map_err(store_error)? {
@@ -348,8 +342,7 @@ mod tests {
             shown(get("cerro", "cerro").await.unwrap().0),
             plain("backlog", 30, false)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -395,13 +388,12 @@ mod tests {
             .err(),
             Some(StatusCode::UNAUTHORIZED)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
     fn progress_and_the_moment_follow_the_mode() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let mut profile = game::compute_with_history(
             "hill",
             "Hill",
@@ -446,13 +438,12 @@ mod tests {
             event(&store.conn, "hill", &profile).unwrap().is_none(),
             "a reported reach counts for its own day"
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
     fn a_plan_starts_when_the_goal_changes_or_restarts() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let since = |today| stored(&store.conn, "hill", today).unwrap().0.since;
         assert_eq!(since(5), 5, "an unchosen goal starts today");
         save(&store.conn, "hill", &setting("backlog", Some(14)), 10).unwrap();
@@ -467,7 +458,6 @@ mod tests {
         };
         save(&store.conn, "hill", &restart, 20).unwrap();
         assert_eq!(since(20), 20);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

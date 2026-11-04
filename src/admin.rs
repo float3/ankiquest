@@ -669,6 +669,7 @@ fn updated_at(conn: &Connection, key: &str) -> Result<Option<i64>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
 
     const NOW: i64 = 1_800_000_000_000;
 
@@ -811,8 +812,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -867,8 +867,7 @@ mod tests {
             "{log}"
         );
         assert!(log.contains("admin reset review_weighting"), "{log}");
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -962,8 +961,7 @@ mod tests {
             .contains("last month"),
             "0 keeps everything"
         );
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -1001,8 +999,7 @@ mod tests {
             [change(NOW + 1, 10), change(NOW + 3, 5), change(NOW + 4, 0)],
             "changes keep their order even within one millisecond"
         );
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -1048,8 +1045,7 @@ mod tests {
         let rule = streak_rule(&store.conn, 10, NOW + 9).unwrap();
         assert_eq!(rule.for_player("aldanita").minutes_at(NOW + 7), 3);
         assert_eq!(rule.for_player("aldanita").minutes_at(NOW + 9), 10);
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -1067,7 +1063,6 @@ mod tests {
             configured().effective(&store.conn).unwrap().streak_minutes,
             10
         );
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 }

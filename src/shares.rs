@@ -3,11 +3,12 @@
 //! notification they can reply to and cheer, with the same topic so it shows the same art.
 //! A win can also leave AnkiQuest as a link to its card.
 
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::notifications::{Outgoing, insert_notification};
 use crate::store::{Error, Store, clock_in};
 use crate::wins::{self, Win as Moment};
-use crate::{access::authorized, boards::standings, web_util::base_url, web_util::store_error};
+use crate::{boards::standings, web_util::base_url, web_util::store_error};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -247,7 +248,7 @@ pub(crate) fn localize(
     if crate::i18n::normalize(language) == "en" {
         return Ok(());
     }
-    let system = |value: &str| crate::i18n::system(value, language);
+    let system = |value: &str| crate::i18n::system_text(value, language);
     match notice.kind.as_str() {
         "share" => {
             let wins = conn
@@ -320,8 +321,8 @@ fn invitation(
     Ok(crate::i18n::substitute(
         &crate::i18n::text("{0}: {1} Join me on AnkiQuest: {2}", language),
         &[
-            &crate::i18n::system(&title, language),
-            &crate::i18n::system(&body, language),
+            &crate::i18n::system_text(&title, language),
+            &crate::i18n::system_text(&body, language),
             url,
         ],
     ))
@@ -373,9 +374,7 @@ async fn share(
     headers: HeaderMap,
     Json(request): Json<Request>,
 ) -> Result<Json<Value>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let win = match (request.notification, request.place, request.win, request.to) {
         (None, None, Some(id), Some(to)) => {
             return share_win(&app, &user, id, &to, &headers).map(Json);
@@ -500,9 +499,7 @@ async fn react_to(
     headers: HeaderMap,
     Json(reaction): Json<Reaction>,
 ) -> Result<Json<Reacted>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let display = app.display(&user);
     let already = react(
         &mut app.store.lock().unwrap().conn,
@@ -526,6 +523,7 @@ pub fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::game::Event;
+    use crate::test_support::cleanup;
     use crate::test_support::{fixture, headers};
     use crate::wins::tests::moment;
 
@@ -557,7 +555,7 @@ mod tests {
 
     #[test]
     fn a_celebration_is_shared_as_its_win_and_older_rows_as_a_quote() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         let win = store.notifications("hill", 2_000).unwrap()[0].win.unwrap();
         assert!(matches!(
@@ -590,7 +588,7 @@ mod tests {
 
     #[test]
     fn only_your_own_wins_can_be_shared() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         assert!(notification_win(&store, "cerro", id).unwrap().is_none());
         store
@@ -605,7 +603,7 @@ mod tests {
 
     #[test]
     fn a_win_reaches_each_friend_once_with_its_topic_and_card() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = moment(&store, "hill", "streak:1:30");
         let token = wins::ensure_link(&store.conn, "hill", id).unwrap().unwrap();
         let win = wins::win(&store.conn, "hill", id).unwrap();
@@ -654,7 +652,7 @@ mod tests {
 
     #[test]
     fn automatic_wins_arrive_as_one_digest_within_the_daily_cap() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         wins::update_sharing(
             &store.conn,
             "hill",
@@ -696,7 +694,7 @@ mod tests {
 
     #[test]
     fn shared_wins_are_worded_from_the_wins_in_the_readers_language() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let win = |store: &Store, key: &str, title: &str, body: &str| {
             let id = wins::create(
                 &store.conn,
@@ -830,13 +828,12 @@ mod tests {
             ask(json!({"win": id, "to": "link"}), "cerro").await.err(),
             Some(StatusCode::UNAUTHORIZED)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
     fn a_cheer_reaches_the_sender_once_and_can_be_answered() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = moment(&store, "hill", "level:7");
         let win = wins::win(&store.conn, "hill", id).unwrap();
         send_wins(
@@ -883,7 +880,7 @@ mod tests {
 
     #[test]
     fn a_friend_who_muted_you_is_skipped() {
-        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let (mut store, _path) = crate::test_support::temporary_store();
         let id = win_for(&mut store, "hill");
         store
             .conn

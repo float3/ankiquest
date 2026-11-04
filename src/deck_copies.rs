@@ -1,6 +1,6 @@
 //! Private, time-limited Anki deck packages shared with selected players.
 
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, now_ms};
 use crate::decks;
 use crate::game::DAY_MS;
@@ -182,9 +182,7 @@ async fn deck_copy_inbox(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<CopyInbox>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let (offers, reachable) = {
         let store = app.store.lock().unwrap();
         (
@@ -207,9 +205,7 @@ async fn offer_deck_copy(
     Query(request): Query<CopyRequest>,
     package: Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let recipients: Vec<String> =
         serde_json::from_str(&request.recipients).map_err(|_| StatusCode::BAD_REQUEST)?;
     if package.len() > MAX_BYTES {
@@ -241,9 +237,7 @@ async fn download_deck_copy(
     UrlPath((user, id)): UrlPath<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<Response<Body>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let package = package(&app.store.lock().unwrap().conn, &user, id, now_ms())
         .map_err(store_error)?
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -263,9 +257,7 @@ async fn dismiss_deck_copy(
     UrlPath((user, id)): UrlPath<(String, i64)>,
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if dismiss(&mut app.store.lock().unwrap().conn, &user, id).map_err(store_error)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -455,7 +447,6 @@ mod tests {
             .unwrap_err(),
             StatusCode::NOT_FOUND
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

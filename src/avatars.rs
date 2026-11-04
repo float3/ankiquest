@@ -1,4 +1,5 @@
 use crate::store::{Error, Store};
+use crate::web_util::refuse;
 use crate::{access::authorized, app::App};
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
@@ -106,18 +107,9 @@ fn normalize(bytes: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(output.into_inner())
 }
 
-fn failure(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(serde_json::json!({"error": message})),
-    )
-        .into_response()
-}
-
 fn storage_failure(error: Error) -> Response {
     eprintln!("profile picture storage failed: {error}");
-    failure(
+    refuse(
         StatusCode::INTERNAL_SERVER_ERROR,
         "The profile picture could not be saved or loaded. Please try again.",
     )
@@ -157,12 +149,12 @@ async fn read(
     headers: HeaderMap,
 ) -> Response {
     if !app.is_user(&user) {
-        return failure(StatusCode::NOT_FOUND, "No profile picture.");
+        return refuse(StatusCode::NOT_FOUND, "No profile picture.");
     }
     let result = picture(&app.store.lock().unwrap(), &user);
     let (revision, bytes) = match result {
         Ok(Some(picture)) => picture,
-        Ok(None) => return failure(StatusCode::NOT_FOUND, "No profile picture."),
+        Ok(None) => return refuse(StatusCode::NOT_FOUND, "No profile picture."),
         Err(error) => return storage_failure(error),
     };
     let etag = format!("\"avatar-{revision}\"");
@@ -195,12 +187,12 @@ async fn upload(
     // Authenticate before reading or decoding the body. The explicit byte limit
     // also covers chunked bodies, which have no Content-Length header.
     if !authorized(&app, &user, request.headers()) {
-        return failure(StatusCode::UNAUTHORIZED, "Connect your own account first.");
+        return refuse(StatusCode::UNAUTHORIZED, "Connect your own account first.");
     }
     let bytes = match to_bytes(request.into_body(), MAX_UPLOAD).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            return failure(
+            return refuse(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Choose a picture smaller than 2 MiB.",
             );
@@ -208,10 +200,10 @@ async fn upload(
     };
     let image = match tokio::task::spawn_blocking(move || normalize(&bytes)).await {
         Ok(Ok(image)) => image,
-        Ok(Err(message)) => return failure(StatusCode::BAD_REQUEST, message),
+        Ok(Err(message)) => return refuse(StatusCode::BAD_REQUEST, message),
         Err(error) => {
             eprintln!("profile picture processing failed: {error}");
-            return failure(
+            return refuse(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "The picture could not be processed. Please try again.",
             );
@@ -233,7 +225,7 @@ async fn remove(
     headers: HeaderMap,
 ) -> Response {
     if !authorized(&app, &user, &headers) {
-        return failure(StatusCode::UNAUTHORIZED, "Connect your own account first.");
+        return refuse(StatusCode::UNAUTHORIZED, "Connect your own account first.");
     }
     match save(&app.store.lock().unwrap(), &user, None) {
         Ok(_) => (
@@ -270,12 +262,13 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::Config, game::Week};
+    use crate::test_support::cleanup;
+
     use axum::body::Body;
     use axum::extract::ConnectInfo;
     use image::{GenericImageView, Rgb, RgbImage};
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
@@ -283,30 +276,10 @@ mod tests {
     }
 
     fn fixture_with_private_site(private_site: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config: Config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "private_site": private_site,
             "users": {"cerro": {"token": "cerro-secret"}, "hill": {"token": "hill-secret"}}
         }))
-        .unwrap();
-        (
-            Arc::new(App {
-                access: crate::access::Access::from_config(&config).unwrap(),
-                accounts: Default::default(),
-                config,
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(Default::default()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
-    }
-
-    fn cleanup(app: Arc<App>, path: PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     fn encoded(image: RgbImage, format: ImageFormat) -> Vec<u8> {
@@ -623,7 +596,7 @@ mod tests {
 
     #[test]
     fn revisions_and_removal_survive_restart_without_reusing_a_version() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let image = normalize(&sample(ImageFormat::Png)).unwrap();
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 1);
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 2);
@@ -634,8 +607,7 @@ mod tests {
         assert!(picture(&store, "cerro").unwrap().is_none());
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 4);
         assert_eq!(picture(&store, "cerro").unwrap(), Some((4, image)));
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]

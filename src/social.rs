@@ -258,25 +258,19 @@ impl App {
     }
 }
 
+/// 24 hex characters.
 fn new_invite() -> Result<String, Error> {
-    let mut random = [0u8; 12];
-    getrandom::fill(&mut random).map_err(|_| "invite randomness unavailable")?;
-    Ok(random.iter().map(|b| format!("{b:02x}")).collect())
+    let random = crate::web_util::random_bytes("invite randomness unavailable")?;
+    Ok(crate::web_util::hex(&random[..12]))
 }
 
 fn clean_name(name: &str) -> Option<String> {
     let name = name.trim();
-    (!name.is_empty()
-        && name.chars().count() <= MAX_GROUP_NAME
-        && !name.chars().any(char::is_control))
-    .then(|| name.to_string())
+    crate::web_util::valid_title(name, MAX_GROUP_NAME).then(|| name.to_string())
 }
 
-#[derive(Debug, Serialize)]
-pub struct Person {
-    pub user: String,
-    pub display: String,
-}
+/// A player as the community page shows them.
+pub type Person = crate::decks::Recipient;
 
 #[derive(Debug, Serialize)]
 pub struct Group {
@@ -299,13 +293,6 @@ pub struct Overview {
     pub muted: Vec<Person>,
 }
 
-fn person(app: &App, user: String) -> Person {
-    Person {
-        display: app.display(&user),
-        user,
-    }
-}
-
 fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overview> {
     let rows: Vec<(i64, String, String, bool)> = conn
         .prepare(
@@ -316,11 +303,7 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
         .collect::<Result<_, _>>()?;
     let mut groups = Vec::new();
     for (id, name, invite, owner) in rows {
-        let mut members: Vec<Person> = group_members(conn, id)?
-            .into_iter()
-            .map(|u| person(app, u))
-            .collect();
-        members.sort_by(|a, b| a.display.cmp(&b.display));
+        let members = app.sorted_recipients(group_members(conn, id)?);
         groups.push(Group {
             id,
             name,
@@ -330,32 +313,21 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
         });
     }
     let requests = |incoming: bool| -> rusqlite::Result<Vec<Person>> {
-        let mut people: Vec<Person> = conn
+        let people = conn
             .prepare(
                 "select case when a = ?1 then b else a end from friendships
                  where accepted = 0 and (a = ?1 or b = ?1) and (requested_by = ?1) = ?2",
             )?
             .query_map(params![user, !incoming], |r| r.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|u| person(app, u))
-            .collect();
-        people.sort_by(|a, b| a.display.cmp(&b.display));
-        Ok(people)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(app.sorted_recipients(people))
     };
-    let mut friend_list: Vec<Person> = friends(conn, user)?
-        .into_iter()
-        .map(|u| person(app, u))
-        .collect();
-    friend_list.sort_by(|a, b| a.display.cmp(&b.display));
-    let mut muted: Vec<Person> = conn
-        .prepare("select sender from muted_people where recipient = ?1")?
-        .query_map([user], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .map(|u| person(app, u))
-        .collect();
-    muted.sort_by(|a, b| a.display.cmp(&b.display).then(a.user.cmp(&b.user)));
+    let friend_list = app.sorted_recipients(friends(conn, user)?);
+    let muted = app.sorted_recipients(
+        conn.prepare("select sender from muted_people where recipient = ?1")?
+            .query_map([user], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     Ok(Overview {
         groups,
         friends: friend_list,
@@ -753,36 +725,21 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{cleanup, json_response, route};
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
-    use std::collections::HashMap;
+
     use std::net::SocketAddr;
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
+
     use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(serde_json::json!({
+        crate::test_support::app_with(serde_json::json!({
             "registration": true,
             "users": {"alice": {"token": "alice-token"}, "bob": {"token": "bob-token"}}
         }))
-        .unwrap();
-        let accounts = crate::accounts::Directory::load(&store.conn).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts,
-                week: crate::game::Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
     }
 
     async fn call(
@@ -803,19 +760,7 @@ mod tests {
                 body.to_string()
             }))
             .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.1:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        (
-            status,
-            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        )
+        json_response(route(app, request).await).await
     }
 
     async fn sign_up(app: &Arc<App>, user: &str) -> String {
@@ -891,8 +836,7 @@ mod tests {
             ["alice", "bob"]
         );
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1038,8 +982,7 @@ mod tests {
             .query_row("select count(*) from groups", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0, "an empty group is deleted");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1108,8 +1051,7 @@ mod tests {
                 .friend_nudges_enabled("ana", "bobby")
                 .unwrap()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1208,8 +1150,7 @@ mod tests {
         );
         assert!(app.global(conn).unwrap().contains("ana"));
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1234,8 +1175,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn study(app: &Arc<App>, user: &str, token: &str) {
@@ -1394,8 +1334,7 @@ mod tests {
         assert_eq!(inbox["friends"][0]["user"], "bobby");
         let (_, records) = call(&app, "GET", "/api/records", &ana, serde_json::Value::Null).await;
         assert!(!records.to_string().contains("alice"));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

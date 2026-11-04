@@ -58,7 +58,6 @@
           else syncMount;
         state_dir = "/var/lib/ankiquest";
         ntfy = cfg.ntfy;
-        remind_hour = cfg.remindHour;
         week_timezone = cfg.weekTimezone;
         week_rollover_hour = cfg.weekRolloverHour;
         competition_start_date = cfg.competitionStartDate;
@@ -132,6 +131,9 @@
         };
       };
     in {
+      imports = [
+        (lib.mkRemovedOptionModule ["services" "ankiquest" "remindHour"] "Reminders are personal now; set them at /community#reminders.")
+      ];
       options.services.ankiquest = {
         enable = lib.mkEnableOption "ankiquest";
         package = lib.mkOption {
@@ -242,11 +244,6 @@
           type = lib.types.ints.between 0 23;
           default = 4;
           description = "Local hour in weekTimezone at which the leaderboard week turns over on Mondays.";
-        };
-        remindHour = lib.mkOption {
-          type = lib.types.ints.between 0 23;
-          default = 20;
-          description = "Deprecated: reminder times and types are configured per player at /community.";
         };
         competitionStartDate = lib.mkOption {
           type = lib.types.nullOr lib.types.str;

@@ -275,7 +275,7 @@ impl Access {
 
 /// The refusal for a passwordless account that has to sign in with its provider again first.
 pub(crate) fn reauth_first() -> Response {
-    crate::accounts::reply(
+    crate::web_util::reply(
         StatusCode::FORBIDDEN,
         serde_json::json!({"error": "Sign in with your provider again first.", "reauth": true}),
     )
@@ -355,17 +355,9 @@ fn member(app: &App, headers: &HeaderMap) -> Option<String> {
     if headers.contains_key(header::AUTHORIZATION) {
         return bearer(headers).and_then(|given| token_owner(app, given));
     }
-    let owner = app.access.member(headers, now_ms())?;
-    if app.accounts.contains(&owner) {
-        return Some(owner);
-    }
-    app.config
-        .users
-        .get(&owner)?
-        .token
-        .as_ref()
-        .filter(|token| !token.is_empty())?;
-    Some(owner)
+    app.access
+        .member(headers, now_ms())
+        .filter(|owner| app.can_sign_in(owner))
 }
 
 /// The signed-in member, or the shared community password, behind a request.
@@ -378,13 +370,16 @@ pub(crate) fn viewer(app: &App, headers: &HeaderMap) -> crate::social::Viewer {
 }
 
 pub(crate) fn authorized(app: &App, user: &str, headers: &HeaderMap) -> bool {
-    if headers.contains_key(header::AUTHORIZATION) {
-        return bearer(headers)
-            .and_then(|given| token_owner(app, given))
-            .as_deref()
-            == Some(user);
-    }
     member(app, headers).as_deref() == Some(user)
+}
+
+/// [`authorized`] as a handler's first step: 401 unless `headers` belong to `user`.
+pub(crate) fn require_owner(app: &App, user: &str, headers: &HeaderMap) -> Result<(), StatusCode> {
+    if authorized(app, user, headers) {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 fn authenticated(app: &App, headers: &HeaderMap) -> bool {
@@ -633,20 +628,7 @@ pub(crate) async fn session(
                     "Username or password not recognized.",
                 );
             }
-            return match app
-                .access
-                .create_session(&headers, Some(user), None, now_ms())
-            {
-                Ok(token) => (
-                    StatusCode::NO_CONTENT,
-                    [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
-                )
-                    .into_response(),
-                Err(_) => json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Unable to create a session.",
-                ),
-            };
+            return open_session(&app, &headers, Some(user), None);
         }
         let valid = credential.as_ref().is_some_and(|credential| {
             credential.password.len() <= 1024
@@ -677,13 +659,23 @@ pub(crate) async fn session(
             opened_with = account_token(&app, &credential.password, owner.as_deref());
         }
     }
+    open_session(&app, &headers, owner, opened_with)
+}
+
+/// 204 with the new session's cookie.
+fn open_session(
+    app: &App,
+    headers: &HeaderMap,
+    owner: Option<String>,
+    opened_with: Option<String>,
+) -> Response {
     match app
         .access
-        .create_session(&headers, owner, opened_with, now_ms())
+        .create_session(headers, owner, opened_with, now_ms())
     {
         Ok(token) => (
             StatusCode::NO_CONTENT,
-            [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
+            [(header::SET_COOKIE, cookie(app, &token, SESSION_SECONDS))],
         )
             .into_response(),
         Err(_) => json_error(
@@ -745,7 +737,7 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::Week;
+    use crate::test_support::cleanup;
 
     #[test]
     fn signing_in_again_counts_briefly_for_its_own_session_only() {
@@ -802,33 +794,18 @@ mod tests {
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use std::path::PathBuf;
-    use std::sync::RwLock;
-    use tower::ServiceExt;
 
     fn fixture(private_site: bool) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let config = serde_json::from_value(serde_json::json!({
             "private_site": private_site,
             "public_url": "https://anki.example.test",
             "users": {"alice": {"token": "alice-token"}, "bob": {"token": "bob-token"}}
         }))
         .unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: Access {
-                    password: Some("shared-master".into()),
-                    ..Access::default()
-                },
-                accounts: Default::default(),
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
+        let mut app = crate::test_support::app_from(store, config);
+        app.access.password = Some("shared-master".into());
+        (Arc::new(app), path)
     }
 
     async fn request(
@@ -865,10 +842,7 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        crate::router(app.clone())
-            .oneshot(request.body(Body::from(body.to_string())).unwrap())
-            .await
-            .unwrap()
+        crate::test_support::route(app, request.body(Body::from(body.to_string())).unwrap()).await
     }
 
     async fn sign_in(app: &Arc<App>, password: &str) -> Response {
@@ -896,11 +870,6 @@ mod tests {
             .to_string()
     }
 
-    fn cleanup(app: Arc<App>, path: PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
     #[tokio::test]
     async fn health_is_public_on_a_private_site_and_names_no_one() {
         let (app, path) = fixture(true);
@@ -911,8 +880,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["ok"], true);
         assert_eq!(body.as_object().unwrap().len(), 2);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1872,7 +1840,7 @@ mod tests {
         )
         .unwrap();
         assert!(Access::from_config(&token).is_ok());
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let password_file = path.join("password");
         std::fs::write(&password_file, "  \n").unwrap();
         let mut config = token;
@@ -1880,7 +1848,6 @@ mod tests {
         assert!(Access::from_config(&config).is_err());
         std::fs::write(&password_file, "shared-master\n").unwrap();
         assert!(Access::from_config(&config).is_ok());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

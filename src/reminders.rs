@@ -1,7 +1,7 @@
 //! Opt-in reminders, using the same durable inbox and retry queue as deck notices.
-use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::App;
-use crate::game::{Clock, DAY_MS, MAX_FREEZES, Profile, Week};
+use crate::game::{Clock, DAY_MS, HOUR_MS, MAX_FREEZES, Profile, Week};
 use crate::notifications::{Notification, Outgoing};
 use crate::store::{Error, Store};
 use crate::web_util::store_error;
@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub use crate::competition::WeeklyRecap as Recap;
-
-const HOUR: i64 = 3_600_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
@@ -133,9 +131,6 @@ fn save_settings_at(
     }
     let previous = settings(store, user)?;
     if previous == *value {
-        store.conn.execute(
-            "update notifications set pushed = 1, push_only = 1 where recipient = ?1 and kind = 'risk'", [user],
-        )?;
         return Ok(());
     }
     let tx = store.conn.transaction()?;
@@ -170,7 +165,6 @@ fn save_settings_at(
     // change. Delivery rechecks their timing and relevance. Canceled rows remain
     // budget receipts, so toggling preferences cannot reset the daily limit.
     for kind in [
-        "risk",
         "reminder_daily",
         "reminder_urgent",
         "reminder_freeze_used",
@@ -216,7 +210,7 @@ fn local_midnight(clock: &Clock, now: i64) -> i64 {
 }
 
 fn deadline(clock: &Clock, now: i64) -> i64 {
-    (clock.day(now) + 1) * DAY_MS + clock.rollover_hour * HOUR + clock.offset_west_min * 60_000
+    clock.day_start_ms(clock.day(now) + 1)
 }
 
 /// Place the preferred wall-clock hour inside the current Anki day. Hours
@@ -224,7 +218,7 @@ fn deadline(clock: &Clock, now: i64) -> i64 {
 fn reminder_due(prefs: &Settings, clock: &Clock, now: i64) -> bool {
     let day_start = deadline(clock, now) - DAY_MS;
     let scheduled =
-        day_start + (i64::from(prefs.reminder_hour) - clock.rollover_hour).rem_euclid(24) * HOUR;
+        day_start + (i64::from(prefs.reminder_hour) - clock.rollover_hour).rem_euclid(24) * HOUR_MS;
     now >= scheduled
 }
 
@@ -238,19 +232,19 @@ fn deadline_window(prefs: &Settings, clock: &Clock, now: i64, cutoff: i64) -> bo
     if prefs.quiet(clock.hour(now)) {
         return false;
     }
-    if cutoff - now <= 2 * HOUR {
+    if cutoff - now <= 2 * HOUR_MS {
         return true;
     }
     if prefs.quiet_start == prefs.quiet_end {
         return false;
     }
-    let mut quiet_at = local_midnight(clock, now) + i64::from(prefs.quiet_start) * HOUR;
+    let mut quiet_at = local_midnight(clock, now) + i64::from(prefs.quiet_start) * HOUR_MS;
     if quiet_at <= now {
         quiet_at += DAY_MS;
     }
     let quiet_length =
-        (i64::from(prefs.quiet_end) - i64::from(prefs.quiet_start)).rem_euclid(24) * HOUR;
-    quiet_at - now <= HOUR && quiet_at < cutoff && quiet_at + quiet_length >= cutoff
+        (i64::from(prefs.quiet_end) - i64::from(prefs.quiet_start)).rem_euclid(24) * HOUR_MS;
+    quiet_at - now <= HOUR_MS && quiet_at < cutoff && quiet_at + quiet_length >= cutoff
 }
 
 fn unprotected(profile: &Profile) -> bool {
@@ -382,7 +376,7 @@ pub fn current_body(
 }
 
 fn urgent_body(profile: &Profile, clock: &Clock, now: i64) -> String {
-    let hours = (deadline(clock, now) - now + HOUR - 1) / HOUR;
+    let hours = (deadline(clock, now) - now + HOUR_MS - 1) / HOUR_MS;
     format!(
         "Your {}-day streak ends in {hours} {} at your {:02}:00 Anki cutoff{}. {}",
         profile.streak,
@@ -404,7 +398,7 @@ fn urgent_body(profile: &Profile, clock: &Clock, now: i64) -> String {
 }
 
 fn closing_body(profile: &Profile, week: &Week, now: i64) -> String {
-    let hours = (week.end_after(now) - now + HOUR - 1) / HOUR;
+    let hours = (week.end_after(now) - now + HOUR_MS - 1) / HOUR_MS;
     format!(
         "The shared leaderboard week closes in {hours} {} ({}, {:02}:00). You have {} XP this week.",
         if hours == 1 { "hour" } else { "hours" },
@@ -647,9 +641,7 @@ async fn get_reminders(
     UrlPath(user): UrlPath<String>,
     headers: HeaderMap,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     settings(&app.store.lock().unwrap(), &user)
         .map(Json)
         .map_err(store_error)
@@ -661,9 +653,7 @@ async fn set_reminders(
     headers: HeaderMap,
     Json(settings): Json<Settings>,
 ) -> Result<Json<Settings>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if !settings.valid() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -686,11 +676,11 @@ mod tests {
 
     const DATE: i64 = 20_000;
     fn at(hour: i64) -> i64 {
-        DATE * DAY_MS + hour * HOUR
+        DATE * DAY_MS + hour * HOUR_MS
     }
 
     fn store() -> (Store, std::path::PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         initialize(&store.conn).unwrap();
         (store, path)
     }
@@ -722,11 +712,6 @@ mod tests {
 
     fn run(store: &mut Store, profile: &Profile, clock: &Clock, now: i64) {
         tick(store, "hill", profile, clock, &Week::default(), now, None).unwrap();
-    }
-
-    fn cleanup(store: Store, path: std::path::PathBuf) {
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
@@ -793,34 +778,6 @@ mod tests {
         assert!(store.take_deck_deliveries(at(20)).unwrap().is_empty());
         assert!(store.is_seen("hill", "risk:legacy").unwrap());
         assert!(store.notifications("hill", at(20)).unwrap().is_empty());
-        cleanup(store, path);
-    }
-
-    #[test]
-    fn saving_even_unchanged_opt_out_retires_only_that_players_legacy_warnings() {
-        let (mut store, path) = store();
-        for user in ["hill", "friend"] {
-            store
-                .send_once(
-                    &Outgoing {
-                        to: user,
-                        from: "",
-                        title: "Streak at risk",
-                        body: "Old global warning",
-                        kind: "risk",
-                    },
-                    "risk:legacy",
-                    DATE,
-                    at(20),
-                    true,
-                )
-                .unwrap();
-        }
-        save_settings(&mut store, "hill", &Settings::default()).unwrap();
-        let pending = store.take_deck_deliveries(at(20)).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].user, "friend");
-        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         cleanup(store, path);
     }
 
@@ -971,19 +928,19 @@ mod tests {
         assert!(deadline_window(
             &Settings::default(),
             &clock,
-            week_end - 7 * HOUR,
+            week_end - 7 * HOUR_MS,
             week_end
         ));
         assert!(!deadline_window(
             &Settings::default(),
             &clock,
-            week_end - 6 * HOUR,
+            week_end - 6 * HOUR_MS,
             week_end
         ));
         assert!(deadline_window(
             &Settings::default(),
             &offset,
-            week_end - 9 * HOUR,
+            week_end - 9 * HOUR_MS,
             week_end
         ));
     }
@@ -1087,10 +1044,10 @@ mod tests {
             quiet_end: 0,
             ..Settings::default()
         };
-        super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
+        super::save_settings_at(&mut store, "hill", &prefs, end - HOUR_MS).unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
-        let now = end + DAY_MS + HOUR;
+        let now = end + DAY_MS + HOUR_MS;
         let p = profile(&clock, now);
         let recap = Recap {
             week_start: end - 7 * DAY_MS,
@@ -1109,7 +1066,7 @@ mod tests {
         );
         assert_eq!(
             baseline(&store, "hill", "weekly_recap", true, now).unwrap(),
-            end - HOUR
+            end - HOUR_MS
         );
         cleanup(store, path);
     }
@@ -1130,8 +1087,8 @@ mod tests {
             quiet_end: 0,
             ..Settings::default()
         };
-        super::save_settings_at(&mut store, "hill", &prefs, end - HOUR).unwrap();
-        let now = end + DAY_MS + HOUR;
+        super::save_settings_at(&mut store, "hill", &prefs, end - HOUR_MS).unwrap();
+        let now = end + DAY_MS + HOUR_MS;
         let p = profile(&clock, now);
         let recap = Recap {
             week_start: end - 7 * DAY_MS,
@@ -1161,7 +1118,7 @@ mod tests {
 
         // A new recipient avoids the first player's deduplication key, proving
         // the archive deadline itself prevents a stale recap from being queued.
-        super::save_settings_at(&mut store, "friend", &prefs, end - HOUR).unwrap();
+        super::save_settings_at(&mut store, "friend", &prefs, end - HOUR_MS).unwrap();
         let expired = recap.valid_until;
         let p = profile(&clock, expired);
         tick(
@@ -1434,12 +1391,17 @@ mod tests {
             "no old recap when enabled"
         );
         p.week_xp = 0;
-        run(&mut store, &p, &clock, end - HOUR);
-        assert!(store.notifications("hill", end - HOUR).unwrap().is_empty());
+        run(&mut store, &p, &clock, end - HOUR_MS);
+        assert!(
+            store
+                .notifications("hill", end - HOUR_MS)
+                .unwrap()
+                .is_empty()
+        );
         p.week_xp = 500;
-        run(&mut store, &p, &clock, end - HOUR);
+        run(&mut store, &p, &clock, end - HOUR_MS);
         assert_eq!(
-            store.notifications("hill", end - HOUR).unwrap()[0].kind,
+            store.notifications("hill", end - HOUR_MS).unwrap()[0].kind,
             "reminder_weekly_closing"
         );
         let recap = Recap {
@@ -1452,7 +1414,7 @@ mod tests {
             rank: Some(2),
             improvement_xp: 100,
         };
-        let now = end + 5 * HOUR;
+        let now = end + 5 * HOUR_MS;
         p.day = clock.day(now);
         tick(
             &mut store,
@@ -1601,7 +1563,6 @@ mod tests {
                 .0
                 .urgent_streak
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

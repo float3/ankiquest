@@ -4,6 +4,7 @@
 //! and composited with the companion art and the player's avatar.
 use crate::app::App;
 use crate::store::{Error, Store};
+use crate::web_util::escape;
 use crate::wins::{self, Win};
 use crate::{access::authorized, avatars, i18n};
 use axum::Router;
@@ -354,22 +355,6 @@ pub(crate) fn chips(kind: &str, stats: &serde_json::Value, language: &str) -> Ve
     })
     .take(3)
     .collect()
-}
-
-/// `text` safe inside XML and HTML text and quoted attributes.
-pub(crate) fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 fn font(bold: bool) -> skrifa::FontRef<'static> {
@@ -1283,13 +1268,14 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Config, Week, now_ms};
+    use crate::test_support::cleanup;
+    use crate::test_support::now_ms;
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
-    use std::collections::HashMap;
+
     use std::path::PathBuf;
-    use std::sync::RwLock;
+
     use tower::ServiceExt;
 
     fn sample(art: Option<&'static str>, avatar: Option<Vec<u8>>, kind: &str) -> Card {
@@ -1549,7 +1535,6 @@ mod tests {
     }
 
     fn fixture(private_site: bool, public_url: Option<&str>) -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
         let mut config = serde_json::json!({
             "private_site": private_site,
             "users": {
@@ -1560,20 +1545,7 @@ mod tests {
         if let Some(url) = public_url {
             config["public_url"] = url.into();
         }
-        let config: Config = serde_json::from_value(config).unwrap();
-        (
-            Arc::new(App {
-                config,
-                access: crate::access::Access::default(),
-                accounts: Default::default(),
-                week: Week::default(),
-                store: Mutex::new(store),
-                players: RwLock::new(HashMap::new()),
-                standings: Default::default(),
-                heartbeat: Default::default(),
-            }),
-            path,
-        )
+        crate::test_support::app_with(config)
     }
 
     fn insert(app: &App, user: &str, title: &str, token: Option<&str>) -> i64 {
@@ -1675,8 +1647,7 @@ mod tests {
                 StatusCode::NOT_FOUND
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1708,8 +1679,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(dimensions(&body(response).await), (1080, 1080));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1718,8 +1688,7 @@ mod tests {
         insert(&app, "cerro", "Daily goal reached!", Some("abc"));
         let html = String::from_utf8(body(get(&app, "/w/abc", &[]).await).await).unwrap();
         assert!(html.contains(r#"content="http://anki.example.test/w/abc.wide.png""#));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     /// Writes example cards to `target/card-examples` to look at.

@@ -25,8 +25,6 @@ pub(crate) struct Config {
     #[serde(default = "default_state")]
     pub(crate) state_dir: PathBuf,
     pub(crate) ntfy: Option<String>,
-    #[serde(default, rename = "remind_hour")]
-    pub(crate) legacy_remind_hour: Option<i64>,
     pub(crate) public_url: Option<String>,
     #[serde(default)]
     pub(crate) private_site: bool,
@@ -97,11 +95,8 @@ impl Config {
         )?)
     }
 
-    /// Warns about superseded settings and rejects a competition start outside 1970 to today.
+    /// Rejects a competition start outside 1970 to today.
     pub(crate) fn check(&self) -> Result<(), Error> {
-        if self.legacy_remind_hour.is_some() {
-            eprintln!("remind_hour is superseded by personal reminder preferences at /community.");
-        }
         if let Some(date) = &self.competition_start_date {
             let date = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
                 .map_err(|_| "competition_start_date must be YYYY-MM-DD")?;
@@ -142,5 +137,14 @@ impl Config {
             return Err("week_rollover_hour must be between 0 and 23".into());
         }
         Ok(week)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_config_with_the_removed_remind_hour_still_loads() {
+        let config: super::Config = serde_json::from_str(r#"{"remind_hour": 20}"#).unwrap();
+        assert!(config.check().is_ok());
     }
 }

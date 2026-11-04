@@ -1,6 +1,7 @@
 //! A player's own study: profile, history, previews, and uploading reviews.
 
 use crate::access::authorized;
+use crate::access::require_owner;
 use crate::app::{App, Player, mark_events_seen, now_ms};
 use crate::game::{Clock, Profile, Review};
 use crate::web_util::{failed_for, store_error};
@@ -111,9 +112,7 @@ async fn study_history(
     Query(query): Query<StudyQuery>,
     headers: HeaderMap,
 ) -> Result<Json<StudyHistory>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     let (current_year, latest_session) = {
         let players = app.players.read().unwrap();
         let player = players.get(&user);
@@ -246,9 +245,7 @@ pub(crate) async fn upload(
     headers: HeaderMap,
     Json(upload): Json<Upload>,
 ) -> Result<Json<UploadResponse>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    require_owner(&app, &user, &headers)?;
     if upload.reviews.len() > MAX_PENDING || upload.deleted.len() > MAX_PENDING {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
@@ -486,8 +483,7 @@ mod tests {
             send(sample_upload(0, false)).await.announced.is_empty(),
             "a deck is only announced once a day"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -556,8 +552,7 @@ mod tests {
                 .0
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -572,8 +567,7 @@ mod tests {
         assert!(status.contains("Lv "), "{status}");
         let again = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
         assert_eq!(again.feedback.status, None);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -590,8 +584,7 @@ mod tests {
         .unwrap();
         let done = upload_as(&app, "cerro", sample_upload(0, false)).await;
         assert_eq!(done.feedback.headlines, vec!["📣 Spanish — told 1 friend"]);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -627,7 +620,6 @@ mod tests {
             .to_string();
         assert!(status.starts_with('+'), "{status}");
         assert_eq!(ask(Some(pending[2].id)).await.feedback.status, None);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

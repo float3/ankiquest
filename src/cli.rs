@@ -234,7 +234,6 @@ mod tests {
                 "{text:?} is not a message"
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

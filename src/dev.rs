@@ -48,9 +48,7 @@ impl App {
 
 /// 401 without the player's own credentials, 403 when they are not a dev.
 fn check(app: &App, user: &str, headers: &HeaderMap) -> Result<(), StatusCode> {
-    if !access::authorized(app, user, headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    access::require_owner(app, user, headers)?;
     if !app.is_dev(user) {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -381,13 +379,8 @@ pub fn stats(app: &App, now: i64) -> Result<Stats, Error> {
             }
         }
     }
-    let sizes: Vec<i64> = conn
-        .prepare(
-            "select count(m.user) as size from groups g
-             left join group_members m on m.group_id = g.id group by g.id order by size desc",
-        )?
-        .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let mut sizes: Vec<i64> = groups(conn)?.into_iter().map(|g| g.members).collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
     let groups = Groups {
         count: sizes.len(),
         members: conn.query_row("select count(distinct user) from group_members", [], |r| {
@@ -494,11 +487,7 @@ async fn send(
     check(&app, &user, &headers)?;
     let title = draft.title.trim();
     let body = draft.body.trim();
-    if title.is_empty()
-        || title.chars().count() > MAX_TITLE
-        || title.chars().any(char::is_control)
-        || !valid_message(body)
-    {
+    if !crate::web_util::valid_title(title, MAX_TITLE) || !valid_message(body) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut store = app.store.lock().unwrap();
@@ -551,13 +540,12 @@ pub fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::game::{Clock, ClockHistory, FreezePolicy};
-    use axum::body::{Body, to_bytes};
-    use axum::extract::connect_info::MockConnectInfo;
+    use crate::test_support::{cleanup, json_response, route_from};
+    use axum::body::Body;
+
     use axum::http::Request;
-    use std::net::SocketAddr;
+
     use std::path::PathBuf;
-    use std::sync::{Mutex, RwLock};
-    use tower::ServiceExt;
 
     const NOW: i64 = 1_790_000_000_000;
 
@@ -572,20 +560,11 @@ mod tests {
             }
         }))
         .unwrap();
-        App {
-            config,
-            access: crate::access::Access::default(),
-            accounts: crate::accounts::Directory::load(&store.conn).unwrap(),
-            week: crate::game::Week::default(),
-            store: Mutex::new(store),
-            players: RwLock::new(HashMap::new()),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        }
+        crate::test_support::app_from(store, config)
     }
 
     fn fixture() -> (Arc<App>, PathBuf) {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         (Arc::new(app_with(store)), path)
     }
 
@@ -610,19 +589,7 @@ mod tests {
                 body.to_string()
             }))
             .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                "192.0.2.7:40000".parse::<SocketAddr>().unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
-        let status = response.status();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        (
-            status,
-            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        )
+        json_response(route_from(app, request, "192.0.2.7:40000").await).await
     }
 
     fn get<'a>(
@@ -719,8 +686,7 @@ mod tests {
         );
         let theirs = get(&app, "/auth/status", Some("cerro-token")).await.1;
         assert!(theirs.get("dev").is_none());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -739,8 +705,7 @@ mod tests {
                 .0
                 .is_success()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -776,8 +741,7 @@ mod tests {
         assert_eq!(names(Some(&[])), None);
         assert_eq!(names(Some(&[book, 999])), None);
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -836,8 +800,7 @@ mod tests {
         assert_eq!(listed[1]["sender"], "hill");
         let exported = crate::privacy::export(&app.store.lock().unwrap().conn, "hill").unwrap();
         assert_eq!(exported["announcements_sent"].as_array().unwrap().len(), 2);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -884,7 +847,7 @@ mod tests {
 
     #[test]
     fn stats_count_players_signups_groups_and_retention() {
-        let (store, path) = crate::decks::tests::temporary_store();
+        let (store, path) = crate::test_support::temporary_store();
         let now = now_ms();
         for (user, age) in [
             ("old", 20 * DAY_MS),
@@ -950,7 +913,6 @@ mod tests {
                 retained: 1
             }
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

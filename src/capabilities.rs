@@ -38,28 +38,17 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
     #[tokio::test]
     async fn capabilities_are_public_cached_and_list_stable_names() {
-        let (store, path) = crate::decks::tests::temporary_store();
-        let config = serde_json::from_value(json!({
+        let (app, path) = crate::test_support::app_with(json!({
             "private_site": true,
             "users": {"alice": {"token": "alice-token"}}
-        }))
-        .unwrap();
-        let app = Arc::new(App {
-            config,
-            access: crate::access::Access::default(),
-            accounts: Default::default(),
-            week: crate::game::Week::default(),
-            store: std::sync::Mutex::new(store),
-            players: Default::default(),
-            standings: Default::default(),
-            heartbeat: Default::default(),
-        });
+        }));
         let response = crate::router(app.clone())
             .oneshot(Request::get(PATH).body(Body::empty()).unwrap())
             .await
@@ -92,7 +81,6 @@ mod tests {
                 "{name} is snake_case"
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }
