@@ -30,6 +30,10 @@ impl Fixture {
         let config = serde_json::from_value(json!({
             "registration": true,
             "public_url": "https://anki.example.test",
+            "oauth": {
+                "google": {"client_id": "example-google", "client_secret": "example"},
+                "github": {"client_id": "example-github", "client_secret": "example"}
+            },
             "users": {
                 "hill": {"display": "Hill", "token": "hill-secret"},
                 "cerro": {"display": "Cerro", "token": "cerro-secret"},
@@ -488,6 +492,48 @@ async fn examples_match_the_handlers() {
             "/api/decks/hill/share",
             Some("hill-secret"),
             json!({"id": "1", "name": "Spanish", "recipients": ["cerro"]}),
+        )
+        .await,
+    ));
+
+    // Account settings come last, since they change how Ana signs in. Ana linked GitHub.
+    f.app
+        .store
+        .lock()
+        .unwrap()
+        .conn
+        .execute(
+            "insert into sign_in_links (provider, subject, user, created_at) values ('github', 'example-subject', 'ana', ?1)",
+            [NOW_MS],
+        )
+        .unwrap();
+    examples.push((
+        "sign_in_methods",
+        f.call("GET", "/api/sign-in/ana", Some(&ana), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "account",
+        f.call("GET", "/api/accounts/ana", Some(&ana), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "password_change",
+        f.call(
+            "POST",
+            "/api/sign-in/ana",
+            Some(&ana),
+            json!({"action": "password", "current": PASSWORD, "password": "an even longer pw", "sign_out_others": false}),
+        )
+        .await,
+    ));
+    examples.push((
+        "devices_sign_out",
+        f.call(
+            "POST",
+            "/api/devices/ana",
+            Some(&ana),
+            json!({"action": "sign_out_others"}),
         )
         .await,
     ));

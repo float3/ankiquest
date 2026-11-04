@@ -35,5 +35,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `challenge_create.json` | `POST /api/community/challenges/{user}` with a `request_id` |
 | `challenge_action.json` | `POST /api/community/challenges/{user}/{id}` `{"action": "accept"}` |
 | `mute.json` | `POST /api/social/{user}` `{"action": "mute", "user"}` |
+| `sign_in_methods.json` | `GET /api/sign-in/{user}`: a password and a linked GitHub |
+| `account.json` | `GET /api/accounts/{user}` |
+| `password_change.json` | `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others": false}` |
+| `devices_sign_out.json` | `POST /api/devices/{user}` `{"action": "sign_out_others"}` |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.

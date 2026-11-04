@@ -1,0 +1,12 @@
+{
+  "devices": [
+    {
+      "created_at": 1793183400000,
+      "current": true,
+      "id": "example-device-1",
+      "kind": "app",
+      "last_used_at": 1793183400000,
+      "name": "Pixel 9"
+    }
+  ]
+}

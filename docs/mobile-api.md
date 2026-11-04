@@ -30,6 +30,22 @@ A name is never removed or renamed. New names are added as their features land. 
 
 Real responses for the endpoints the Android app uses are in [api/examples](api/examples/README.md).
 
+## account settings
+
+The Android app's account settings are native and use these endpoints with the device token (all described in `docs/server.md`, "passwords and devices", "sign in with Google, GitHub or GitLab" and the privacy section):
+
+| request | answers |
+|---|---|
+| `GET /api/sign-in/{user}` | `account`, `password` and `providers` (`provider`, `name`, `linked`) |
+| `POST /api/sign-in/{user}` `{"action": "unlink", "provider"}` | the same, after unlinking |
+| `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others"}` | the same, after the change |
+| `GET /api/devices/{user}`, `POST` `{"action": "sign_out", "id"}` or `{"action": "sign_out_others"}` | `devices` |
+| `GET /api/accounts/{user}` | `user`, `display`, `created_at`, `password`, `confirmed_until` |
+| `GET /api/export/{user}` | the data download, saved by the app as it came |
+| `DELETE /api/accounts/{user}` `{"password"}` or `{"confirm": "<user>"}` | `204` |
+
+The `403` with `"reauth": true` described under capabilities applies to the first password and to deleting an account without a password.
+
 ## browser identity
 
 `POST /auth/session` still returns `204` with the `ankiquest_session` cookie. a valid `Authorization: Bearer <member-token>` establishes that member's session. browser JSON `{ "password": "..." }` accepts either the shared site password or a member token and requires `X-Ankiquest-CSRF: 1`. a shared-password session can read shared pages but has no personal permissions. if a secret is both the shared password and a member token, password login remains read-only. a token configured for multiple members cannot implicitly select a browser owner; existing explicit bearer requests retain their previous per-user behavior.
