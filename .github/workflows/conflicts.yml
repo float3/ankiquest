@@ -17,10 +17,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: conflict-scan
-  cancel-in-progress: true
-
 jobs:
   scan:
     if: github.repository == 'float3/ankiquest'
