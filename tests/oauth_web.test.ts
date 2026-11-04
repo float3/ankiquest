@@ -23,7 +23,7 @@ async function login(browser: Browser, oauth: string[] | undefined) {
   return {links, shown, errors};
 }
 
-async function settings(browser: Browser) {
+async function settings(browser: Browser, confirmedUntil: number | null = null) {
   const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 1400}});
   const posted: unknown[] = [];
   const linked = true;
@@ -32,7 +32,7 @@ async function settings(browser: Browser) {
     if (pathname === '/settings') return route.fulfill({contentType: 'text/html', body: built('personal')});
     if (await fulfillAsset(route, pathname)) return;
     if (pathname === '/auth/status') return route.fulfill({json: {private_site: false, registration: true, authenticated: true, member: {user: 'ana', display: 'Ana'}, oauth: ['github', 'gitlab']}});
-    if (pathname === '/api/accounts/ana') return route.fulfill({json: {user: 'ana', display: 'Ana', created_at: 0, password: false}});
+    if (pathname === '/api/accounts/ana') return route.fulfill({json: {user: 'ana', display: 'Ana', created_at: 0, password: false, confirmed_until: confirmedUntil}});
     if (pathname === '/api/sign-in/ana') {
       if (request.method() === 'POST') {
         const body = request.postDataJSON();
@@ -52,9 +52,11 @@ async function settings(browser: Browser) {
   await page.locator('.sign-in-row').first().waitFor();
   const result = {
     rows: (await page.locator('.sign-in-row').allInnerTexts()).map(text => text.replace(/\s+/g, ' ')),
-    link: await page.locator('.sign-in-row a').getAttribute('href'),
+    link: await page.locator('.sign-in-row a').count() ? await page.locator('.sign-in-row a').getAttribute('href') : null,
+    reauth: await page.locator('#delete-account-reauth [data-reauth]').evaluateAll(links => links.map(link => [link.textContent, link.getAttribute('href')])),
+    passwordForm: await page.locator('#password-form').count(),
     unlinkDisabled: await page.locator('[data-unlink=gitlab]').isDisabled(),
-    confirmField: await page.locator('#delete-account-form input[name=confirm]').count(),
+    deleteForm: await page.locator('#delete-account-form').count(),
     passwordField: await page.locator('#delete-account-form input[name=password]').count(),
     token: '',
     posted,
@@ -87,14 +89,31 @@ test('sign-in buttons appear only for configured providers', async () => {
   }
 });
 
+test('a passwordless account that signed in again can link, set a password and delete', async () => {
+  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  try {
+    const page = await settings(browser, Date.now() + 600_000);
+    assert.equal(page.link, '/auth/oauth/github?link=1');
+    assert.deepEqual(page.reauth, []);
+    assert.equal(page.deleteForm, 1);
+    assert.equal(page.passwordForm, 1);
+    assert.equal(page.passwordField, 0, 'no username or password to type');
+    assert.deepEqual(page.errors, []);
+  } finally {
+    await browser.close();
+  }
+});
+
 test('settings link providers, keep the last sign-in and make device tokens', async () => {
   const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
   try {
     const page = await settings(browser);
     assert.deepEqual(page.rows, ['GitHub Link', 'GitLab Unlink']);
-    assert.equal(page.link, '/auth/oauth/github?link=1');
+    assert.equal(page.link, null, 'linking waits until the player signs in again');
     assert.equal(page.unlinkDisabled, true, 'the only way in cannot be unlinked');
-    assert.equal(page.confirmField, 1, 'an account without a password confirms deletion with its username');
+    assert.equal(page.deleteForm, 0, 'an account without a password signs in again before deleting');
+    assert.equal(page.passwordForm, 0);
+    assert.deepEqual(page.reauth, [['Sign in again with GitLab', '/auth/oauth/gitlab?reauth=1']]);
     assert.equal(page.passwordField, 0);
     assert.equal(page.token, 'fresh-device-token');
     assert.deepEqual(page.posted, [{csrf: '1', body: {action: 'token'}}]);

@@ -104,6 +104,7 @@ fn baseline(conn: &Connection) -> Result<(), Error> {
         ("reply_to_body", "text"),
         ("topic", "text"),
         ("win_id", "integer"),
+        ("quiet", "integer not null default 0"),
     ] {
         add_column(conn, "notifications", column, definition)?;
     }

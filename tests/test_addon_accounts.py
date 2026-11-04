@@ -39,6 +39,14 @@ class Server(BaseHTTPRequestHandler):
         else:
             self.answer(404, None)
 
+    old_server = False
+
+    def do_GET(self):
+        if self.path == "/api/capabilities" and not Server.old_server:
+            self.answer(200, {"version": 1, "features": ["share_cards", "wins", 3]})
+        else:
+            self.answer(404, None)
+
     def answer(self, status, body):
         payload = b"" if body is None else json.dumps(body).encode()
         self.send_response(status)
@@ -86,6 +94,15 @@ class AccountTests(unittest.TestCase):
         self.assertEqual((refused.exception.status, str(refused.exception)), (401, "Username or password not recognized."))
         headers = Server.headers[-1]
         self.assertEqual((headers["Authorization"], headers["Accept-Language"]), ("Bearer device-token", "es"))
+
+    def test_capabilities_are_read_and_an_older_server_has_none(self):
+        api = self.client.Client(self.base, "ana", "device-token")
+        self.assertEqual(frozenset({"share_cards", "wins"}), api.capabilities())
+        Server.old_server = True
+        try:
+            self.assertEqual(frozenset(), api.capabilities())
+        finally:
+            Server.old_server = False
 
     def test_a_refusal_without_words_still_names_its_status(self):
         with self.assertRaises(self.client.ServerError) as missing:
