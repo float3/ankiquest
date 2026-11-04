@@ -63,9 +63,20 @@ pub struct StreakChange {
 /// `streak_minutes` setting changed over time, oldest first. A day follows the
 /// value in force when it began, so a change never rewrites a day that already
 /// started. Before the first change any review counts.
+///
+/// `players` holds an admin's per-player overrides, oldest first for each
+/// player. `None` hands the player back to the server's value. They follow the
+/// same rule: a change applies from the player's next day on.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StreakRule {
     pub changes: Vec<StreakChange>,
+    pub players: BTreeMap<String, Vec<PlayerStreakChange>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlayerStreakChange {
+    pub at: i64,
+    pub minutes: Option<u32>,
 }
 
 impl StreakRule {
@@ -77,10 +88,45 @@ impl StreakRule {
             0
         }
     }
+
+    /// The rule one player follows: the server's changes with that player's
+    /// overrides on top, as a plain list of changes.
+    pub fn for_player(&self, user: &str) -> StreakRule {
+        let Some(own) = self.players.get(user).filter(|own| !own.is_empty()) else {
+            return StreakRule {
+                changes: self.changes.clone(),
+                players: BTreeMap::new(),
+            };
+        };
+        let mut times: Vec<i64> = self
+            .changes
+            .iter()
+            .map(|change| change.at)
+            .chain(own.iter().map(|change| change.at))
+            .collect();
+        times.sort_unstable();
+        times.dedup();
+        let changes = times
+            .into_iter()
+            .map(|at| {
+                let end = own.partition_point(|change| change.at <= at);
+                let minutes = own[..end]
+                    .last()
+                    .and_then(|change| change.minutes)
+                    .unwrap_or_else(|| self.minutes_at(at));
+                StreakChange { at, minutes }
+            })
+            .collect();
+        StreakRule {
+            changes,
+            players: BTreeMap::new(),
+        }
+    }
 }
 
 static STREAK_RULE: RwLock<StreakRule> = RwLock::new(StreakRule {
     changes: Vec::new(),
+    players: BTreeMap::new(),
 });
 static STREAK_RULE_VERSION: AtomicU64 = AtomicU64::new(0);
 
@@ -94,11 +140,12 @@ pub fn set_streak_rule(rule: StreakRule) {
     }
 }
 
-pub fn streak_rule() -> StreakRule {
+/// The rule `user` follows, with any per-player override applied.
+pub fn streak_rule_for(user: &str) -> StreakRule {
     STREAK_RULE
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .clone()
+        .for_player(user)
 }
 
 /// Changes whenever [`set_streak_rule`] changes the rule, so cached profiles know they are stale.
@@ -1374,7 +1421,7 @@ pub fn compute_with_history(
         week,
         now_ms,
         freeze_policy,
-        &streak_rule(),
+        &streak_rule_for(user),
     )
 }
 
@@ -3581,8 +3628,37 @@ mod tests {
                         minutes: *minutes,
                     })
                     .collect(),
+                ..StreakRule::default()
             },
         )
+    }
+
+    #[test]
+    fn a_player_override_applies_from_its_time_and_can_be_handed_back() {
+        let server = |at, minutes| StreakChange { at, minutes };
+        let own = |at, minutes| PlayerStreakChange { at, minutes };
+        let rule = StreakRule {
+            changes: vec![server(100, 10), server(500, 15)],
+            players: BTreeMap::from([(
+                "a".to_string(),
+                vec![own(200, Some(3)), own(400, Some(5)), own(600, None)],
+            )]),
+        };
+        let a = rule.for_player("a");
+        let minutes = |at| a.minutes_at(at);
+        assert_eq!(
+            [50, 100, 199, 200, 400, 500, 599, 600, 700].map(minutes),
+            [0, 10, 10, 3, 5, 5, 5, 15, 15]
+        );
+        // Another player keeps the server's rule.
+        assert_eq!(rule.for_player("b").changes, rule.changes);
+        // An override before any server change still counts.
+        let early = StreakRule {
+            changes: vec![],
+            players: BTreeMap::from([("a".to_string(), vec![own(10, Some(3))])]),
+        };
+        assert_eq!(early.for_player("a").minutes_at(9), 0);
+        assert_eq!(early.for_player("a").minutes_at(10), 3);
     }
 
     #[test]

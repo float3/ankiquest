@@ -68,12 +68,15 @@ def streak_warning(profile, hours, now_ms, warned_for):
 
 
 def fresh_messages(inbox, cursor, now_s):
-    """Shows recent arrivals even on the first poll, but never replays a backlog."""
+    """Shows recent arrivals even on the first poll, but never replays a backlog. Quiet rows
+    (a routine "Streak secured!") stay in the inbox without being announced."""
     fresh = []
     for entry in sorted(inbox, key=lambda entry: entry["id"]):
         if entry["id"] <= cursor:
             continue
         cursor = entry["id"]
+        if entry.get("quiet"):
+            continue
         if entry.get("created_at", 0) >= now_s - FRESH_SECONDS:
             fresh.append(entry)
     return fresh, cursor

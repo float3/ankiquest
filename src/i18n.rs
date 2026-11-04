@@ -345,6 +345,7 @@ mod tests {
             image: None,
             reacted: false,
             link_token: None,
+            quiet: false,
         };
         notification(&mut notice, "es", "");
         assert_eq!(notice.title, "¡Nuevo récord en 24 horas!");
@@ -430,6 +431,7 @@ mod tests {
                 image: None,
                 reacted: false,
                 link_token: None,
+                quiet: false,
             };
             notification(&mut notice, language, "Aldana");
             assert_eq!(notice.title, title);

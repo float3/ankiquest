@@ -160,6 +160,15 @@ class GoalTests(unittest.TestCase):
         claim(goals.Load(6, 0, 0, 5, 0))
         self.assertEqual(goals.BOTH, claim(goals.Load(6, 5, 6, 0, 0)))
 
+    def test_a_server_with_wins_celebrates_the_goal_instead(self):
+        status = goals.Status(5, 9, 0, 20, "backlog", goals.Goal(20, 4, 1, 4), None, False)
+        self.assertTrue(status.minimum_done and status.goal_done)
+        earned, stored = goals.claim(status, None, server_goal=True)
+        self.assertEqual(goals.MINIMUM, earned)
+        self.assertNotIn("Next up", goals.celebration_text(earned, status))
+        self.assertIsNone(goals.claim(status, stored, server_goal=True)[0])
+        self.assertEqual(goals.BOTH, goals.claim(status, None)[0], "the fallback for older servers")
+
     def test_a_reached_backlog_goal_is_reported_once_a_day(self):
         done = goals.Status(5, 9, 0, 20, "backlog", goals.Goal(20, 4, 1, 4), None, False)
         self.assertTrue(goals.to_report(done, self.me, 1000, None))
@@ -692,6 +701,22 @@ class HomeTests(unittest.TestCase):
         self.session(1)
         self.assertEqual(2, dialog.call_count)
         self.assertEqual(3, self.mw.pm.profile[self.home.SESSION_KEY]["remaining"])
+
+    def test_the_goal_popup_is_left_to_a_server_with_wins(self):
+        self.remember("cards", 1)
+        self.api.capabilities = Mock(return_value=frozenset({"wins"}))
+        self.session(2)
+        dialog = self.home.today_ui.session_dialog
+        self.assertEqual("Streak secured! 🔥", dialog.call_args.args[1])
+        self.assertNotIn("goal", dialog.call_args.args[2].lower())
+        self.api.capabilities.assert_called_once_with()
+
+    def test_an_older_server_without_wins_keeps_the_goal_popup(self):
+        self.remember("cards", 1)
+        self.api.capabilities = Mock(return_value=frozenset())
+        self.home.load_capabilities(self.api)
+        self.session(2)
+        self.assertEqual("Daily goal reached! 🎉", self.home.today_ui.session_dialog.call_args.args[1])
 
     def write_config(self, _, values):
         self.settings = dict(values)
