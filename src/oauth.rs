@@ -22,6 +22,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Whether `path` is where [`ticket_page`]'s form posts, which checks its own origin and nonce.
+pub(crate) fn confirm_path(path: &str) -> bool {
+    path.strip_prefix("/auth/oauth/")
+        .and_then(|rest| rest.strip_suffix("/confirm"))
+        .is_some_and(|provider| !provider.is_empty() && !provider.contains('/'))
+}
+
 /// Where a first sign-in picks its username.
 pub const SIGNUP_PATH: &str = "/auth/oauth/signup";
 const COOKIE: &str = "ankiquest_oauth";
@@ -1007,7 +1014,8 @@ async fn confirm(
             "This server does not offer that sign-in.",
         );
     };
-    if !access::same_origin(&app, &headers) {
+    // Browsers send Origin with every form POST; one without it did not come from the page.
+    if !headers.contains_key(header::ORIGIN) || !access::same_origin(&app, &headers) {
         return message(StatusCode::FORBIDDEN, "Sign-in failed. Try again.", "", &[]);
     }
     let now = now_ms();
@@ -2630,6 +2638,146 @@ mod tests {
             app.access.reauthenticated_until(&headers, "ana", now_ms()),
             None
         );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn a_confirmation_comes_from_the_browser_that_showed_its_page() {
+        let (base, _mock) = provider().await;
+        let (app, path) = fixture(true, &base);
+        let session = sign_up(&app, "ana").await;
+        let ana = format!("Bearer {}", app.issue_token("ana", "Pixel 9").unwrap());
+        let open = || {
+            let app = app.clone();
+            let ana = ana.clone();
+            async move {
+                let opened = json(
+                    send(
+                        &app,
+                        "POST",
+                        "/api/sign-in/ana",
+                        &[
+                            ("authorization", &ana),
+                            ("content-type", "application/json"),
+                        ],
+                        r#"{"action": "browser", "provider": "gitlab", "purpose": "reauth"}"#,
+                    )
+                    .await,
+                )
+                .await;
+                opened["url"].as_str().unwrap()[ORIGIN.len() + "/auth/oauth/gitlab".len()..]
+                    .to_string()
+            }
+        };
+        let page = send(
+            &app,
+            "GET",
+            &format!("/auth/oauth/gitlab{}", open().await),
+            &[],
+            "",
+        )
+        .await;
+        assert_eq!(page.headers()[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(
+            page.headers()[header::CONTENT_SECURITY_POLICY],
+            "frame-ancestors 'none'"
+        );
+        let flow = cookie(&page, COOKIE).unwrap();
+        let html = text(page).await;
+        let nonce = html
+            .split(r#"name="nonce" value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string();
+        let post = |cookie: Option<String>, origin: Option<&'static str>| {
+            let app = app.clone();
+            let nonce = nonce.clone();
+            async move {
+                let mut headers = vec![("content-type", FORM.to_string())];
+                if let Some(cookie) = cookie {
+                    headers.push(("cookie", cookie));
+                }
+                if let Some(origin) = origin {
+                    headers.push(("origin", origin.to_string()));
+                }
+                let headers: Vec<(&str, &str)> =
+                    headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                send(
+                    &app,
+                    "POST",
+                    "/auth/oauth/gitlab/confirm",
+                    &headers,
+                    &format!("nonce={nonce}"),
+                )
+                .await
+                .status()
+            }
+        };
+        assert_eq!(
+            post(Some(flow.clone()), None).await,
+            StatusCode::FORBIDDEN,
+            "a form post always says where it came from"
+        );
+        assert_eq!(
+            post(None, Some(ORIGIN)).await,
+            StatusCode::BAD_REQUEST,
+            "another browser has the nonce but not the cookie"
+        );
+        let elsewhere = send(
+            &app,
+            "GET",
+            &format!("/auth/oauth/gitlab{}", open().await),
+            &[],
+            "",
+        )
+        .await;
+        let other = cookie(&elsewhere, COOKIE).unwrap();
+        assert_eq!(
+            post(Some(other), Some(ORIGIN)).await,
+            StatusCode::BAD_REQUEST,
+            "nor with a cookie of its own"
+        );
+        let page = send(
+            &app,
+            "GET",
+            &format!("/auth/oauth/gitlab{}", open().await),
+            &[],
+            "",
+        )
+        .await;
+        let flow = cookie(&page, COOKIE).unwrap();
+        let html = text(page).await;
+        let nonce = html
+            .split(r#"name="nonce" value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string();
+        let signed_in = send(
+            &app,
+            "POST",
+            "/auth/oauth/gitlab/confirm",
+            &[
+                ("cookie", &format!("{flow}; {session}")),
+                ("content-type", FORM),
+                ("origin", ORIGIN),
+            ],
+            &format!("nonce={nonce}"),
+        )
+        .await;
+        assert_eq!(
+            signed_in.status(),
+            StatusCode::SEE_OTHER,
+            "a browser signed in to the site needs no extra header for the form"
+        );
+        assert!(confirm_path("/auth/oauth/gitlab/confirm"));
+        assert!(!confirm_path("/auth/oauth//confirm"));
+        assert!(!confirm_path("/auth/oauth/a/b/confirm"));
         cleanup(app, path);
     }
 
