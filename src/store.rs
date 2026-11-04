@@ -317,6 +317,7 @@ impl Store {
         }
     }
 
+    #[cfg(test)]
     pub fn upsert(
         &mut self,
         user: &str,
@@ -327,10 +328,38 @@ impl Store {
         self.upsert_at(user, reviews, deleted, clock, crate::app::now_ms())
     }
 
+    /// [`Store::upsert`] for an upload whose client stamped reviews with the UTC offset
+    /// (`offset_west_min`) they were made on: `offsets` pairs a review id with its offset.
+    /// The clock history then changes where the reviews say the player moved, not only
+    /// when an upload first reports the new clock, so reviews made offline after a move,
+    /// or queued over a daylight-saving change, land on the day they were made on.
+    pub fn upsert_stamped(
+        &mut self,
+        user: &str,
+        reviews: &[Review],
+        offsets: &[(i64, i64)],
+        deleted: &[i64],
+        clock: Clock,
+    ) -> Result<(), Error> {
+        self.upsert_stamped_at(user, reviews, offsets, deleted, clock, crate::app::now_ms())
+    }
+
     fn upsert_at(
         &mut self,
         user: &str,
         reviews: &[Review],
+        deleted: &[i64],
+        clock: Clock,
+        received_at: i64,
+    ) -> Result<(), Error> {
+        self.upsert_stamped_at(user, reviews, &[], deleted, clock, received_at)
+    }
+
+    fn upsert_stamped_at(
+        &mut self,
+        user: &str,
+        reviews: &[Review],
+        offsets: &[(i64, i64)],
         deleted: &[i64],
         clock: Clock,
         received_at: i64,
@@ -352,6 +381,7 @@ impl Store {
             for id in deleted {
                 delete.execute(params![user, id])?;
             }
+            record_stamps(&tx, user, offsets, clock.rollover_hour, received_at)?;
             // A clock that differs from the last one we saw starts a new entry,
             // dated from this upload: the reviews already here were kept under
             // the old one. The first entry a player gets reaches back forever,
@@ -410,6 +440,68 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Writes the offsets reviews were stamped with into the player's clock history: a review
+/// whose offset differs from the clock in force when it was made starts a new entry at
+/// that review, keeping the rollover hour of the entry it splits (a stamp says where the
+/// player was, not their settings). Stamps from the future are ignored, as are those that
+/// agree with the history already; entries that end up repeating the one before them
+/// are folded into it. A player's first stamp reaches back forever, like a first clock.
+fn record_stamps(
+    tx: &rusqlite::Transaction,
+    user: &str,
+    offsets: &[(i64, i64)],
+    rollover_hour: i64,
+    received_at: i64,
+) -> Result<(), Error> {
+    let mut stamps: Vec<(i64, i64)> = offsets
+        .iter()
+        .copied()
+        .filter(|(id, _)| (1..=received_at).contains(id))
+        .collect();
+    if stamps.is_empty() {
+        return Ok(());
+    }
+    stamps.sort_unstable();
+    let before: Vec<(i64, i64, i64)> = tx
+        .prepare(
+            "select effective_from_ms, offset_west_min, rollover_hour from clock_history
+             where user = ?1 order by effective_from_ms",
+        )?
+        .query_map([user], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut history = before.clone();
+    for (id, offset) in stamps {
+        if history.is_empty() {
+            history.push((0, offset, rollover_hour));
+            continue;
+        }
+        let at = history
+            .partition_point(|(from, _, _)| *from <= id)
+            .saturating_sub(1);
+        let (from, in_force, rollover) = history[at];
+        if in_force == offset {
+            continue;
+        }
+        if from == id {
+            history[at].1 = offset;
+        } else {
+            history.insert(at + 1, (id, offset, rollover));
+        }
+    }
+    history.dedup_by(|later, earlier| (later.1, later.2) == (earlier.1, earlier.2));
+    if history != before {
+        tx.execute("delete from clock_history where user = ?1", [user])?;
+        let mut insert = tx.prepare(
+            "insert into clock_history (user, effective_from_ms, offset_west_min, rollover_hour)
+             values (?1, ?2, ?3, ?4)",
+        )?;
+        for (from, offset, rollover) in history {
+            insert.execute(params![user, from, offset, rollover])?;
+        }
+    }
+    Ok(())
 }
 
 fn initialize_sync_signatures(conn: &Connection) -> rusqlite::Result<()> {
@@ -472,6 +564,162 @@ mod tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn stamped_reviews_date_a_move_from_where_they_were_made() {
+        let dir = temp_dir("clock-stamps");
+        let mut store = Store::open(&dir).unwrap();
+        let buenos_aires = Clock {
+            offset_west_min: 180,
+            rollover_hour: 4,
+        };
+        let berlin = Clock {
+            offset_west_min: -60,
+            rollover_hour: 4,
+        };
+        let study = |id| Review {
+            id,
+            cid: id,
+            last_ivl: 0,
+            ivl: None,
+            time_ms: 5_000,
+            kind: 1,
+        };
+        const HOUR: i64 = 3_600_000;
+        // Saturday evening in Buenos Aires, uploaded there.
+        let saturday = 1_791_331_200_000;
+        store
+            .upsert_stamped_at(
+                "hill",
+                &[study(saturday)],
+                &[(saturday, 180)],
+                &[],
+                buenos_aires,
+                saturday + 1_000,
+            )
+            .unwrap();
+        // One more review at the airport, then two days offline, landing in Berlin.
+        let airport = saturday + 3 * HOUR;
+        let landed = saturday + 20 * HOUR;
+        let next_day = landed + 24 * HOUR;
+        let upload = next_day + HOUR;
+        let reviews = [study(airport), study(landed), study(next_day)];
+        let unstamped = {
+            let dir = temp_dir("clock-unstamped");
+            let mut store = Store::open(&dir).unwrap();
+            store
+                .upsert_at(
+                    "hill",
+                    &[study(saturday)],
+                    &[],
+                    buenos_aires,
+                    saturday + 1_000,
+                )
+                .unwrap();
+            store
+                .upsert_at("hill", &reviews, &[], berlin, upload)
+                .unwrap();
+            store.clock_history("hill").unwrap()
+        };
+        assert_eq!(
+            unstamped.at(landed),
+            buenos_aires,
+            "without stamps the move dates from the upload"
+        );
+        store
+            .upsert_stamped_at(
+                "hill",
+                &reviews,
+                &[(airport, 180), (landed, -60), (next_day, -60)],
+                &[],
+                berlin,
+                upload,
+            )
+            .unwrap();
+        let history = store.clock_history("hill").unwrap();
+        assert_eq!(history.at(airport), buenos_aires);
+        assert_eq!(
+            history.at(landed),
+            berlin,
+            "the move dates from the first review made in Berlin"
+        );
+        assert_eq!(history.current(), berlin);
+        let rows: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from clock_history where user = 'hill'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rows, 2,
+            "the upload's own clock agrees with the stamps and adds nothing"
+        );
+
+        // Agreeing stamps, a stamp from the future and a resend change nothing.
+        store
+            .upsert_stamped_at(
+                "hill",
+                &reviews,
+                &[(next_day, -60), (upload + 10 * HOUR, 180)],
+                &[],
+                berlin,
+                upload + HOUR,
+            )
+            .unwrap();
+        assert_eq!(store.clock_history("hill").unwrap(), history);
+
+        // A phone that queued a review back in Buenos Aires, before the move, sets it right.
+        let late = study(saturday + 2 * HOUR);
+        store
+            .upsert_stamped_at(
+                "hill",
+                &[late],
+                &[(late.id, 180)],
+                &[],
+                berlin,
+                upload + 2 * HOUR,
+            )
+            .unwrap();
+        assert_eq!(store.clock_history("hill").unwrap(), history);
+    }
+
+    #[test]
+    fn a_first_upload_can_carry_its_own_move() {
+        let dir = temp_dir("clock-stamps-first");
+        let mut store = Store::open(&dir).unwrap();
+        let study = |id| Review {
+            id,
+            cid: id,
+            last_ivl: 0,
+            ivl: None,
+            time_ms: 5_000,
+            kind: 1,
+        };
+        let (before, after) = (1_791_000_000_000, 1_791_100_000_000);
+        let california = Clock {
+            offset_west_min: 420,
+            rollover_hour: 4,
+        };
+        store
+            .upsert_stamped_at(
+                "hill",
+                &[study(before), study(after)],
+                &[(before, -120), (after, 420)],
+                &[],
+                california,
+                after + 1_000,
+            )
+            .unwrap();
+        let history = store.clock_history("hill").unwrap();
+        assert_eq!(
+            history.at(i64::MIN).offset_west_min,
+            -120,
+            "the first stamp reaches back"
+        );
+        assert_eq!(history.at(after), california);
     }
 
     #[test]

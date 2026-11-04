@@ -218,8 +218,12 @@ pub(crate) async fn preview(
 }
 
 #[derive(Deserialize)]
+#[serde(from = "RawUpload")]
 pub(crate) struct Upload {
     pub(crate) reviews: Vec<Review>,
+    /// `(review id, offset_west_min)` for the reviews the client stamped with the clock
+    /// they were made on; see [`Store::upsert_stamped`](crate::store::Store::upsert_stamped).
+    pub(crate) offsets: Vec<(i64, i64)>,
     #[serde(default)]
     pub(crate) deleted: Vec<i64>,
     pub(crate) clock: Clock,
@@ -228,6 +232,49 @@ pub(crate) struct Upload {
     pub(crate) decks: Option<Vec<decks::Snapshot>>,
     #[serde(default)]
     pub(crate) catalog: bool,
+}
+
+/// A review row as uploaded: the row, and optionally the UTC offset (minutes west, like
+/// `clock`) of the device when the review was made. Clients stamp a review only when they
+/// saw it answered; a row synced in from another device is sent without one.
+#[derive(Deserialize)]
+struct UploadedReview {
+    #[serde(flatten)]
+    review: Review,
+    #[serde(default)]
+    offset_west_min: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct RawUpload {
+    reviews: Vec<UploadedReview>,
+    #[serde(default)]
+    deleted: Vec<i64>,
+    clock: Clock,
+    #[serde(default)]
+    silent: bool,
+    decks: Option<Vec<decks::Snapshot>>,
+    #[serde(default)]
+    catalog: bool,
+}
+
+impl From<RawUpload> for Upload {
+    fn from(raw: RawUpload) -> Self {
+        let offsets = raw
+            .reviews
+            .iter()
+            .filter_map(|row| Some((row.review.id, row.offset_west_min?)))
+            .collect();
+        Self {
+            reviews: raw.reviews.into_iter().map(|row| row.review).collect(),
+            offsets,
+            deleted: raw.deleted,
+            clock: raw.clock,
+            silent: raw.silent,
+            decks: raw.decks,
+            catalog: raw.catalog,
+        }
+    }
 }
 
 /// The player's profile, plus any deck completion this upload just announced.
@@ -257,6 +304,12 @@ pub(crate) async fn upload(
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
     if !decks::valid_clock(upload.clock)
+        || upload.offsets.iter().any(|(_, offset)| {
+            !decks::valid_clock(Clock {
+                offset_west_min: *offset,
+                rollover_hour: upload.clock.rollover_hour,
+            })
+        })
         || upload
             .decks
             .as_ref()
@@ -292,7 +345,13 @@ fn record_upload(
     let (announced, changed) = {
         let mut store = app.store.lock().unwrap();
         store
-            .upsert(user, &reviews, &upload.deleted, upload.clock)
+            .upsert_stamped(
+                user,
+                &reviews,
+                &upload.offsets,
+                &upload.deleted,
+                upload.clock,
+            )
             .map_err(store_error)?;
         let mut announced = Vec::new();
         if let Some(decks) = &upload.decks {
@@ -483,6 +542,53 @@ mod tests {
             send(sample_upload(0, false)).await.announced.is_empty(),
             "a deck is only announced once a day"
         );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn uploaded_reviews_can_say_which_clock_they_were_made_on() {
+        let (app, path) = fixture();
+        let now = crate::app::now_ms();
+        let row = |id: i64, offset: Option<i64>| {
+            let mut row = serde_json::json!({
+                "id": id, "cid": 1, "last_ivl": 0, "ivl": 1, "time_ms": 5000, "kind": 1
+            });
+            if let Some(offset) = offset {
+                row["offset_west_min"] = offset.into();
+            }
+            row
+        };
+        let body = |rows: Vec<serde_json::Value>| -> Upload {
+            serde_json::from_value(serde_json::json!({
+                "reviews": rows, "clock": {"offset_west_min": -60, "rollover_hour": 4}
+            }))
+            .unwrap()
+        };
+        let parsed = body(vec![row(now - 3_000, Some(180)), row(now - 2_000, None)]);
+        assert_eq!(parsed.reviews.len(), 2);
+        assert_eq!(parsed.offsets, vec![(now - 3_000, 180)]);
+        let rejected = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(body(vec![row(now - 1_000, Some(5_000))])),
+        )
+        .await;
+        assert_eq!(rejected.err(), Some(StatusCode::BAD_REQUEST));
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("cerro".into()),
+            headers("cerro"),
+            Json(body(vec![
+                row(now - 7_200_000, Some(180)),
+                row(now - 3_600_000, Some(-60)),
+            ])),
+        )
+        .await
+        .unwrap();
+        let history = app.store.lock().unwrap().clock_history("cerro").unwrap();
+        assert_eq!(history.at(now - 7_200_000).offset_west_min, 180);
+        assert_eq!(history.at(now - 3_600_000).offset_west_min, -60);
         cleanup(app, path);
     }
 

@@ -20,6 +20,7 @@ pub(crate) const FEATURES: &[&str] = &[
     "goal_backlog_days",
     "mute",
     "reactions",
+    "review_offsets",
     "share_cards",
     "wins",
 ];
