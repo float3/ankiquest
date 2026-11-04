@@ -309,6 +309,15 @@ async fn examples_match_the_handlers() {
         ("profile", "GET", "/api/profile/hill", Value::Null),
         ("leaderboard", "GET", "/api/leaderboard", Value::Null),
         (
+            "leaderboard_day",
+            "GET",
+            "/api/leaderboard?period=day",
+            Value::Null,
+        ),
+        ("week", "GET", "/api/week", Value::Null),
+        // Another player's profile, as the leaderboard opens it: no `goal`.
+        ("player_profile", "GET", "/api/profile/cerro", Value::Null),
+        (
             "rank",
             "POST",
             "/api/rank/hill",
