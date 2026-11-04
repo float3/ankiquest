@@ -43,6 +43,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("streak_freezes", "select at, enabled from freeze_preferences where user = ?1 order by at"),
     ("granted_freezes", "select date, at from freeze_grants where user = ?1 order by date"),
     ("legacy_freeze_player", "select 1 as legacy from freeze_legacy_players where user = ?1"),
+    ("streak_minimum", "select at, minutes from player_streak_minutes where user = ?1 order by at"),
     ("reminder_baselines", "select kind, since from reminder_baselines where user = ?1"),
     ("seen", "select key from seen where user = ?1 order by key"),
     ("encouragement", "select * from player_settings where user = ?1"),
@@ -116,6 +117,7 @@ const OWNED: &[(&str, &str)] = &[
     ("reminder_baselines", "user = ?1"),
     ("freeze_preferences", "user = ?1"),
     ("freeze_legacy_players", "user = ?1"),
+    ("player_streak_minutes", "user = ?1"),
     ("player_settings", "user = ?1"),
     ("incoming_settings", "user = ?1"),
     ("incoming_muted_senders", "recipient = ?1 or sender = ?1"),
@@ -274,14 +276,15 @@ pub fn carry_out_removals(app: &App, conn: &Connection) -> rusqlite::Result<()> 
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Deletion {
     #[serde(default)]
     password: Option<String>,
-    /// The username, typed again, for accounts without a password.
-    #[serde(default)]
-    confirm: Option<String>,
+    /// The username older pages sent for accounts without a password. It proves nothing,
+    /// so it is accepted and ignored.
+    #[serde(default, rename = "confirm")]
+    _confirm: Option<serde::de::IgnoredAny>,
 }
 
 async fn download(
@@ -328,10 +331,11 @@ async fn account(
         [&user],
         |r| Ok((r.get(0)?, r.get(1)?)),
     );
+    let confirmed_until = app.access.reauthenticated_until(&headers, &user, now_ms());
     match created {
         Ok((created_at, password)) => reply(
             StatusCode::OK,
-            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at, "password": password}),
+            serde_json::json!({"user": user, "display": app.display(&user), "created_at": created_at, "password": password, "confirmed_until": confirmed_until}),
         ),
         Err(_) => refuse(
             StatusCode::NOT_FOUND,
@@ -340,8 +344,9 @@ async fn account(
     }
 }
 
-/// Deletes the account. The password is asked for again, or for an account without one,
-/// the username is typed out.
+/// Deletes the account. The password is asked for again, or an account without one must
+/// have signed in with its provider again from this browser in the last few minutes, so
+/// someone who only holds a signed-in device cannot do it.
 async fn delete(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -358,7 +363,12 @@ async fn delete(
             "This player comes from the server configuration. Ask whoever runs the server to remove it.",
         );
     }
-    let Ok(request) = serde_json::from_slice::<Deletion>(&body) else {
+    let parsed = if body.iter().all(u8::is_ascii_whitespace) {
+        Ok(Deletion::default())
+    } else {
+        serde_json::from_slice::<Deletion>(&body)
+    };
+    let Ok(request) = parsed else {
         return refuse(
             StatusCode::BAD_REQUEST,
             "Enter your password to delete your account.",
@@ -374,11 +384,12 @@ async fn delete(
     }
     let has_password = has_password(&app.store.lock().unwrap().conn, &user).unwrap_or(true);
     if !has_password {
-        if request.confirm.as_deref().map(str::trim) != Some(user.as_str()) {
-            return refuse(
-                StatusCode::BAD_REQUEST,
-                "Type your username to delete your account.",
-            );
+        if app
+            .access
+            .reauthenticated_until(&headers, &user, now)
+            .is_none()
+        {
+            return access::reauth_first();
         }
     } else if let Some(password) = &request.password {
         if !password_matches(&app, &user, password).await {

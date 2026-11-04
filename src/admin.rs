@@ -2,7 +2,7 @@
 //! and the `ankiquest admin` command that reads and changes them while the
 //! service runs. The service picks up overrides on its next poll.
 
-use crate::game::{DAY_MS, ReviewWeighting, StreakChange, StreakRule};
+use crate::game::{DAY_MS, PlayerStreakChange, ReviewWeighting, StreakChange, StreakRule};
 use crate::store::{Error, Store};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags, params, types::ValueRef};
@@ -52,7 +52,13 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
          create table if not exists streak_minutes (
              at integer primary key,
              minutes integer not null
-         );",
+         );
+         create table if not exists player_streak_minutes (
+             user text not null,
+             at integer not null,
+             minutes integer,
+             primary key (user, at)
+         ) without rowid;",
     )?;
     Ok(())
 }
@@ -193,7 +199,10 @@ pub fn streak_rule(conn: &Connection, minutes: u32, now_ms: i64) -> Result<Strea
             })
         })?
         .collect::<Result<_, _>>()?;
-    let mut rule = StreakRule { changes };
+    let mut rule = StreakRule {
+        changes,
+        players: player_streak_changes(&tx)?,
+    };
     let last = rule.changes.last().copied();
     if last.map_or(0, |change| change.minutes) != minutes {
         let at = now_ms.max(last.map_or(now_ms, |change| change.at + 1));
@@ -205,6 +214,55 @@ pub fn streak_rule(conn: &Connection, minutes: u32, now_ms: i64) -> Result<Strea
     }
     tx.commit()?;
     Ok(rule)
+}
+
+fn player_streak_changes(
+    conn: &Connection,
+) -> Result<std::collections::BTreeMap<String, Vec<PlayerStreakChange>>, Error> {
+    let mut players = std::collections::BTreeMap::<String, Vec<PlayerStreakChange>>::new();
+    let mut stmt =
+        conn.prepare("select user, at, minutes from player_streak_minutes order by user, at")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            PlayerStreakChange {
+                at: r.get(1)?,
+                minutes: r.get(2)?,
+            },
+        ))
+    })?;
+    for row in rows {
+        let (user, change) = row?;
+        players.entry(user).or_default().push(change);
+    }
+    Ok(players)
+}
+
+/// Records a per-player streak minimum (`None` hands the player back to the
+/// server's) from `now_ms` on, unless it is already in force. Returns whether
+/// anything changed.
+fn set_player_streak_minutes(
+    conn: &Connection,
+    user: &str,
+    minutes: Option<u32>,
+    now_ms: i64,
+) -> Result<bool, Error> {
+    let last: Option<(i64, Option<u32>)> = conn
+        .prepare(
+            "select at, minutes from player_streak_minutes where user = ?1 order by at desc limit 1",
+        )?
+        .query_map([user], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .next()
+        .transpose()?;
+    if last.and_then(|(_, minutes)| minutes) == minutes {
+        return Ok(false);
+    }
+    let at = now_ms.max(last.map_or(now_ms, |(at, _)| at + 1));
+    conn.execute(
+        "insert into player_streak_minutes (user, at, minutes) values (?1, ?2, ?3)",
+        params![user, at, minutes],
+    )?;
+    Ok(true)
 }
 
 fn unknown(key: &str) -> Error {
@@ -232,7 +290,10 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
   set-password <user>             give a self-service account a new random password, for
                                   someone who forgot theirs; prints it once
   grant-freeze <user> <date>...   protect a player's streak on these days (YYYY-MM-DD)
-  revoke-freeze <user> <date>...  take that protection away again";
+  revoke-freeze <user> <date>...  take that protection away again
+  streak-minutes <user> <minutes|default>
+                                  give one player their own streak minimum from their
+                                  next Anki day on; default goes back to the server's";
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
@@ -244,6 +305,7 @@ pub enum Command {
     RemoveAccount(String),
     SetPassword(String),
     GrantFreeze(String, Vec<String>, bool),
+    PlayerStreakMinutes(String, Option<u32>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -267,6 +329,19 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["sql", query] => Command::Sql(query.to_string()),
         ["remove-account", user] => Command::RemoveAccount(user.to_string()),
         ["set-password", user] => Command::SetPassword(user.to_string()),
+        ["streak-minutes", user, "default"] => Command::PlayerStreakMinutes(user.to_string(), None),
+        ["streak-minutes", user, minutes] => Command::PlayerStreakMinutes(
+            user.to_string(),
+            Some(
+                minutes
+                    .parse()
+                    .ok()
+                    .filter(|minutes| *minutes <= MAX_STREAK_MINUTES)
+                    .ok_or(
+                        "streak-minutes takes a whole number of minutes, at most 1440, or default",
+                    )?,
+            ),
+        ),
         [verb @ ("grant-freeze" | "revoke-freeze"), user, dates @ ..] if !dates.is_empty() => {
             let dates = dates
                 .iter()
@@ -353,7 +428,37 @@ pub fn run(
                 };
                 out += &format!("{key} = {}  ({source})\n    {about}\n", effective.get(key));
             }
+            for (user, changes) in player_streak_changes(conn)? {
+                if let Some(PlayerStreakChange {
+                    at,
+                    minutes: Some(minutes),
+                }) = changes.last()
+                {
+                    out += &format!(
+                        "streak_minutes for {user} = {minutes}  (set by admin {})\n",
+                        timestamp(*at)
+                    );
+                }
+            }
             out
+        }
+        Command::PlayerStreakMinutes(user, minutes) => {
+            if !store.users()?.contains(&user) {
+                return Err(format!("{user} is not a player on this server").into());
+            }
+            let shown = minutes.map_or("the server's value".to_string(), |m| m.to_string());
+            if set_player_streak_minutes(conn, &user, minutes, now_ms)? {
+                admin_log(
+                    conn,
+                    now_ms,
+                    format!("admin set streak_minutes for {user} to {shown}"),
+                )?;
+                format!(
+                    "streak_minutes for {user} = {shown} from their next Anki day; the service applies it within a minute.\n"
+                )
+            } else {
+                format!("streak_minutes for {user} is already {shown}.\n")
+            }
         }
         Command::Set(key, value) => {
             let mut check = configured;
@@ -896,6 +1001,53 @@ mod tests {
             [change(NOW + 1, 10), change(NOW + 3, 5), change(NOW + 4, 0)],
             "changes keep their order even within one millisecond"
         );
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_player_can_get_their_own_streak_minimum() {
+        let dir = state("player-streak");
+        let cmd = |args: &[&str], now| run(&dir, configured(), parse(&words(args))?, now);
+        assert!(parse(&words(&["streak-minutes", "aldanita", "ten"])).is_err());
+        assert!(parse(&words(&["streak-minutes", "aldanita", "1441"])).is_err());
+        let store = Store::open(&dir).unwrap();
+        store
+            .conn
+            .execute(
+                "insert into clocks (user, offset_west_min, rollover_hour) values ('aldanita', 0, 4)",
+                [],
+            )
+            .unwrap();
+        drop(store);
+        assert!(cmd(&["streak-minutes", "nobody", "3"], NOW).is_err());
+        assert!(
+            cmd(&["streak-minutes", "aldanita", "3"], NOW)
+                .unwrap()
+                .contains("= 3 from their next Anki day")
+        );
+        assert!(
+            cmd(&["streak-minutes", "aldanita", "3"], NOW + 5)
+                .unwrap()
+                .contains("already 3")
+        );
+        assert!(
+            cmd(&["settings"], NOW + 5)
+                .unwrap()
+                .contains("streak_minutes for aldanita = 3")
+        );
+
+        let store = Store::open(&dir).unwrap();
+        let rule = streak_rule(&store.conn, 10, NOW + 6).unwrap();
+        assert_eq!(rule.for_player("aldanita").minutes_at(NOW + 7), 3);
+        assert_eq!(rule.for_player("ivancito").minutes_at(NOW + 7), 10);
+        drop(store);
+
+        cmd(&["streak-minutes", "aldanita", "default"], NOW + 8).unwrap();
+        let store = Store::open(&dir).unwrap();
+        let rule = streak_rule(&store.conn, 10, NOW + 9).unwrap();
+        assert_eq!(rule.for_player("aldanita").minutes_at(NOW + 7), 3);
+        assert_eq!(rule.for_player("aldanita").minutes_at(NOW + 9), 10);
         drop(store);
         std::fs::remove_dir_all(dir).unwrap();
     }

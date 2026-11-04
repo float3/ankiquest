@@ -735,6 +735,13 @@ pub(crate) async fn change_password(
             app.access.failure(client, now);
             return Some(refuse(StatusCode::FORBIDDEN, "That password is not right."));
         }
+    } else if app
+        .access
+        .reauthenticated_until(headers, user, now)
+        .is_none()
+    {
+        // A first password would let whoever holds a signed-in device delete the account.
+        return Some(crate::access::reauth_first());
     }
     let password = password.to_string();
     let Ok(Ok(hash)) = tokio::task::spawn_blocking(move || hash_password(&password)).await else {
@@ -1455,11 +1462,35 @@ mod tests {
                 .await
                 .is_none()
         );
-        let (status, methods) = post(
+        let first = serde_json::json!({"action": "password", "password": "a new long password"});
+        let (status, refused) = post(
             &app,
             "/api/sign-in/ana",
             &with_token(&token),
-            serde_json::json!({"action": "password", "password": "a new long password"}),
+            first.clone(),
+            "192.0.2.1",
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a device token alone cannot");
+        assert_eq!(refused["reauth"], true);
+        let browser = web_session(&app, "ana", Some(&token)).await;
+        let (status, _) = post(
+            &app,
+            "/api/sign-in/ana",
+            &with_cookie(&browser),
+            first.clone(),
+            "192.0.2.1",
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "nor its web view");
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, browser.parse().unwrap());
+        assert!(app.access.reauthenticate(&headers, "ana", now_ms()));
+        let (status, methods) = post(
+            &app,
+            "/api/sign-in/ana",
+            &with_cookie(&browser),
+            first,
             "192.0.2.1",
         )
         .await;
