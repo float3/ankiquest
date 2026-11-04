@@ -103,12 +103,43 @@ pub(crate) fn standings(
 struct RankQuery {
     #[serde(default)]
     previous: Vec<String>,
+    /// The `week` of the answer `previous` came from. Older clients leave it out.
+    #[serde(default)]
+    week: Option<i64>,
 }
 
 #[derive(Serialize)]
 struct RankResponse {
     order: Vec<String>,
+    /// When this competition week began (ms), for the client to send back with `order`.
+    week: i64,
     change: Option<feedback::Notice>,
+}
+
+/// How `me` moved among the players who have earned XP this week. Everyone else sits at
+/// zero, ordered by lifetime XP, and moving past them is no news: right after the weekly
+/// reset whoever studies first (often someone in an earlier time zone) would otherwise
+/// "pass" everyone whose score just reset.
+fn rank_change_this_week(
+    previous: &[String],
+    places: &[feedback::Place],
+    me: &str,
+) -> Option<feedback::Notice> {
+    let active: Vec<feedback::Place> = places
+        .iter()
+        .filter(|place| place.week_xp > 0 || place.user == me)
+        .map(|place| feedback::Place {
+            user: place.user,
+            display: place.display,
+            week_xp: place.week_xp,
+        })
+        .collect();
+    let previous: Vec<String> = previous
+        .iter()
+        .filter(|user| active.iter().any(|place| place.user == user.as_str()))
+        .cloned()
+        .collect();
+    feedback::rank_change(&previous, &active, me)
 }
 
 /// The weekly order, and how `user` moved since the order a device saw last.
@@ -126,6 +157,7 @@ async fn rank(
     } else {
         board_users(&app, &headers, None)?
     };
+    let week = app.week.start_of(now_ms());
     let board = standings(&app, &users, None);
     let places: Vec<feedback::Place> = board
         .iter()
@@ -135,12 +167,17 @@ async fn rank(
             week_xp: standing.week_xp,
         })
         .collect();
-    let mut change = feedback::rank_change(&query.previous, &places, &user);
+    // An order from another week says nothing about this one.
+    let same_week = query.week.is_none_or(|seen| seen == week);
+    let mut change = same_week
+        .then(|| rank_change_this_week(&query.previous, &places, &user))
+        .flatten();
     if let Some(change) = &mut change {
         i18n::notice(change, &language);
     }
     Ok(Json(RankResponse {
         order: board.iter().map(|standing| standing.user.clone()).collect(),
+        week,
         change,
     }))
 }
@@ -385,6 +422,7 @@ mod tests {
             HeaderMap::new(),
             Json(RankQuery {
                 previous: vec!["hill".into(), "cerro".into()],
+                week: None,
             }),
         )
         .await
@@ -398,12 +436,84 @@ mod tests {
             State(app.clone()),
             UrlPath("cerro".into()),
             HeaderMap::new(),
-            Json(RankQuery { previous: vec![] }),
+            Json(RankQuery {
+                previous: vec![],
+                week: None,
+            }),
         )
         .await
         .unwrap()
         .0;
         assert!(first_look.change.is_none());
+        assert_eq!(first_look.week, app.week.start_of(now_ms()));
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    async fn rank_of(
+        app: &Arc<App>,
+        user: &str,
+        previous: &[&str],
+        week: Option<i64>,
+    ) -> RankResponse {
+        rank(
+            State(app.clone()),
+            UrlPath(user.into()),
+            HeaderMap::new(),
+            Json(RankQuery {
+                previous: previous.iter().map(|user| user.to_string()).collect(),
+                week,
+            }),
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    #[tokio::test]
+    async fn passing_players_whose_week_just_reset_is_no_news() {
+        let (app, path) = fixture();
+        let now = now_ms();
+        let week = app.week.start_of(now);
+        assert!(week <= now && now < app.week.end_after(now));
+        // Hill studied a lot last week and nothing yet this week; Cerro is the first to study.
+        upload_as(
+            &app,
+            "hill",
+            plain_upload(reviews_at(week - 3 * 86_400_000, 40)),
+        )
+        .await;
+        upload_as(&app, "cerro", plain_upload(reviews_at(now - 600_000, 2))).await;
+        let answer = rank_of(&app, "cerro", &["hill", "cerro"], Some(week)).await;
+        assert_eq!(answer.order, vec!["cerro", "hill"]);
+        assert!(
+            answer.change.is_none(),
+            "{:?}",
+            answer.change.map(|c| c.title)
+        );
+        assert!(
+            rank_of(&app, "cerro", &["hill", "cerro"], None)
+                .await
+                .change
+                .is_none(),
+            "older clients without a week are spared too"
+        );
+        // Once Hill studies more than Cerro this week, passing is real again.
+        upload_as(&app, "hill", plain_upload(reviews_at(now - 300_000, 20))).await;
+        let answer = rank_of(&app, "hill", &["cerro", "hill"], Some(week)).await;
+        assert_eq!(answer.change.unwrap().title, "👑 You took the crown");
+        // An order seen in another week is not compared with this one.
+        assert!(
+            rank_of(
+                &app,
+                "hill",
+                &["cerro", "hill"],
+                Some(week - 7 * 86_400_000)
+            )
+            .await
+            .change
+            .is_none()
+        );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

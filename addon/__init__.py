@@ -35,6 +35,7 @@ RECENT_KEY = "ankiquestRecentUploads"
 BASELINE_KEY = "ankiquestBaselineAccount"
 SHARED_KEY = "ankiquestSharedDecks"
 ORDER_KEY = "ankiquestLastOrder"
+ORDER_WEEK_KEY = "ankiquestLastOrderWeek"
 INBOX_KEY = "ankiquestInboxCursor"
 STREAK_DAY_KEY = "ankiquestStreakDay"
 UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
@@ -190,9 +191,10 @@ def poll(quiet=False):
     state["polling"] = True
 
     previous = mw.pm.profile.get(ORDER_KEY) or []
+    week = mw.pm.profile.get(ORDER_WEEK_KEY)
 
     def work():
-        rank, profile, notifications = api.rank(previous), api.profile(), api.notifications()
+        rank, profile, notifications = api.rank(previous, week), api.profile(), api.notifications()
         try:
             companion = api.companion()
         except Exception:
@@ -221,6 +223,7 @@ def announce(rank, profile, inbox, quiet):
     now_ms = int(time.time() * 1000)
     previous = mw.pm.profile.get(ORDER_KEY) or []
     mw.pm.profile[ORDER_KEY] = rank.get("order") or []
+    mw.pm.profile[ORDER_WEEK_KEY] = rank.get("week")
     fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
     mw.pm.profile[INBOX_KEY] = cursor
     warning = notify.streak_warning(

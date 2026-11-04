@@ -103,9 +103,13 @@ class Client:
             headers["Authorization"] = "Bearer " + self.token
         return request_json(self.base + path, body, headers, method=method)
 
-    def rank(self, previous):
-        """The weekly order, and how this player moved since `previous`."""
-        return self._request("/api/rank/" + self.user, {"previous": list(previous or [])})
+    def rank(self, previous, week=None):
+        """The weekly order, and how this player moved since `previous`, the order seen in
+        competition `week` (from an earlier answer; the server ignores a change across weeks)."""
+        body = {"previous": list(previous or [])}
+        if isinstance(week, int) and not isinstance(week, bool):
+            body["week"] = week
+        return self._request("/api/rank/" + self.user, body)
 
     def profile(self):
         return self._request("/api/profile/" + self.user)

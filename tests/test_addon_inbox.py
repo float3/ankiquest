@@ -315,6 +315,16 @@ class CelebrationHookTests(unittest.TestCase):
         win = offer.call_args.args[2]
         self.assertEqual({"title": "Crown", "body": "You passed Hill.", "notification": None, "place": 1, "win": None}, win)
 
+    def test_the_poll_sends_back_the_week_its_order_was_seen_in(self):
+        self.offered()
+        self.mw.pm.profile["ankiquestLastOrder"] = ["hill", "cerro"]
+        self.api.rank.return_value = {"order": ["cerro", "hill"], "week": 1_700_000_000_000}
+        self.addon.poll()
+        self.api.rank.assert_called_with(["hill", "cerro"], None)
+        self.assertEqual(1_700_000_000_000, self.mw.pm.profile["ankiquestLastOrderWeek"])
+        self.addon.poll()
+        self.api.rank.assert_called_with(["cerro", "hill"], 1_700_000_000_000)
+
     def test_only_the_newest_own_win_is_offered(self):
         offer = self.offered()
         now = int(time.time())
