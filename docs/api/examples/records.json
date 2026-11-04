@@ -1,0 +1,156 @@
+[
+  {
+    "holders": [
+      {
+        "at": 1793007000000,
+        "detail": 6,
+        "display": "Hill",
+        "until": 1793007005000,
+        "user": "hill",
+        "value": 61
+      },
+      {
+        "at": 1793182200000,
+        "detail": 3,
+        "display": "Cerro",
+        "until": 1793182202000,
+        "user": "cerro",
+        "value": 30
+      }
+    ],
+    "unit": "xp",
+    "window": "hour"
+  },
+  {
+    "holders": [
+      {
+        "at": 1793182200000,
+        "detail": 5,
+        "display": "Hill",
+        "until": 1793182204000,
+        "user": "hill",
+        "value": 101
+      },
+      {
+        "at": 1793182200000,
+        "detail": 3,
+        "display": "Cerro",
+        "until": 1793182202000,
+        "user": "cerro",
+        "value": 31
+      }
+    ],
+    "unit": "xp",
+    "window": "day"
+  },
+  {
+    "holders": [
+      {
+        "at": 1792920600000,
+        "detail": 15,
+        "display": "Hill",
+        "until": 1793182204000,
+        "user": "hill",
+        "value": 203
+      },
+      {
+        "at": 1793182200000,
+        "detail": 3,
+        "display": "Cerro",
+        "until": 1793182202000,
+        "user": "cerro",
+        "value": 31
+      }
+    ],
+    "unit": "xp",
+    "window": "week"
+  },
+  {
+    "holders": [
+      {
+        "at": 1792920600000,
+        "detail": 15,
+        "display": "Hill",
+        "until": 1793182204000,
+        "user": "hill",
+        "value": 203
+      },
+      {
+        "at": 1793182200000,
+        "detail": 3,
+        "display": "Cerro",
+        "until": 1793182202000,
+        "user": "cerro",
+        "value": 31
+      }
+    ],
+    "unit": "xp",
+    "window": "month"
+  },
+  {
+    "holders": [
+      {
+        "at": 1792920600000,
+        "detail": 15,
+        "display": "Hill",
+        "until": 1793182204000,
+        "user": "hill",
+        "value": 203
+      },
+      {
+        "at": 1793182200000,
+        "detail": 3,
+        "display": "Cerro",
+        "until": 1793182202000,
+        "user": "cerro",
+        "value": 31
+      }
+    ],
+    "unit": "xp",
+    "window": "year"
+  },
+  {
+    "holders": [
+      {
+        "at": 1792987200000,
+        "detail": 0,
+        "display": "Hill",
+        "until": 1792987200000,
+        "user": "hill",
+        "value": 2
+      },
+      {
+        "at": 1793160000000,
+        "detail": 0,
+        "display": "Cerro",
+        "until": 1793160000000,
+        "user": "cerro",
+        "value": 1
+      }
+    ],
+    "unit": "days",
+    "window": "streak"
+  },
+  {
+    "holders": [
+      {
+        "at": 1792900800000,
+        "detail": 0,
+        "display": "Hill",
+        "until": 1792900800000,
+        "user": "hill",
+        "value": 3
+      },
+      {
+        "at": 1793160000000,
+        "detail": 0,
+        "display": "Cerro",
+        "until": 1793160000000,
+        "user": "cerro",
+        "value": 1
+      }
+    ],
+    "unit": "days",
+    "window": "days"
+  }
+]
