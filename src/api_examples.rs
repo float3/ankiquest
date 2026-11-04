@@ -342,6 +342,137 @@ async fn examples_match_the_handlers() {
         examples.push((name, f.call(method, uri, Some("hill-secret"), body).await));
     }
 
+    // Friend goals come last, so their invitations change no example above. They start an hour
+    // ago, so the reviews uploaded above count: one goal in progress, one reached, one ended early
+    // and one invitation waiting for Hill.
+    crate::app::fix_now_ms(Some(NOW_MS - 60 * 60_000));
+    let goal = |title: &str, kind: &str, cooperative: bool, target: u64, to: &[&str], key: &str| {
+        json!({
+            "title": title,
+            "kind": kind,
+            "cooperative": cooperative,
+            "target": target,
+            "duration_days": 7,
+            "recipients": to,
+            "request_id": key
+        })
+    };
+    let ids = |list: &Value| -> Vec<i64> {
+        list["challenges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|challenge| challenge["id"].as_i64().unwrap())
+            .collect()
+    };
+    let created = f
+        .call(
+            "POST",
+            "/api/community/challenges/hill",
+            Some("hill-secret"),
+            goal(
+                "Three study days together",
+                "study_days",
+                false,
+                3,
+                &["cerro", "friend"],
+                "example-request-1",
+            ),
+        )
+        .await;
+    let mine = ids(&created)[0];
+    examples.push(("challenge_create", created));
+    let together = f
+        .call(
+            "POST",
+            "/api/community/challenges/cerro",
+            Some("cerro-secret"),
+            goal(
+                "Spanish sprint",
+                "reviews",
+                true,
+                5,
+                &["hill"],
+                "example-request-2",
+            ),
+        )
+        .await;
+    let sprint = ids(&together).into_iter().max().unwrap();
+    f.call(
+        "POST",
+        &format!("/api/community/challenges/cerro/{mine}"),
+        Some("cerro-secret"),
+        json!({"action": "accept"}),
+    )
+    .await;
+    f.call(
+        "POST",
+        &format!("/api/community/challenges/hill/{sprint}"),
+        Some("hill-secret"),
+        json!({"action": "accept"}),
+    )
+    .await;
+    let early = f
+        .call(
+            "POST",
+            "/api/community/challenges/hill",
+            Some("hill-secret"),
+            goal(
+                "Weekend reviews",
+                "reviews",
+                false,
+                40,
+                &["cerro"],
+                "example-request-3",
+            ),
+        )
+        .await;
+    let early = ids(&early).into_iter().max().unwrap();
+    f.call(
+        "POST",
+        &format!("/api/community/challenges/hill/{early}"),
+        Some("hill-secret"),
+        json!({"action": "cancel"}),
+    )
+    .await;
+    let invited = f
+        .call(
+            "POST",
+            "/api/community/challenges/friend",
+            Some("friend-secret"),
+            goal(
+                "Fifty reviews each",
+                "reviews",
+                false,
+                50,
+                &["hill"],
+                "example-request-4",
+            ),
+        )
+        .await;
+    let invited = ids(&invited).into_iter().max().unwrap();
+    crate::app::fix_now_ms(Some(NOW_MS));
+    examples.push((
+        "challenges",
+        f.call(
+            "GET",
+            "/api/community/challenges/hill",
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+    examples.push((
+        "challenge_action",
+        f.call(
+            "POST",
+            &format!("/api/community/challenges/hill/{invited}"),
+            Some("hill-secret"),
+            json!({"action": "accept"}),
+        )
+        .await,
+    ));
+
     // After the inbox example, whose row ids would otherwise shift.
     examples.push((
         "deck_share",
