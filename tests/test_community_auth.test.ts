@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {test, before, after} from 'node:test';
 import type {TestContext} from 'node:test';
 import type {Browser, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 const html = built('community');
 const origin = 'http://ankiquest.test';
@@ -19,9 +19,7 @@ const saved: Session = { user: 'cerro', token: 'saved-token' };
 const tokenOwners: Record<string, string> = { 'Bearer saved-token': 'cerro', 'Bearer hill-token': 'hill' };
 let browser: Browser | undefined;
 before(async () => {
-  browser = await chromium.launch({ headless: true,
-    ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : process.platform === 'win32' ? { channel: 'msedge' } : {}),
-  });
+  browser = await launch();
 });
 after(async () => browser?.close());
 

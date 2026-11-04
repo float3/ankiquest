@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Browser, BrowserContext, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 interface Person {user: string; display: string}
 interface Group {id: number; name: string; owner: boolean; invite: string | null; members: Person[]}
@@ -63,7 +63,7 @@ const noOverflow = async (page: Page) => {
 };
 
 test('muting a friend lists them under Muted until unmuted', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const f = await fixture(browser, 320, data => { data.social.friends = [people.bob]; });
     await f.page.goto('http://ankiquest.test/friends');
@@ -90,7 +90,7 @@ test('muting a friend lists them under Muted until unmuted', async () => {
 });
 
 test('friends, groups and invite links', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     for (const width of [320, 1440]) {
       const f = await fixture(browser, width);
@@ -139,7 +139,7 @@ test('friends, groups and invite links', async () => {
 });
 
 test('the leaderboard and records follow the chosen scope', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const f = await fixture(browser);
     await f.page.goto('http://ankiquest.test/week');

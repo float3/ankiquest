@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import {test,before,after} from 'node:test';
 import type {TestContext} from 'node:test';
 import type {Browser} from 'playwright';
-import {chromium,fulfillAsset,page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 const origin='http://ankiquest.test';
 interface Member {user:string;display:string;status:string;progress:number}
 interface Goal {id:number;title:string;weekly:boolean;start_when_ready?:boolean;started:boolean;kind:string;cooperative:boolean;creator:string;start_at:number;end_at:number;target:number;status:string;progress:number;members:Member[]}
 interface Request {path:string;auth:string|undefined;body:{action?:string;start_when_ready?:boolean}}
 let browser: Browser;
-before(async()=>{browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:process.platform==='win32'?{channel:'msedge'}:{})});});
+before(async()=>{browser=await launch();});
 after(async()=>browser?.close());
 async function fixture(t: TestContext,{language='en-US',suggested=true}={}) {
   const context=await browser.newContext({viewport:{width:390,height:844},locale:language});t.after(()=>context.close());

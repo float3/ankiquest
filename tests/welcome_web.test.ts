@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Browser} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 async function visit(browser: Browser, access: Record<string, unknown>) {
   const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 850}});
@@ -36,7 +36,7 @@ async function visit(browser: Browser, access: Record<string, unknown>) {
 }
 
 test('newcomers see what AnkiQuest is and how to start; members and private communities do not', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const newcomer = await visit(browser, {private_site: false, authenticated: false, registration: true, member: null});
     assert.deepEqual(newcomer, {welcome: 1, signIn: true, signUp: '/login?signup=1', errors: []});

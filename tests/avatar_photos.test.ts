@@ -2,7 +2,7 @@
 // Optional PLAYWRIGHT_MODULE and PLAYWRIGHT_CHANNEL work as in avatar_layout.test.ts.
 // ANKIQUEST_AVATAR_WIDTH and ANKIQUEST_AVATAR_THEME select a viewport/theme (390/light by default).
 import assert from 'node:assert/strict';
-import {chromium, fulfillAsset} from './support/web.ts';
+import {fulfillAsset, launch} from './support/web.ts';
 
 // Test-only page globals.
 declare global {
@@ -14,7 +14,7 @@ interface Gate { started(): void; reached: Promise<void>; released: Promise<void
 interface Recorded { user: string; method: string; headers: Record<string, string>; body: Buffer }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
+  const browser = await launch();
   const checks: string[] = [], requests: Recorded[] = [], errors: string[] = [];
   const metadata: Record<string, string> = Object.create(null), broken = new Set<string>();
   let image: Buffer, imageRequests = 0, pauseWrite: Gate | null = null, pauseMetadata: Gate | null = null, pauseStatus: Gate | null = null, cookieUser: string | null = null;

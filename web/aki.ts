@@ -27,8 +27,7 @@ import {escape} from "./common";
     if (profile?.streak_state === "studied" && (profile?.today?.reviews ?? 0) > 0) return "streak";
     return "review";
   }
-  const messages: Record<Mood | "welcome", string> = {
-    welcome: "A small step starts with one card.",
+  const messages: Record<Mood, string> = {
     review: "A small step starts with one card.",
     celebrate: "Your daily quests are complete. Look at you go!",
     streak: "You showed up today. That is progress worth keeping.",
@@ -63,7 +62,7 @@ import {escape} from "./common";
       if (epoch === identityEpoch) setChoice(saved.companion);
     } catch (_) { /* Keep the last visible choice while offline. */ }
   }
-  window.AnkiQuestAki = {image, mood, profile, decorate, setChoice, choice:()=>choice};
+  window.AnkiQuestAki = {image, profile, decorate, setChoice, choice:()=>choice};
   addEventListener("ankiquest:identity", event => loadChoice(event.detail?.user));
   addEventListener("ankiquest:locked", () => loadChoice(null));
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && identity) loadChoice(identity); });

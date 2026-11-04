@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {addSite, chromium, open, page as built, prefix, root, script} from './support/web.ts';
+import {addSite, launch, open, page as built, prefix, root, script} from './support/web.ts';
 const html = built('index');
 const styles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
 const renderer = prefix('pages/index', 'async function render(');
@@ -15,7 +15,7 @@ const evidence = process.env.ANKIQUEST_AVATAR_EVIDENCE;
 if (evidence) fs.mkdirSync(evidence, { recursive: true });
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
+  const browser = await launch();
   const results: object[] = [], failures: string[] = [];
   try {
     for (const width of [320, 390, 1440]) for (const colorScheme of ['light', 'dark'] as const) for (const locale of ['en-US','es-ES']) {

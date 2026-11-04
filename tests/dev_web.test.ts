@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Browser} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 const DAY = 86_400_000, TODAY = Math.floor(Date.UTC(2026, 9, 30) / DAY);
 const stats = {
@@ -66,7 +66,7 @@ async function visit(browser: Browser, dev: boolean, width = 390) {
 }
 
 test('devs see totals and send announcements to chosen groups; others are told no', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const dev = await visit(browser, true);
     assert.equal(dev.link, true);

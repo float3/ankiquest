@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Browser} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 async function login(browser: Browser, oauth: string[] | undefined) {
   const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 900}});
@@ -71,7 +71,7 @@ async function settings(browser: Browser, confirmedUntil: number | null = null) 
 }
 
 test('sign-in buttons appear only for configured providers', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const configured = await login(browser, ['github', 'gitlab', 'unknown']);
     assert.equal(configured.shown, true);
@@ -90,7 +90,7 @@ test('sign-in buttons appear only for configured providers', async () => {
 });
 
 test('a passwordless account that signed in again can link, set a password and delete', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const page = await settings(browser, Date.now() + 600_000);
     assert.equal(page.link, '/auth/oauth/github?link=1');
@@ -105,7 +105,7 @@ test('a passwordless account that signed in again can link, set a password and d
 });
 
 test('settings link providers, keep the last sign-in and make device tokens', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const page = await settings(browser);
     assert.deepEqual(page.rows, ['GitHub Link', 'GitLab Unlink']);
@@ -185,7 +185,7 @@ async function passwordAndDevices(browser: Browser) {
 }
 
 test('settings change the password and sign devices out', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   try {
     const page = await passwordAndDevices(browser);
     assert.equal(page.rows.length, 3);

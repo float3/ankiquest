@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {Browser, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 const now = Date.now();
 const token = 'test-owner-token';
 const initial = () => ({
@@ -59,7 +59,7 @@ async function fixture(browser: Browser, options: {member?:boolean,locale?:strin
 }
 async function noOverflow(page: Page,label: string){const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(size.scroll<=size.width,`${label}: ${JSON.stringify(size)}`);}
 (async()=>{
-  const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'});
+  const browser=await launch();
   const screenshots=process.env.ANKIQUEST_PERSONAL_QA_DIR;
   if(screenshots)fs.mkdirSync(screenshots,{recursive:true});
   let checks=0;

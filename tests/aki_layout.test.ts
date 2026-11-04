@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {Route} from 'playwright';
-import {addSite, chromium, fulfillAsset, page as built, prefix, root, script} from './support/web.ts';
+import {addSite, fulfillAsset, launch, page as built, prefix, root, script} from './support/web.ts';
 const html = built('index');
 const styles = fs.readFileSync(path.join(root, 'static/site.css'), 'utf8') + '\n' + [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(m => m[1]).join('\n');
 const renderer = prefix('pages/index', 'async function render(');
@@ -21,7 +21,7 @@ async function assets(route: Route) {
   else await route.abort();
 }
 async function main() {
-  const browser = await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
+  const browser = await launch();
   try {
     for (const width of [320,390,1440]) for (const colorScheme of ['light','dark'] as const) for (const locale of ['en-US','es-ES']) {
       const page = await browser.newPage({viewport:{width,height:1100},colorScheme,locale});
