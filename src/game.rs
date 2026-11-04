@@ -7,6 +7,8 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub(crate) const SESSION_GAP_MS: i64 = 300_000;
+/// Milliseconds in an hour.
+pub const HOUR_MS: i64 = 3_600_000;
 /// Milliseconds in a UTC day.
 pub const DAY_MS: i64 = 86_400_000;
 const MATURE_IVL: i64 = 21;
@@ -206,7 +208,7 @@ impl Clock {
         self.local_secs(ms).rem_euclid(86400) / 3600
     }
 
-    fn day_start_ms(&self, day: i64) -> i64 {
+    pub(crate) fn day_start_ms(&self, day: i64) -> i64 {
         (day * 86400 + self.rollover_hour * 3600 + self.offset_west_min * 60) * 1000
     }
 }

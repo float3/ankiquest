@@ -272,11 +272,8 @@ fn clean_name(name: &str) -> Option<String> {
     .then(|| name.to_string())
 }
 
-#[derive(Debug, Serialize)]
-pub struct Person {
-    pub user: String,
-    pub display: String,
-}
+/// A player as the community page shows them.
+pub type Person = crate::decks::Recipient;
 
 #[derive(Debug, Serialize)]
 pub struct Group {
@@ -299,13 +296,6 @@ pub struct Overview {
     pub muted: Vec<Person>,
 }
 
-fn person(app: &App, user: String) -> Person {
-    Person {
-        display: app.display(&user),
-        user,
-    }
-}
-
 fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overview> {
     let rows: Vec<(i64, String, String, bool)> = conn
         .prepare(
@@ -316,11 +306,7 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
         .collect::<Result<_, _>>()?;
     let mut groups = Vec::new();
     for (id, name, invite, owner) in rows {
-        let mut members: Vec<Person> = group_members(conn, id)?
-            .into_iter()
-            .map(|u| person(app, u))
-            .collect();
-        members.sort_by(|a, b| a.display.cmp(&b.display));
+        let members = app.sorted_recipients(group_members(conn, id)?);
         groups.push(Group {
             id,
             name,
@@ -330,32 +316,21 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
         });
     }
     let requests = |incoming: bool| -> rusqlite::Result<Vec<Person>> {
-        let mut people: Vec<Person> = conn
+        let people = conn
             .prepare(
                 "select case when a = ?1 then b else a end from friendships
                  where accepted = 0 and (a = ?1 or b = ?1) and (requested_by = ?1) = ?2",
             )?
             .query_map(params![user, !incoming], |r| r.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|u| person(app, u))
-            .collect();
-        people.sort_by(|a, b| a.display.cmp(&b.display));
-        Ok(people)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(app.sorted_recipients(people))
     };
-    let mut friend_list: Vec<Person> = friends(conn, user)?
-        .into_iter()
-        .map(|u| person(app, u))
-        .collect();
-    friend_list.sort_by(|a, b| a.display.cmp(&b.display));
-    let mut muted: Vec<Person> = conn
-        .prepare("select sender from muted_people where recipient = ?1")?
-        .query_map([user], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .map(|u| person(app, u))
-        .collect();
-    muted.sort_by(|a, b| a.display.cmp(&b.display).then(a.user.cmp(&b.user)));
+    let friend_list = app.sorted_recipients(friends(conn, user)?);
+    let muted = app.sorted_recipients(
+        conn.prepare("select sender from muted_people where recipient = ?1")?
+            .query_map([user], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?,
+    );
     Ok(Overview {
         groups,
         friends: friend_list,

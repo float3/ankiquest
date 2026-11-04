@@ -2,6 +2,7 @@
 //! Configured users keep working; accounts only exist when registration is on.
 
 use crate::access::Credential;
+use crate::game::HOUR_MS;
 use crate::web_util::{bearer, hex, normalize_user, random_bytes};
 use crate::web_util::{refuse, reply};
 use crate::{Error, app::App, app::now_ms};
@@ -24,7 +25,6 @@ pub const MAX_PASSWORD: usize = 256;
 const MAX_DISPLAY: usize = 40;
 const MAX_DEVICE: usize = 60;
 const SIGNUPS_PER_HOUR: usize = 5;
-const HOUR_MS: i64 = 3_600_000;
 const RESERVED: &[&str] = &[
     "admin",
     "administrator",

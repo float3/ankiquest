@@ -5,13 +5,11 @@
 //! the reader's language only when it is sent, so nothing has to read English back.
 
 use crate::decks::Announcement;
-use crate::game::{Conquest, Profile};
+use crate::game::{Conquest, HOUR_MS, Profile};
 use crate::i18n;
 use serde::{Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::fmt;
-
-const HOUR_MS: i64 = 3_600_000;
 
 /// A text for a player, sent as a plain string in `language`, English unless localized.
 #[derive(Clone, Debug, PartialEq, Eq)]
