@@ -141,11 +141,6 @@ class NotifyTests(unittest.TestCase):
         told = {"feedback": {"headlines": ["<b>Level 5!</b>"], "status": "<i>+10 XP</i>"}}
         self.assertEqual(("&lt;b&gt;Level 5!&lt;/b&gt;<br>&lt;i&gt;+10 XP&lt;/i&gt;", True), notify.feedback(told, False))
 
-    def test_a_message_can_be_answered_until_it_has_been(self):
-        self.assertTrue(notify.answerable({"sender": "cerro"}))
-        self.assertFalse(notify.answerable({"sender": "cerro", "replied": True}))
-        self.assertFalse(notify.answerable({"sender": ""}))
-
 
 class WebTests(unittest.TestCase):
     def test_webview_receives_the_selected_anki_language(self):

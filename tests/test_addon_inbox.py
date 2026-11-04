@@ -86,6 +86,13 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(["cheer", "open", "read"], inbox.actions(dict(entry, replied=True)))
         self.assertEqual(["reply", "cheer", "open"], inbox.actions(dict(entry, read_at=1790000000)))
 
+    def test_a_message_can_be_answered_until_it_has_been(self):
+        self.assertTrue(inbox.answerable({"sender": "cerro"}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "replied": True}))
+        self.assertFalse(inbox.answerable({"sender": ""}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "challenge_id": 8}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "route": "/community#challenge-8"}))
+
     def test_challenge_rows_are_answered_on_the_website(self):
         invite = {"id": 5, "sender": "alice", "kind": "challenge_invite", "challenge_id": 8, "route": "/community#challenge-8"}
         self.assertEqual(["open", "read"], inbox.actions(invite))

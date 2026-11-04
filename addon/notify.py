@@ -80,7 +80,3 @@ def fresh_messages(inbox, cursor, now_s):
         if entry.get("created_at", 0) >= now_s - FRESH_SECONDS:
             fresh.append(entry)
     return fresh, cursor
-
-
-def answerable(entry):
-    return bool(entry.get("sender")) and not entry.get("replied")

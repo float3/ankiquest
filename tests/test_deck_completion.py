@@ -358,6 +358,20 @@ class RefreshTests(unittest.TestCase):
                            "created_at": int(time.time()), "sender": "hill", "replied": False})
         self.addon.poll()
         self.assertIn("Good job!", self.addon.tooltip.call_args.args[0])
+        self.assertIn("to reply", self.addon.tooltip.call_args.args[0])
+
+    def test_challenge_rows_are_not_counted_or_offered_as_replies(self):
+        self.with_board()
+        self.addon.poll(quiet=True)
+        self.inbox.append({"id": 5, "title": "⚔️ Hill", "body": "Hill challenged you.",
+                           "created_at": int(time.time()), "sender": "hill", "replied": False,
+                           "route": "/community#challenge-3"})
+        self.addon.poll()
+        self.assertIn("Hill challenged you.", self.addon.tooltip.call_args.args[0])
+        self.assertNotIn("to reply", self.addon.tooltip.call_args.args[0])
+        content = SimpleNamespace(stats="")
+        self.addon.on_deck_browser(None, content)
+        self.assertIn("📬 1 new", content.stats)
 
     def test_deck_list_links_open_the_website_inside_anki(self):
         self.assertEqual((True, None), self.addon.on_js_message(False, "ankiquest:web:inbox", None))
