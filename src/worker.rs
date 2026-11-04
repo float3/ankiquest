@@ -4,7 +4,7 @@ use crate::app::{App, mark_events_seen, now_ms};
 use crate::competition::refresh_community;
 use crate::config::Config;
 use crate::game::{Clock, Profile};
-use crate::store::{Error, Store};
+use crate::store::{self, Error, Store};
 use crate::{
     admin, challenges, competition, freezes, game, goals, i18n, notifications, privacy, reminders,
     shares, social, wins,
@@ -146,16 +146,29 @@ pub(crate) fn sync_users(base: &Path) -> Result<Vec<String>, Error> {
     }
 }
 
-pub(crate) fn import(app: &App, store: &mut Store, base: &Path) -> Result<(), Error> {
+/// Imports run without the store lock but copy into the same scratch files, so one at a time.
+static IMPORTING: Mutex<()> = Mutex::new(());
+
+/// Imports every changed collection from the sync server. Copying and reading a collection
+/// is the slow part, so the store is locked only to look up what the last import saw and
+/// to record the result.
+pub(crate) fn import(app: &App, base: &Path) -> Result<(), Error> {
+    let _importing = IMPORTING.lock().unwrap();
+    let scratch = app.store.lock().unwrap().scratch().to_path_buf();
     let mut errors = Vec::new();
     for user in sync_users(base)? {
         let result = (|| -> Result<(), Error> {
-            let first_import = !store.is_known(&user)?;
-            if store.ingest(base, &user)? {
-                app.reload_player(store, &user)?;
+            let (first_import, last) = {
+                let store = app.store.lock().unwrap();
+                (!store.is_known(&user)?, store.sync_signature(&user)?)
+            };
+            if let Some(synced) = store::read_sync(&scratch, base, &user, last.as_ref())? {
+                let mut store = app.store.lock().unwrap();
+                store.record_sync(&user, &synced)?;
+                app.reload_player(&store, &user)?;
             }
             if first_import && let Some(profile) = app.profile(&user) {
-                mark_events_seen(store, &user, &profile)?;
+                mark_events_seen(&app.store.lock().unwrap(), &user, &profile)?;
             }
             Ok(())
         })();
@@ -193,45 +206,48 @@ fn streak_warning_body(profile: &Profile) -> String {
 
 pub(crate) fn tick(app: &App) -> Result<(), Error> {
     let now = now_ms();
-    let participants =
-        {
-            let mut store = app.store.lock().unwrap();
-            let settings = app.config.settings().effective(&store.conn)?;
-            if settings.review_weighting != game::review_weighting() {
-                game::set_review_weighting(settings.review_weighting);
-                log_info!("review weighting is now {:?}", settings.review_weighting);
+    {
+        let store = app.store.lock().unwrap();
+        let settings = app.config.settings().effective(&store.conn)?;
+        if settings.review_weighting != game::review_weighting() {
+            game::set_review_weighting(settings.review_weighting);
+            log_info!("review weighting is now {:?}", settings.review_weighting);
+        }
+        game::set_streak_rule(admin::streak_rule(
+            &store.conn,
+            settings.streak_minutes,
+            now,
+        )?);
+        admin::flush(&store.conn, now, settings.log_retention_days)?;
+        privacy::carry_out_removals(app, &store.conn)?;
+        for user in freezes::grant_reloads(&store.conn)? {
+            if app.players.read().unwrap().contains_key(&user) {
+                app.reload_player(&store, &user)?;
             }
-            game::set_streak_rule(admin::streak_rule(
-                &store.conn,
-                settings.streak_minutes,
-                now,
-            )?);
-            admin::flush(&store.conn, now, settings.log_retention_days)?;
-            privacy::carry_out_removals(app, &store.conn)?;
-            for user in freezes::grant_reloads(&store.conn)? {
-                if app.players.read().unwrap().contains_key(&user) {
-                    app.reload_player(&store, &user)?;
-                }
-                freezes::grant_reloaded(&store.conn, &user)?;
-            }
-            let import_complete = app.config.sync_base.as_ref().is_none_or(|base| {
-                match import(app, &mut store, base) {
-                    Ok(()) => true,
-                    Err(error) => {
-                        log_error!(
-                            "competition refresh deferred until sync import succeeds: {error}"
-                        );
-                        false
-                    }
+            freezes::grant_reloaded(&store.conn, &user)?;
+        }
+    }
+    // Copying collections is slow, so the import takes the store only for each player's result.
+    let import_complete =
+        app.config
+            .sync_base
+            .as_ref()
+            .is_none_or(|base| match import(app, base) {
+                Ok(()) => true,
+                Err(error) => {
+                    log_error!("competition refresh deferred until sync import succeeds: {error}");
+                    false
                 }
             });
-            let participants = app.participants();
-            if import_complete {
-                refresh_community(app, &mut store, &app.legacy_participants(), now)?;
-            }
-            challenges::refresh(&mut store, &participants, now)?;
-            participants
-        };
+    let participants = {
+        let mut store = app.store.lock().unwrap();
+        let participants = app.participants();
+        if import_complete {
+            refresh_community(app, &mut store, &app.legacy_participants(), now)?;
+        }
+        challenges::refresh(&mut store, &participants, now)?;
+        participants
+    };
     // Standings are the expensive part, so they are worked out without holding the database.
     let users: Vec<String> = app.players.read().unwrap().keys().cloned().collect();
     let ranking: HashMap<&str, Arc<Profile>> = users

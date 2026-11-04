@@ -91,6 +91,10 @@ const NOT_EXPORTED: &[(&str, &str)] = &[
         "a queue the server empties within a minute",
     ),
     ("win_auto_queue", "a queue the server empties within a tick"),
+    (
+        "sync_signatures",
+        "file times and sizes of the sync server's copy, to skip unchanged imports",
+    ),
 ];
 
 /// Rows that belong to the player alone: (table, condition on ?1).
@@ -101,6 +105,7 @@ const OWNED: &[(&str, &str)] = &[
     ("clocks", "user = ?1"),
     ("clock_history", "user = ?1"),
     ("review_syncs", "user = ?1"),
+    ("sync_signatures", "user = ?1"),
     (
         "seen",
         "user = ?1 or key glob 'friend-nudge:*:' || ?1 or key glob 'conquest:' || ?1 || ':*'",
