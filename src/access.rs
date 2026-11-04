@@ -505,6 +505,7 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
         *request.method(),
         Method::GET | Method::HEAD | Method::OPTIONS
     ) && path != crate::oauth::SIGNUP_PATH
+        && !crate::oauth::confirm_path(path)
         && app.access.authenticated(request.headers(), now_ms())
         && !bearer(request.headers()).is_some_and(|given| member_token(&app, given))
         && (!csrf(request.headers()) || !same_origin(&app, request.headers()))
@@ -529,6 +530,15 @@ pub(crate) async fn gate(State(app): State<Arc<App>>, request: Request, next: Ne
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // Nothing frames the site: the apps and the add-on open it as a top-level page. Refusing
+    // frames keeps a confirmation button, such as an app sign-in's, from being clicked unseen.
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors 'none'"),
+        );
+    }
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     response
 }
 
