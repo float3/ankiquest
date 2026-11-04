@@ -14,7 +14,7 @@ backgrounds and are approximately 1280 × 1280 pixels.
 - streak protection: a cozy freeze illustration in its settings dialog.
 - desktop add-on: a locally served deck-list image and settings dialog icon.
 
-the seven assets in `static/aki` are embedded in the server binary. only their
+the seven assets in the table below are embedded in the server binary. only their
 exact public paths bypass sign-in; member APIs and unknown paths remain
 protected. the desktop face is packaged locally in `addon/aki_face.png` so
 branding works offline.
@@ -32,6 +32,35 @@ the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi
 | `freeze.png` | Confirmed protection; contextual settings illustration |
 | `winner.png` | Records, trophies, winners and tamed leeches |
 | `face.png` | Compact branding and installed app icon |
+
+### moment art (#88)
+
+these PNGs (1254 × 1254, transparent) cover moments that the seven poses above
+only approximated. they are source art for the Android app's `drawable-nodpi`
+names in brackets, written by the export tool. the website does not serve them
+yet: they are not embedded in the server binary and are not public paths.
+
+| Asset | Android name | Use |
+| --- | --- | --- |
+| `icon_happy.png` | `aki_icon_happy` | App icon mood: today counts |
+| `icon_worried.png` | `aki_icon_worried` | App icon mood: streak ends soon, today doesn't count yet |
+| `icon_frozen.png` | `aki_icon_frozen` | App icon mood: a freeze protects the streak |
+| `icon_sleepy.png` | `aki_icon_sleepy` | App icon mood: no streak running |
+| `streak_hot.png` | `aki_streak_hot` | Streak of 7+ days |
+| `streak_blazing.png` | `aki_streak_blazing` | Streak of 30+ days |
+| `streak_legend.png` | `aki_streak_legend` | Streak of 100+ days |
+| `streak_milestone.png` | `aki_streak_milestone` | A streak milestone reached |
+| `freeze_used.png` | `aki_freeze_used` | A freeze just saved the streak |
+| `comeback.png` | `aki_comeback` | Starting again after a lost streak |
+| `minimum.png` | `aki_minimum` | Daily minimum reached; today counts |
+| `goal.png` | `aki_goal` | Daily goal reached |
+| `achievement.png` | `aki_achievement` | An achievement unlocked |
+| `deck_conquered.png` | `aki_deck_conquered` | A deck conquered |
+| `sleeping.png` | `aki_sleeping` | Rest day, notifications off |
+| `../duo/friends.png` | `duo_friends` | Aki and Ankilope together: sharing, challenges, nudges |
+
+the prompts for the moment art were not recorded, so `aki-prompts.json` has no
+entries for them yet.
 
 Aki encourages small steps and celebrates confirmed progress. avoid guilt,
 threats, fake rewards or implying a streak is protected merely because a user

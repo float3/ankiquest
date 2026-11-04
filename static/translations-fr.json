@@ -1341,5 +1341,11 @@
   "You signed in again, so for a few minutes you can delete your account here.": "Tu viens de te reconnecter : pendant quelques minutes, tu peux supprimer ton compte ici.",
   "Sign in with your provider again first.": "Reconnecte-toi d’abord avec ton fournisseur.",
   "That is not the account you linked. Sign in with the one linked to this player.": "Ce n’est pas le compte que tu as associé. Connecte-toi avec celui associé à ce joueur.",
+  "Mute": "Masquer",
+  "Unmute": "Ne plus masquer",
+  "Muted": "Masqués",
+  "Mute {0}? You won't hear from them. They are not told.": "Masquer {0} ? Tu ne recevras plus rien de cette personne. Elle n’est pas prévenue.",
+  "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Aucune invitation à un défi, aucun encouragement, aucune carte conquise, aucune nouvelle de paquet, aucun partage ni bravo de ces personnes. Elles ne sont pas prévenues.",
+  "You muted as many people as you can. Unmute someone first.": "Tu as masqué le nombre maximal de personnes. Arrête d’abord d’en masquer une.",
   "Last used {0}": "Dernière utilisation le {0}"
 }
