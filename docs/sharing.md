@@ -20,6 +20,7 @@ and link. All clients (Android, desktop add-on, web) use this API. None of them 
 | `challenge` | a challenge is completed | `challenge:{id}` | `ask` |
 
 Deck completions keep their own per-deck recipients (`/api/decks`) and are not part of this table.
+A client can also ask right after a deck is finished which friends to tell (see "Telling friends about a finished deck").
 
 Policies:
 - `private`: only the player sees it.
@@ -169,6 +170,20 @@ each win reaches each friend once.
 
 `DELETE /api/wins/{user}/{id}/link` revokes the link (204, or 404 for someone else's win). The page and the image then answer 404.
 
+### Conquered cards in the player's words
+
+A `conquered` win reads as the player's own news once it leaves them: on its card, its page, the
+invitation text and friends' `share` rows. The player's own list keeps the stored text.
+
+- title: "I just conquered a card", or "I just tamed a leech"
+- body: "I forgot it {n} times, and now it stays with me for weeks."
+
+The card itself is never shared unless its owner adds a label for that conquest with
+`POST /api/conquests/{user}/{at}/label` (`at` is the number in the win's key `conquered:{at}`).
+The body then names it: "I forgot “{label}” {n} times, and now it stays with me for weeks."
+`DELETE` on the same path takes it off the card and page again; friends already told keep the row
+they got. Clients offer the label per share, off by default, and show the player the exact text first.
+
 ## Automatic sharing and digests
 
 When a win's policy is `auto`, the server sends it to friends in the same tick in which it is created.
@@ -211,7 +226,8 @@ Card contents:
   - Ankilope has no `streak`, `winner` or `freeze` pose and uses `celebrate`. The new art from #88
     replaces these poses later.
 - title, body
-- up to three stat chips from `stats`
+- up to three stat chips from `stats`: streak, level, and the day's cards and minutes, which say
+  "today". A `conquered` card leaves the day's totals off, since it is about one card
 - the player's display name with their avatar
 - the date in the player's language
 - the server's host in the footer
@@ -221,6 +237,20 @@ Colours are the app's light theme. Text is in the player's language.
 `GET /w/{token}` is a small public HTML page with the card and an invitation to the server. Its
 `og:title`, `og:description`, `og:image` (wide), `twitter:card=summary_large_image` tags make pasted
 links preview. Only wins that have a link are public. Tokens are random and unguessable.
+
+## Telling friends about a finished deck
+
+Per-deck recipients announce a deck automatically. For other decks the client can ask the player
+right after they finish one which friends to tell (players can turn the question off):
+
+`POST /api/decks/{user}/share { "id": "123", "name": "Spanish", "recipients": ["cerro"] }` (owner
+only) sends each recipient the usual `completion` row, "{display} has finished their {name}
+studies for today.", and answers `{ "recipients": n }`, those who got it now. Recipients must be
+among `recipients` of `GET /api/decks/{user}` (the player's circle, without people who
+unsubscribed), at most 100 and without repeats; otherwise it is 400. Each recipient hears about a
+deck once per Anki day; recipients who paused deck alerts or unsubscribed from the player are
+skipped. The name comes from this request only and is not stored with the player's decks. The
+server cannot check that the deck is finished, so this is the player's word, like a message.
 
 ## Privacy
 
