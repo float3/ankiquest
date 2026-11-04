@@ -1,0 +1,39 @@
+name: Issue Labels
+
+# Marks new issues that arrive without a label as "needs triage", and drops
+# that label once the issue gets another label or is closed.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 3
+          script: |
+            const LABEL = 'needs triage';
+            const { owner, repo } = context.repo;
+            const issue = context.payload.issue;
+            const issue_number = issue.number;
+            const names = issue.labels.map((label) => label.name);
+            const has = names.includes(LABEL);
+            const untriaged = issue.state === 'open' && names.every((name) => name === LABEL);
+
+            if (untriaged && !has && ['opened', 'reopened'].includes(context.payload.action)) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [LABEL] });
+            } else if (!untriaged && has) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: LABEL });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }

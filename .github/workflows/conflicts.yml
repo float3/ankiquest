@@ -1,0 +1,67 @@
+name: Conflict Scan
+
+# Adds the "conflicts" label to open pull requests that no longer merge
+# cleanly into their base branch, and removes it once they do again. Only
+# labels, never comments. Never checks out or runs pull request code.
+
+on:
+  push:
+    branches:
+      - master
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conflict-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    if: github.repository == 'float3/ankiquest'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 3
+          script: |
+            const LABEL = 'conflicts';
+            const { owner, repo } = context.repo;
+            const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+
+            for (const { number } of pulls) {
+              // `mergeable` is null while GitHub is still computing it.
+              let pr;
+              for (let attempt = 0; attempt < 10; attempt++) {
+                ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number }));
+                if (pr.mergeable !== null) break;
+                await wait(2000);
+              }
+
+              const labelled = pr.labels.some((label) => label.name === LABEL);
+              if (pr.mergeable === false && !labelled) {
+                core.info(`#${number}: has conflicts, adding label`);
+                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [LABEL] });
+              } else if (pr.mergeable === true && labelled) {
+                core.info(`#${number}: merges cleanly, removing label`);
+                try {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name: LABEL });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+              } else if (pr.mergeable === null) {
+                core.warning(`#${number}: mergeability still unknown, skipped`);
+              }
+            }

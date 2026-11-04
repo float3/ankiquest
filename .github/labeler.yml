@@ -1,0 +1,43 @@
+# Area labels for pull requests, applied by .github/workflows/labels.yml
+# (actions/labeler). A label is removed again when a later push no longer
+# touches its paths; labels not listed here are never touched.
+
+server:
+  - changed-files:
+      - any-glob-to-any-file:
+          - src/**
+          - crates/**
+          - build.rs
+          - Cargo.toml
+          - Cargo.lock
+
+web:
+  - changed-files:
+      - any-glob-to-any-file:
+          - web/**
+          - static/**
+          - package.json
+          - package-lock.json
+
+addon:
+  - changed-files:
+      - any-glob-to-any-file:
+          - addon/**
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - tests/**
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "**/*.md"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - flake.nix
+          - flake.lock
