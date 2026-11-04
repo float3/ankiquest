@@ -47,7 +47,7 @@ the leaderboard week resets at one instant for everyone: Monday at `week_rollove
 
 this holds for players west of the week's time zone. a player east of it has a Monday that begins before the reset, so that Monday counts toward the week before. pick the easternmost time zone your players live in, with the earliest rollover hour any of them uses.
 
-the live board compares one week: from the reset on it shows the new week, and the closing week's last hours, still being studied in the west, show in the community archive as pending until the 24-hour allowance is over. `GET /api/week` answers `starts_at` and `ends_at` (ms) and the `timezone`, so a client can say that a week has just started. weekly-closing reminders and recaps use each player's own close, the end of their last day of the week.
+the live board compares one week: from the reset on it shows the new week, and the closing week's last hours, still being studied in the west, show in the community archive as pending until the 24-hour allowance is over. `GET /api/week` answers `starts_at` and `ends_at` (ms) and the `timezone`, so a client can say that a week has just started. weekly-closing reminders and recaps use each player's own close, the end of their last day of the week. until that close, a player whose current day began before the reset sees the closing week as still counting, with its XP and when it closes for them, on the website's Today page, profile and board, in the add-on and in the app (`closing_week` on the profile, `closing_xp` on board rows).
 
 ## what the historical record means
 

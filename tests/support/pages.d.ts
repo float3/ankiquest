@@ -8,6 +8,7 @@ declare global {
   // web/pages/index.ts
   var app: HTMLElement;
   function board(rows: object[], me: string): string;
+  function closingWeek(closing: {xp: number; ends_at: number} | undefined): string;
   function view(profile: object, rows: object[], canEditAvatar?: boolean): string;
   // web/pages/community.ts
   var state: {data: unknown};

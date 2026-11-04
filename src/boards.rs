@@ -33,6 +33,10 @@ pub(crate) struct Standing {
     today_minutes: u64,
     /// Review minutes today needs for the streak; 0 when any review counts.
     streak_minutes: u64,
+    /// XP still counting toward the week that just reset, while this player's current day
+    /// began before the reset; see [`game::ClosingWeek`]. Left out otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closing_xp: Option<u64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -89,6 +93,7 @@ pub(crate) fn standings(
             today_reviews: p.today.reviews,
             today_minutes: p.today.minutes,
             streak_minutes: p.today.streak_minutes,
+            closing_xp: p.closing_week.map(|closing| closing.xp),
         })
         .collect();
     standings.sort_by(|a, b| {

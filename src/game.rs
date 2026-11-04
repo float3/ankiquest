@@ -1152,6 +1152,22 @@ pub struct Profile {
     /// The daily goal and today's progress, in the owner's view only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal: Option<crate::goals::GoalView>,
+    /// The week that has already reset on the board but still counts this player's current
+    /// day, present only while it does; see [`ClosingWeek`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closing_week: Option<ClosingWeek>,
+}
+
+/// The shared week resets for everyone at one instant, but an Anki day counts toward the
+/// week its start falls in. A player whose current day began before the reset (Sunday
+/// evening in California for a reset at Monday 00:00 UTC) is still adding to the closing
+/// week until that day ends, while `week_xp` already shows the new one.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClosingWeek {
+    /// XP that counts toward the closing week, today's included.
+    pub xp: u64,
+    /// When it closes for this player: the end of their current day (ms).
+    pub ends_at: i64,
 }
 
 pub fn level_need(level: u64) -> u64 {
@@ -1830,6 +1846,13 @@ pub fn compute_with_rules(
     } else {
         0
     };
+    let closing_week = (week.of(today_start) != this_week).then(|| {
+        let closing = week.of(today_start);
+        ClosingWeek {
+            xp: in_period(9, &|start| week.of(start) == closing),
+            ends_at: day_ends_at,
+        }
+    });
     let streak_state = if today_counts {
         StreakState::Studied
     } else if frozen.contains(&(today - 1)) {
@@ -1900,6 +1923,7 @@ pub fn compute_with_rules(
         events,
         history,
         goal: None,
+        closing_week,
     }
 }
 
@@ -2404,6 +2428,78 @@ mod tests {
             p.week_xp > 0,
             "their Monday started after the shared week did"
         );
+    }
+
+    #[test]
+    fn closing_week_counts_until_the_players_own_day_ends() {
+        // Production: the week resets for everyone on Monday at 00:00 UTC.
+        let week = Week {
+            tz: Tz::UTC,
+            rollover_hour: 0,
+        };
+        let utc = |d, h| {
+            Tz::UTC
+                .with_ymd_and_hms(2026, 9, d, h, 0, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let reset = utc(21, 0);
+        assert_eq!(week.start_of(reset), reset);
+        // California (UTC-8 here) with a 04:00 rollover: Sunday runs to Monday 12:00 UTC.
+        let california = Clock {
+            offset_west_min: 480,
+            rollover_hour: 4,
+        };
+        // Berlin in summer (UTC+2) with a 04:00 rollover: Sunday ends Monday 02:00 UTC.
+        let berlin = Clock {
+            offset_west_min: -120,
+            rollover_hour: 4,
+        };
+        let review = |id| Review {
+            id,
+            cid: id,
+            last_ivl: 0,
+            ivl: None,
+            time_ms: 5_000,
+            kind: 1,
+        };
+        let saturday = utc(19, 20);
+        let sunday_evening = utc(21, 5);
+
+        let reviews = [review(saturday), review(sunday_evening)];
+        let p = compute("a", "a", &reviews, &california, &week, sunday_evening);
+        assert_eq!(p.week_xp, 0, "the board has already reset");
+        let closing = p.closing_week.expect("their Sunday still counts");
+        assert_eq!(closing.ends_at, utc(21, 12));
+        assert_eq!(closing.ends_at, p.day_ends_at);
+        let before = compute("a", "a", &reviews, &california, &week, reset - 1);
+        assert_eq!(before.closing_week, None, "nothing has reset yet");
+        assert_eq!(closing.xp, before.week_xp);
+        assert!(closing.xp > 0);
+        let json = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["closing_week"]["xp"], closing.xp);
+        assert_eq!(json["closing_week"]["ends_at"], utc(21, 12));
+
+        let monday = utc(21, 12);
+        let p = compute("a", "a", &reviews, &california, &week, monday);
+        assert_eq!(p.closing_week, None, "gone once their Sunday ends");
+        assert!(
+            serde_json::to_value(&p)
+                .unwrap()
+                .get("closing_week")
+                .is_none()
+        );
+
+        // At 05:00 UTC Berlin's Monday began three hours ago, inside the new week.
+        let p = compute(
+            "b",
+            "b",
+            &[review(saturday)],
+            &berlin,
+            &week,
+            sunday_evening,
+        );
+        assert_eq!(p.closing_week, None);
     }
 
     #[test]
