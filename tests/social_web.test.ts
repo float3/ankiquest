@@ -10,14 +10,15 @@ const people = {alice: {user: 'alice', display: 'Alice'}, bob: {user: 'bob', dis
 
 function state() {
   return {
-    social: {groups: [{id: 3, name: 'Spanish club', owner: true, invite: 'abc123', members: [people.alice, people.bob]}] as Group[], friends: [] as Person[], incoming: [people.cleo], outgoing: [] as Person[], public: false},
+    social: {groups: [{id: 3, name: 'Spanish club', owner: true, invite: 'abc123', members: [people.alice, people.bob]}] as Group[], friends: [] as Person[], incoming: [people.cleo], outgoing: [] as Person[], public: false, muted: undefined as Person[] | undefined},
     writes: [] as Record<string, unknown>[],
     boards: [] as string[],
   };
 }
 
-async function fixture(browser: Browser, width = 390) {
+async function fixture(browser: Browser, width = 390, prepare = (_: ReturnType<typeof state>) => {}) {
   const data = state();
+  prepare(data);
   const context: BrowserContext = await browser.newContext({locale: 'en-US', viewport: {width, height: 850}});
   await context.route('**/*', async route => {
     const url = new URL(route.request().url()), pathname = url.pathname;
@@ -33,6 +34,8 @@ async function fixture(browser: Browser, width = 390) {
         if (body.action === 'befriend' && body.user === 'nobody') return route.fulfill({status: 404, json: {error: 'There is nobody with that username.'}});
         if (body.action === 'visibility') data.social.public = body.public as boolean;
         if (body.action === 'remove') data.social.groups[0]!.members = [people.alice];
+        if (body.action === 'mute') data.social.muted = [people.bob];
+        if (body.action === 'unmute') data.social.muted = [];
         if (body.action === 'join') data.social.groups.push({id: 4, name: 'Joined', owner: false, invite: null, members: [people.alice]});
       }
       return route.fulfill({json: data.social});
@@ -58,6 +61,33 @@ const noOverflow = async (page: Page) => {
   const size = await page.evaluate(() => ({width: innerWidth, scroll: document.documentElement.scrollWidth}));
   assert(size.scroll <= size.width, JSON.stringify(size));
 };
+
+test('muting a friend lists them under Muted until unmuted', async () => {
+  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  try {
+    const f = await fixture(browser, 320, data => { data.social.friends = [people.bob]; data.social.muted = []; });
+    await f.page.goto('http://ankiquest.test/friends');
+    await f.page.getByRole('heading', {name: 'Groups', exact: true}).waitFor();
+    assert.equal(await f.page.locator('#muted-people').count(), 0);
+    const mute = f.page.locator('[data-social*="mute"]').first();
+    await mute.click();
+    assert.equal(f.data.writes.length, 0, 'muting asks first');
+    assert.equal(await f.page.locator('#social-status').textContent(), "Mute Bob? You won't hear from them. They are not told.");
+    await mute.click();
+    await f.page.locator('#muted-people').waitFor();
+    assert.deepEqual(f.data.writes.at(-1), {action: 'mute', user: 'bob'});
+    assert.match((await f.page.locator('#muted-people').textContent())!, /Bob.*Unmute/s);
+    assert.equal(await f.page.getByRole('button', {name: 'Mute', exact: true}).count(), 0, 'no one else here to mute');
+    await noOverflow(f.page);
+    await f.page.locator('#muted-people [data-social]').click();
+    await f.page.waitForFunction(() => !document.getElementById('muted-people'));
+    assert.deepEqual(f.data.writes.at(-1), {action: 'unmute', user: 'bob'});
+    assert.deepEqual(f.errors, []);
+    await f.context.close();
+  } finally {
+    await browser.close();
+  }
+});
 
 test('friends, groups and invite links', async () => {
   const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});

@@ -16,6 +16,7 @@ use std::sync::Arc;
 pub const MAX_GROUPS: i64 = 20;
 pub const MAX_MEMBERS: i64 = 200;
 pub const MAX_PENDING: i64 = 50;
+pub const MAX_MUTED: i64 = 500;
 const MAX_GROUP_NAME: usize = 40;
 
 pub fn initialize(conn: &Connection) -> Result<(), Error> {
@@ -48,9 +49,32 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
          create table if not exists visibility (
              user text primary key,
              public integer not null
+         ) without rowid;
+         create table if not exists muted_people (
+             recipient text not null,
+             sender text not null,
+             created_at integer not null,
+             primary key (recipient, sender)
          ) without rowid;",
     )?;
     Ok(())
+}
+
+/// Whether `recipient` muted `sender`: no invitations, conquests, nudges, completions, shares
+/// or cheers from them. Both are SQL expressions.
+pub(crate) fn muted_sql(recipient: &str, sender: &str) -> String {
+    format!(
+        "exists (select 1 from muted_people where recipient = {recipient} and sender = {sender})"
+    )
+}
+
+/// Whether `recipient` muted `sender`; see [`muted_sql`].
+pub(crate) fn muted(conn: &Connection, recipient: &str, sender: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        &format!("select {}", muted_sql("?1", "?2")),
+        params![recipient, sender],
+        |r| r.get(0),
+    )
 }
 
 fn pair<'a>(x: &'a str, y: &'a str) -> (&'a str, &'a str) {
@@ -271,6 +295,8 @@ pub struct Overview {
     pub incoming: Vec<Person>,
     pub outgoing: Vec<Person>,
     pub public: bool,
+    /// People this player muted, by display name.
+    pub muted: Vec<Person>,
 }
 
 fn person(app: &App, user: String) -> Person {
@@ -322,12 +348,21 @@ fn overview(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<Overvi
         .map(|u| person(app, u))
         .collect();
     friend_list.sort_by(|a, b| a.display.cmp(&b.display));
+    let mut muted: Vec<Person> = conn
+        .prepare("select sender from muted_people where recipient = ?1")?
+        .query_map([user], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|u| person(app, u))
+        .collect();
+    muted.sort_by(|a, b| a.display.cmp(&b.display).then(a.user.cmp(&b.user)));
     Ok(Overview {
         groups,
         friends: friend_list,
         incoming: requests(true)?,
         outgoing: requests(false)?,
         public: app.is_public(conn, user)?,
+        muted,
     })
 }
 
@@ -369,6 +404,8 @@ enum Change {
     Remove { group: i64, member: String },
     Befriend { user: String },
     Unfriend { user: String },
+    Mute { user: String },
+    Unmute { user: String },
     Visibility { public: bool },
 }
 
@@ -561,6 +598,44 @@ async fn change(
                     params![a, b],
                 )?;
                 prune(&app, conn, &user)?;
+                Ok(())
+            }
+            Change::Mute { user: other } => {
+                let other = normalize_user(&other);
+                if other == user || !app.is_user(&other) {
+                    return Ok(Err((
+                        StatusCode::NOT_FOUND,
+                        "There is nobody with that username.",
+                    )));
+                }
+                let count: i64 = conn.query_row(
+                    "select count(*) from muted_people where recipient = ?1",
+                    [&user],
+                    |r| r.get(0),
+                )?;
+                if count >= MAX_MUTED && !muted(conn, &user, &other)? {
+                    return Ok(Err((
+                        StatusCode::CONFLICT,
+                        "You muted as many people as you can. Unmute someone first.",
+                    )));
+                }
+                conn.execute(
+                    "insert or ignore into muted_people (recipient, sender, created_at) values (?1, ?2, ?3)",
+                    params![user, other, now],
+                )?;
+                // What is already queued for the phone stays in the inbox but is not pushed.
+                conn.execute(
+                    "update notifications set push_cancelled = 1
+                     where recipient = ?1 and sender = ?2 and pushed = 0",
+                    params![user, other],
+                )?;
+                Ok(())
+            }
+            Change::Unmute { user: other } => {
+                conn.execute(
+                    "delete from muted_people where recipient = ?1 and sender = ?2",
+                    params![user, normalize_user(&other)],
+                )?;
                 Ok(())
             }
             Change::Visibility { public } => {
@@ -963,6 +1038,76 @@ mod tests {
             .query_row("select count(*) from groups", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0, "an empty group is deleted");
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_muted_person_reaches_nobody_until_unmuted() {
+        let (app, path) = fixture();
+        let ana = sign_up(&app, "ana").await;
+        sign_up(&app, "bobby").await;
+        let mute = |action: &'static str, who: &'static str| {
+            let (app, ana) = (app.clone(), ana.clone());
+            async move {
+                call(
+                    &app,
+                    "POST",
+                    "/api/social/ana",
+                    &ana,
+                    serde_json::json!({"action": action, "user": who}),
+                )
+                .await
+            }
+        };
+        assert_eq!(mute("mute", "ana").await.0, StatusCode::NOT_FOUND);
+        assert_eq!(mute("mute", "nobody").await.0, StatusCode::NOT_FOUND);
+        {
+            let mut store = app.store.lock().unwrap();
+            store.set_friend_nudges("ana", true).unwrap();
+            store
+                .conn
+                .execute(
+                    "insert into notifications (recipient, sender, title, body, day, created_at, kind)
+                     values ('ana', 'bobby', 't', 'b', 0, 0, 'conquest')",
+                    [],
+                )
+                .unwrap();
+            assert!(store.friend_nudges_enabled("ana", "bobby").unwrap());
+        }
+        let (status, overview) = mute("mute", "Bobby").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(overview["muted"][0]["user"], "bobby");
+        assert_eq!(
+            mute("mute", "bobby").await.0,
+            StatusCode::OK,
+            "twice is fine"
+        );
+        {
+            let store = app.store.lock().unwrap();
+            assert!(muted(&store.conn, "ana", "bobby").unwrap());
+            assert!(!muted(&store.conn, "bobby", "ana").unwrap(), "one way");
+            assert!(!store.friend_nudges_enabled("ana", "bobby").unwrap());
+            let cancelled: bool = store
+                .conn
+                .query_row(
+                    "select push_cancelled from notifications where sender = 'bobby'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(cancelled, "what was waiting is not pushed");
+        }
+        let (status, overview) = mute("unmute", "bobby").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(overview["muted"], serde_json::json!([]));
+        assert!(
+            app.store
+                .lock()
+                .unwrap()
+                .friend_nudges_enabled("ana", "bobby")
+                .unwrap()
+        );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

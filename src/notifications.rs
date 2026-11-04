@@ -66,6 +66,8 @@ pub(crate) const NUDGE_ALLOWED_SQL: &str = "((sender = '' and exists (select 1 f
     or (sender != '' and exists (select 1 from player_settings
                          where user = notifications.recipient and friend_nudges = 1)
         and not exists (select 1 from friend_nudge_muted_senders
+                         where recipient = notifications.recipient and sender = notifications.sender)
+        and not exists (select 1 from muted_people
                          where recipient = notifications.recipient and sender = notifications.sender)))";
 #[derive(Debug, Serialize)]
 pub struct Notification {

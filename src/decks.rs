@@ -18,11 +18,13 @@ pub const MAX_DECKS: usize = 2000;
 const MAX_RECIPIENTS: usize = 100;
 pub const MAX_MESSAGE: usize = 200;
 
-/// Whether `recipient` muted or unsubscribed from `sender`; both are SQL expressions.
+/// Whether `recipient` muted or unsubscribed from `sender`, here or for everything; both are
+/// SQL expressions.
 pub(crate) fn sender_muted_sql(recipient: &str, sender: &str) -> String {
     format!(
         "exists (select 1 from (select recipient,sender from incoming_muted_senders
-                         union all select recipient,sender from sender_unsubscriptions)
+                         union all select recipient,sender from sender_unsubscriptions
+                         union all select recipient,sender from muted_people)
                          where recipient = {recipient} and sender = {sender})"
     )
 }
@@ -614,7 +616,8 @@ impl Store {
 
     pub fn friend_nudges_enabled(&self, recipient: &str, sender: &str) -> Result<bool, Error> {
         Ok(self.friend_nudges_receiving(recipient)?
-            && !self.friend_nudge_muted(recipient, sender)?)
+            && !self.friend_nudge_muted(recipient, sender)?
+            && !crate::social::muted(&self.conn, recipient, sender)?)
     }
 
     pub fn set_friend_nudges(&mut self, user: &str, enabled: bool) -> Result<(), Error> {
