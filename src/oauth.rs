@@ -26,6 +26,8 @@ use std::time::Duration;
 pub const SIGNUP_PATH: &str = "/auth/oauth/signup";
 const COOKIE: &str = "ankiquest_oauth";
 const FLOW_MS: i64 = 10 * 60 * 1000;
+/// How long the address an app opens for a sign-in stays usable.
+const TICKET_MS: i64 = 5 * 60 * 1000;
 const MAX_FLOWS: usize = 4096;
 const MAX_SUBJECT: usize = 255;
 const MAX_SUGGESTION: usize = 28;
@@ -219,9 +221,28 @@ struct Started {
     link: Option<String>,
     /// Signing in again as `link`, to prove who is at the keyboard, rather than linking.
     reauth: bool,
+    /// The hash of the device token of the app that opened this sign-in, see [`Ticket`].
+    app: Option<String>,
     next: String,
     expires: i64,
 }
+
+/// A sign-in an app asked for with its device token, for a browser that has no session: the
+/// address it opens carries the ticket, which works once. Linking applies to the ticket's player
+/// and signing in again counts for the token that asked.
+#[derive(Clone)]
+struct Ticket {
+    user: String,
+    provider: Provider,
+    reauth: bool,
+    token: String,
+    /// The device the token signed in as, and when, to name it on the confirmation page.
+    device: Option<(String, i64)>,
+    expires: i64,
+}
+
+/// How many app sign-ins one player may have waiting at once.
+const TICKETS_PER_PLAYER: usize = 4;
 
 #[derive(Clone)]
 struct Signup {
@@ -238,6 +259,9 @@ struct Signup {
 pub(crate) struct Flows {
     started: Mutex<HashMap<String, Started>>,
     signups: Mutex<HashMap<String, Signup>>,
+    tickets: Mutex<HashMap<String, Ticket>>,
+    /// Tickets whose page was opened, waiting for the person to confirm, by the nonce in its form.
+    confirms: Mutex<HashMap<String, Ticket>>,
 }
 
 /// Adds a flow to `map` after dropping expired ones, and the oldest when it is full.
@@ -291,6 +315,68 @@ impl Flows {
 
     fn finish_signup(&self, key: &str) {
         self.signups.lock().unwrap().remove(key);
+    }
+
+    /// Adds a ticket, replacing any other of the same token, and the oldest of its player's
+    /// beyond [`TICKETS_PER_PLAYER`], so one account cannot crowd out everyone else's.
+    fn add_ticket(&self, key: String, ticket: Ticket, now: i64) {
+        let mut tickets = self.tickets.lock().unwrap();
+        tickets.retain(|_, other| other.token != ticket.token);
+        self.confirms
+            .lock()
+            .unwrap()
+            .retain(|_, other| other.token != ticket.token);
+        let mut mine: Vec<(String, i64)> = tickets
+            .iter()
+            .filter(|(_, other)| other.user == ticket.user)
+            .map(|(key, other)| (key.clone(), other.expires))
+            .collect();
+        mine.sort_by_key(|(_, expires)| *expires);
+        while mine.len() >= TICKETS_PER_PLAYER {
+            tickets.remove(&mine.remove(0).0);
+        }
+        keep(&mut tickets, key, ticket, now, |t| t.expires);
+    }
+
+    fn add_confirm(&self, nonce: String, ticket: Ticket, now: i64) {
+        let mut confirms = self.confirms.lock().unwrap();
+        confirms.retain(|_, other| other.token != ticket.token);
+        keep(&mut confirms, nonce, ticket, now, |t| t.expires);
+    }
+
+    /// The ticket a confirmation form stands for, at most once.
+    fn take_confirm(&self, nonce: &str, now: i64) -> Option<Ticket> {
+        self.confirms
+            .lock()
+            .unwrap()
+            .remove(nonce)
+            .filter(|ticket| ticket.expires > now)
+    }
+
+    /// Drops every sign-in in progress for `user`, so a later account with the same name
+    /// inherits none of them.
+    pub(crate) fn forget(&self, user: &str) {
+        self.tickets
+            .lock()
+            .unwrap()
+            .retain(|_, ticket| ticket.user != user);
+        self.confirms
+            .lock()
+            .unwrap()
+            .retain(|_, ticket| ticket.user != user);
+        self.started
+            .lock()
+            .unwrap()
+            .retain(|_, started| started.link.as_deref() != Some(user));
+    }
+
+    /// The ticket behind an app's sign-in address, at most once.
+    fn take_ticket(&self, key: &str, now: i64) -> Option<Ticket> {
+        self.tickets
+            .lock()
+            .unwrap()
+            .remove(key)
+            .filter(|ticket| ticket.expires > now)
     }
 }
 
@@ -369,7 +455,20 @@ fn translated(text: &str) -> String {
     format!(r#"<span data-i18n="{text}">{text}</span>"#)
 }
 
+/// A page with `text` and a link `back`; an empty `back` is a sign-in an app opened, so the page
+/// tells the person to return to it, where their settings show the result.
 fn message(status: StatusCode, text: &str, back: &str, cookies: &[HeaderValue]) -> Response {
+    if back.is_empty() {
+        return page(
+            status,
+            &format!(
+                r#"<p class="oauth-message">{}</p><p class="oauth-message">{}</p>"#,
+                translated(text),
+                translated("You can close this page and go back to the app.")
+            ),
+            cookies,
+        );
+    }
     let label = if back == "/settings" {
         "Back to settings"
     } else {
@@ -695,6 +794,8 @@ struct StartQuery {
     link: Option<String>,
     #[serde(default)]
     reauth: Option<String>,
+    #[serde(default)]
+    ticket: Option<String>,
 }
 
 /// Whether `user` has no password and has not signed in with a provider again lately, so
@@ -723,6 +824,32 @@ async fn start(
             "This server does not offer that sign-in.",
         );
     };
+    if let Some(key) = &query.ticket {
+        let now = now_ms();
+        let Some(ticket) = app
+            .access
+            .oauth
+            .take_ticket(key, now)
+            .filter(|ticket| ticket.provider == provider)
+            .filter(|ticket| token_belongs(&app, &ticket.token, &ticket.user))
+        else {
+            return message(
+                StatusCode::BAD_REQUEST,
+                "This sign-in expired. Start it again in the app.",
+                "",
+                &[],
+            );
+        };
+        let Ok(nonce) = random().map(|bytes| hex(&bytes)) else {
+            return refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Sign-in failed. Try again.",
+            );
+        };
+        let page = ticket_page(&app, &nonce, &ticket);
+        app.access.oauth.add_confirm(nonce, ticket, now);
+        return page;
+    }
     let reauth = query.reauth.as_deref() == Some("1");
     let link = if reauth || query.link.as_deref() == Some("1") {
         match access::viewer(&app, &headers).member {
@@ -745,6 +872,24 @@ async fn start(
             &[],
         );
     }
+    let next = if link.is_some() {
+        "/settings".to_string()
+    } else {
+        local_path(query.next.as_deref())
+    };
+    to_provider(&app, provider, client, link, reauth, None, next)
+}
+
+/// Starts the flow at the provider: the browser goes there with a fresh state and PKCE challenge.
+fn to_provider(
+    app: &App,
+    provider: Provider,
+    client: &Client,
+    link: Option<String>,
+    reauth: bool,
+    for_app: Option<String>,
+    next: String,
+) -> Response {
     let (Ok(state), Ok(verifier)) = (random(), random()) else {
         return refuse(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -762,17 +907,12 @@ async fn start(
             '?'
         },
         access::encoded_next(&client.client_id),
-        access::encoded_next(&redirect_uri(&app, provider)),
+        access::encoded_next(&redirect_uri(app, provider)),
         challenge(&verifier),
     );
     if let Some(scope) = provider.scope() {
         url += &format!("&scope={}", access::encoded_next(scope));
     }
-    let next = if link.is_some() {
-        "/settings".to_string()
-    } else {
-        local_path(query.next.as_deref())
-    };
     let now = now_ms();
     app.access.oauth.start(
         state.clone(),
@@ -781,12 +921,118 @@ async fn start(
             verifier,
             link,
             reauth,
+            app: for_app,
             next,
             expires: now + FLOW_MS,
         },
         now,
     );
-    see_other(&url, &[set_flow(&app, &state, FLOW_MS / 1000)])
+    see_other(&url, &[set_flow(app, &state, FLOW_MS / 1000)])
+}
+
+/// Whether the device token hashed as `token` still signs in as `user`.
+fn token_belongs(app: &App, token: &str, user: &str) -> bool {
+    access::token_hash_owner(app, token).as_deref() == Some(user)
+}
+
+/// The page an app's sign-in opens on: it names the player and, for signing in again, the device
+/// asking, and goes on to the provider only when the person confirms with its form.
+fn ticket_page(app: &App, nonce: &str, ticket: &Ticket) -> Response {
+    let line = |text: String| format!(r#"<p class="oauth-message">{text}</p>"#);
+    let player = format!(
+        "{} <strong>{}</strong> ({})",
+        translated("Player:"),
+        escape(&app.display(&ticket.user)),
+        escape(&ticket.user)
+    );
+    let provider = format!(
+        "{} <strong>{}</strong>",
+        translated("Sign in with:"),
+        ticket.provider.name()
+    );
+    let mut body = String::new();
+    if ticket.reauth {
+        let device = match &ticket.device {
+            Some((name, at)) => format!(
+                "<strong>{}</strong>, {} {}",
+                escape(name),
+                translated("signed in on"),
+                crate::game::date_string(at.div_euclid(86_400_000))
+            ),
+            None => format!("<strong>{}</strong>", translated("An app")),
+        };
+        body += &line(translated("This device asks you to sign in again:"));
+        body += &line(device);
+        body += &line(player);
+        body += &line(provider);
+        body += &line(translated(
+            "Signing in again lets that device set a password or delete this account for ten minutes. Continue only if you started this yourself.",
+        ));
+    } else {
+        body += &line(translated("Link this sign-in to a player?"));
+        body += &line(player);
+        body += &line(provider);
+        body += &line(translated(
+            "That player can then sign in with it. Continue only if this is your own account.",
+        ));
+    }
+    body += &format!(
+        r#"<form method="post" action="/auth/oauth/{}/confirm"><input type="hidden" name="nonce" value="{nonce}"><button class="oauth-button" type="submit">{}</button></form>"#,
+        ticket.provider.key(),
+        translated("Continue")
+    );
+    page(
+        StatusCode::OK,
+        &body,
+        &[set_flow(app, nonce, TICKET_MS / 1000)],
+    )
+}
+
+#[derive(Deserialize)]
+struct Confirmation {
+    #[serde(default)]
+    nonce: String,
+}
+
+/// The person confirmed an app's sign-in on [`ticket_page`]: on to the provider.
+async fn confirm(
+    State(app): State<Arc<App>>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+    Form(form): Form<Confirmation>,
+) -> Response {
+    let Some((provider, client)) = configured(&app, &key) else {
+        return refuse(
+            StatusCode::NOT_FOUND,
+            "This server does not offer that sign-in.",
+        );
+    };
+    if !access::same_origin(&app, &headers) {
+        return message(StatusCode::FORBIDDEN, "Sign-in failed. Try again.", "", &[]);
+    }
+    let now = now_ms();
+    let ticket = flow_cookie(&headers)
+        .filter(|cookie| !form.nonce.is_empty() && *cookie == form.nonce)
+        .and_then(|nonce| app.access.oauth.take_confirm(nonce, now))
+        .filter(|ticket| ticket.provider == provider)
+        .filter(|ticket| token_belongs(&app, &ticket.token, &ticket.user));
+    let Some(ticket) = ticket else {
+        return message(
+            StatusCode::BAD_REQUEST,
+            "This sign-in expired. Start it again in the app.",
+            "",
+            &[set_flow(&app, "", 0)],
+        );
+    };
+    to_provider(
+        &app,
+        provider,
+        client,
+        Some(ticket.user),
+        ticket.reauth,
+        Some(ticket.token),
+        "/settings".into(),
+    )
 }
 
 /// Where the provider sends the browser back, with a code and the state it was given.
@@ -816,7 +1062,9 @@ async fn callback(
             &[clear],
         );
     };
-    let back = if started.link.is_some() {
+    let back = if started.app.is_some() {
+        ""
+    } else if started.link.is_some() {
         "/settings"
     } else {
         "/login"
@@ -863,7 +1111,18 @@ async fn callback(
             );
         }
     };
+    if let (Some(me), Some(token)) = (&started.link, &started.app)
+        && !token_belongs(&app, token, me)
+    {
+        return message(
+            StatusCode::UNAUTHORIZED,
+            "This sign-in expired. Start it again in the app.",
+            back,
+            &[clear],
+        );
+    }
     if let Some(me) = &started.link
+        && started.app.is_none()
         && access::viewer(&app, &headers).member.as_ref() != Some(me)
     {
         return message(
@@ -881,6 +1140,19 @@ async fn callback(
             owner(&app, &store.conn, provider, &identity.subject)
         };
         return match owner {
+            Ok(Some(owner)) if owner == *me && started.app.is_some() => {
+                let token = started.app.as_deref().unwrap_or_default();
+                if app.access.reauthenticate_token(token, me, now_ms()) {
+                    message(StatusCode::OK, "You signed in again.", back, &[clear])
+                } else {
+                    message(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Sign-in failed. Try again.",
+                        back,
+                        &[clear],
+                    )
+                }
+            }
             Ok(Some(owner))
                 if owner == *me && app.access.reauthenticate(&headers, me, now_ms()) =>
             {
@@ -917,6 +1189,9 @@ async fn callback(
     };
     match outcome {
         Outcome::SignIn(user) => signed_in(&app, &headers, &user, &started.next, &[clear]),
+        Outcome::Linked if started.app.is_some() => {
+            message(StatusCode::OK, "Linked.", back, &[clear])
+        }
         Outcome::Linked => see_other("/settings", &[clear]),
         Outcome::LinkedElsewhere => message(
             StatusCode::CONFLICT,
@@ -1118,6 +1393,8 @@ struct Change {
     password: Option<String>,
     #[serde(default)]
     sign_out_others: bool,
+    #[serde(default)]
+    purpose: Option<String>,
 }
 
 enum Unlinked {
@@ -1150,7 +1427,9 @@ fn unlink(app: &App, user: &str, provider: Provider) -> Result<Unlinked, Error> 
 
 /// `{"action": "unlink", "provider": "github"}` removes a linked sign-in;
 /// `{"action": "token"}` makes a device token, for accounts that have no password to trade for one;
-/// `{"action": "password", "current": "…", "password": "…", "sign_out_others": false}` sets a new password.
+/// `{"action": "password", "current": "…", "password": "…", "sign_out_others": false}` sets a new password;
+/// `{"action": "browser", "provider": "github", "purpose": "link" | "reauth"}` gives an app with a
+/// device token an address to open in a browser to link a provider or sign in with it again.
 async fn change(
     State(app): State<Arc<App>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -1220,8 +1499,90 @@ async fn change(
                 Err(error) => internal(error),
             }
         }
+        "browser" => browser(&app, &user, &headers, &change),
         _ => refuse(StatusCode::BAD_REQUEST, "Unknown action."),
     }
+}
+
+/// An address for a browser, which has no session, to link `change.provider` to `user` or sign
+/// in with it again, for the app whose device token made this request.
+fn browser(app: &App, user: &str, headers: &HeaderMap, change: &Change) -> Response {
+    let Some(token) = crate::web_util::bearer(headers).map(crate::accounts::token_hash) else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            "Use the sign-in buttons on this site.",
+        );
+    };
+    let Some((provider, _)) = change
+        .provider
+        .as_deref()
+        .and_then(|key| configured(app, key))
+    else {
+        return refuse(StatusCode::BAD_REQUEST, "Unknown sign-in provider.");
+    };
+    let reauth = match change.purpose.as_deref() {
+        Some("link") => false,
+        Some("reauth") => true,
+        _ => return refuse(StatusCode::BAD_REQUEST, "Unknown purpose."),
+    };
+    let linked = match linked_providers(&app.store.lock().unwrap().conn, user) {
+        Ok(linked) => linked.contains(&provider),
+        Err(error) => return internal(error),
+    };
+    if reauth && !linked {
+        return refuse(StatusCode::NOT_FOUND, "That sign-in is not linked.");
+    }
+    if !reauth && unconfirmed(app, headers, user) {
+        // As on the website: a device alone cannot add a way in to an account without a password.
+        return access::reauth_first();
+    }
+    let Ok(key) = random().map(|bytes| hex(&bytes)) else {
+        return refuse(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Sign-in failed. Try again.",
+        );
+    };
+    let device = app
+        .store
+        .lock()
+        .unwrap()
+        .conn
+        .query_row(
+            "select device, created_at from account_tokens where token_hash = ?1 and user = ?2",
+            params![token, user],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .optional();
+    let device = match device {
+        Ok(device) => device,
+        Err(error) => return internal(error.into()),
+    };
+    let now = now_ms();
+    app.access.oauth.add_ticket(
+        key.clone(),
+        Ticket {
+            user: user.to_string(),
+            provider,
+            reauth,
+            token,
+            device,
+            expires: now + TICKET_MS,
+        },
+        now,
+    );
+    let base = app
+        .config
+        .public_url
+        .as_deref()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    reply(
+        StatusCode::OK,
+        serde_json::json!({
+            "url": format!("{base}/auth/oauth/{}?ticket={key}", provider.key()),
+            "expires_at": now + TICKET_MS,
+        }),
+    )
 }
 
 pub fn routes() -> Router<Arc<App>> {
@@ -1234,6 +1595,10 @@ pub fn routes() -> Router<Arc<App>> {
         )
         .route("/auth/oauth/{provider}", get(start))
         .route("/auth/oauth/{provider}/callback", get(callback))
+        .route(
+            "/auth/oauth/{provider}/confirm",
+            axum::routing::post(confirm).layer(DefaultBodyLimit::max(4096)),
+        )
         .route(
             "/api/sign-in/{user}",
             get(methods).post(change).layer(DefaultBodyLimit::max(4096)),
@@ -1435,6 +1800,68 @@ mod tests {
         .await
     }
 
+    /// Opens an app's sign-in address, confirms on its page and comes back from the provider.
+    async fn via_ticket(app: &Arc<App>, provider: &str, query: &str, code: &str) -> Response {
+        let (nonce, flow) = ticket_page_of(app, provider, query).await;
+        let confirmed = confirm_ticket(app, provider, &flow, &nonce, ORIGIN).await;
+        assert_eq!(confirmed.status(), StatusCode::SEE_OTHER);
+        let state = param(&location(&confirmed), "state");
+        let flow = cookie(&confirmed, COOKIE).unwrap();
+        send(
+            app,
+            "GET",
+            &format!("/auth/oauth/{provider}/callback?code={code}&state={state}"),
+            &[("cookie", &flow)],
+            "",
+        )
+        .await
+    }
+
+    /// Opens an app's sign-in address: the nonce in its form and its flow cookie.
+    async fn ticket_page_of(app: &Arc<App>, provider: &str, query: &str) -> (String, String) {
+        let page = send(
+            app,
+            "GET",
+            &format!("/auth/oauth/{provider}{query}"),
+            &[],
+            "",
+        )
+        .await;
+        assert_eq!(
+            page.status(),
+            StatusCode::OK,
+            "the page asks before the provider"
+        );
+        let flow = cookie(&page, COOKIE).unwrap();
+        let html = text(page).await;
+        let nonce = html
+            .split(r#"name="nonce" value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string();
+        (nonce, flow)
+    }
+
+    async fn confirm_ticket(
+        app: &Arc<App>,
+        provider: &str,
+        flow: &str,
+        nonce: &str,
+        origin: &str,
+    ) -> Response {
+        send(
+            app,
+            "POST",
+            &format!("/auth/oauth/{provider}/confirm"),
+            &[("cookie", flow), ("content-type", FORM), ("origin", origin)],
+            &format!("nonce={nonce}"),
+        )
+        .await
+    }
+
     async fn member(app: &Arc<App>, session: &str) -> serde_json::Value {
         json(send(app, "GET", "/auth/status", &[("cookie", session)], "").await).await["member"]["user"]
             .clone()
@@ -1516,6 +1943,7 @@ mod tests {
             verifier: "v".into(),
             link: None,
             reauth: false,
+            app: None,
             next: "/".into(),
             expires,
         };
@@ -1894,6 +2322,367 @@ mod tests {
             "the identity can sign up again"
         );
         cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn an_app_links_and_signs_in_again_in_a_browser_without_a_session() {
+        let (base, mock) = provider().await;
+        let (app, path) = fixture(true, &base);
+        let session = sign_up(&app, "ana").await;
+        let token = app.issue_token("ana", "Pixel").unwrap();
+        let bearer = format!("Bearer {token}");
+        let ask = |token: String, body: serde_json::Value| {
+            let app = app.clone();
+            async move {
+                send(
+                    &app,
+                    "POST",
+                    "/api/sign-in/ana",
+                    &[
+                        ("authorization", &token),
+                        ("content-type", "application/json"),
+                    ],
+                    &body.to_string(),
+                )
+                .await
+            }
+        };
+        let open = |token: String, provider: &str, purpose: &str| {
+            ask(
+                token,
+                serde_json::json!({"action": "browser", "provider": provider, "purpose": purpose}),
+            )
+        };
+        let delete = |token: String| {
+            let app = app.clone();
+            async move {
+                send(
+                    &app,
+                    "DELETE",
+                    "/api/accounts/ana",
+                    &[("authorization", &token)],
+                    "",
+                )
+                .await
+                .status()
+            }
+        };
+
+        let refused = open(bearer.clone(), "github", "link").await;
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            json(refused).await["reauth"],
+            true,
+            "a device alone adds no way in"
+        );
+        assert_eq!(
+            open(bearer.clone(), "github", "reauth").await.status(),
+            StatusCode::NOT_FOUND,
+            "only a linked provider signs in again"
+        );
+        assert_eq!(
+            open(bearer.clone(), "gitlab", "other").await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            change(
+                &app,
+                "ana",
+                &session,
+                serde_json::json!({"action": "browser", "provider": "gitlab", "purpose": "reauth"})
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST,
+            "the website has its own buttons"
+        );
+        assert_eq!(delete(bearer.clone()).await, StatusCode::FORBIDDEN);
+
+        let opened = json(open(bearer.clone(), "gitlab", "reauth").await).await;
+        let url = opened["url"].as_str().unwrap();
+        let query = url
+            .strip_prefix(&format!("{ORIGIN}/auth/oauth/gitlab"))
+            .unwrap()
+            .to_string();
+        assert!(query.starts_with("?ticket="));
+        assert!(opened["expires_at"].as_i64().unwrap() > now_ms());
+        mock.subject.lock().unwrap().clone_from(&"9999".to_string());
+        let stranger = via_ticket(&app, "gitlab", &query, "good-code").await;
+        assert_eq!(
+            stranger.status(),
+            StatusCode::FORBIDDEN,
+            "someone else's identity does not count"
+        );
+        let used = send(&app, "GET", &format!("/auth/oauth/gitlab{query}"), &[], "").await;
+        assert_eq!(
+            used.status(),
+            StatusCode::BAD_REQUEST,
+            "a ticket works once"
+        );
+        assert!(text(used).await.contains("go back to the app"));
+        mock.subject.lock().unwrap().clone_from(&"1001".to_string());
+        let opened = json(open(bearer.clone(), "gitlab", "reauth").await).await;
+        let query = opened["url"].as_str().unwrap()[ORIGIN.len() + "/auth/oauth/gitlab".len()..]
+            .to_string();
+        assert_eq!(
+            send(&app, "GET", &format!("/auth/oauth/github{query}"), &[], "")
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "a ticket is for its own provider"
+        );
+        let opened = json(open(bearer.clone(), "gitlab", "reauth").await).await;
+        let query = opened["url"].as_str().unwrap()[ORIGIN.len() + "/auth/oauth/gitlab".len()..]
+            .to_string();
+        let again = via_ticket(&app, "gitlab", &query, "good-code").await;
+        assert_eq!(again.status(), StatusCode::OK);
+        assert!(
+            cookie(&again, "ankiquest_session").is_none(),
+            "the browser is not signed in"
+        );
+        assert!(text(again).await.contains("You signed in again."));
+        let account = |token: String| {
+            let app = app.clone();
+            async move {
+                json(
+                    send(
+                        &app,
+                        "GET",
+                        "/api/accounts/ana",
+                        &[("authorization", &token)],
+                        "",
+                    )
+                    .await,
+                )
+                .await
+            }
+        };
+        assert!(
+            account(bearer.clone()).await["confirmed_until"]
+                .as_i64()
+                .unwrap()
+                > now_ms()
+        );
+        let other = format!("Bearer {}", app.issue_token("ana", "Tablet").unwrap());
+        assert!(
+            account(other.clone()).await["confirmed_until"].is_null(),
+            "it counts for the token that asked only"
+        );
+        assert_eq!(delete(other).await, StatusCode::FORBIDDEN);
+
+        let opened = json(open(bearer.clone(), "github", "link").await).await;
+        let query = opened["url"].as_str().unwrap()[ORIGIN.len() + "/auth/oauth/github".len()..]
+            .to_string();
+        let linked = via_ticket(&app, "github", &query, "good-code").await;
+        assert_eq!(linked.status(), StatusCode::OK);
+        assert!(text(linked).await.contains("Linked."));
+        let methods = json(
+            send(
+                &app,
+                "GET",
+                "/api/sign-in/ana",
+                &[("authorization", &bearer)],
+                "",
+            )
+            .await,
+        )
+        .await;
+        assert!(
+            methods["providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|provider| provider["linked"] == true)
+        );
+
+        assert_eq!(delete(bearer).await, StatusCode::NO_CONTENT);
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn an_app_sign_in_names_what_it_approves_and_needs_a_confirmation() {
+        let (base, _mock) = provider().await;
+        let (app, path) = fixture(true, &base);
+        sign_up(&app, "ana").await;
+        let ana = format!("Bearer {}", app.issue_token("ana", "Pixel 9").unwrap());
+        let ask = |token: String,
+                   user: &'static str,
+                   provider: &'static str,
+                   purpose: &'static str| {
+            let app = app.clone();
+            async move {
+                send(
+                    &app,
+                    "POST",
+                    &format!("/api/sign-in/{user}"),
+                    &[
+                        ("authorization", &token),
+                        ("content-type", "application/json"),
+                    ],
+                    &serde_json::json!({"action": "browser", "provider": provider, "purpose": purpose})
+                        .to_string(),
+                )
+                .await
+            }
+        };
+        let query = |opened: serde_json::Value, provider: &str| {
+            opened["url"].as_str().unwrap()[ORIGIN.len() + "/auth/oauth/".len() + provider.len()..]
+                .to_string()
+        };
+        assert_eq!(
+            ask("Bearer alice-token".into(), "ana", "gitlab", "reauth")
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED,
+            "another player's token cannot ask for ana"
+        );
+
+        // A ticket opens a page naming the device and the player, not the provider.
+        let opened = json(ask(ana.clone(), "ana", "gitlab", "reauth").await).await;
+        let reauth = query(opened, "gitlab");
+        let page = send(&app, "GET", &format!("/auth/oauth/gitlab{reauth}"), &[], "").await;
+        assert_eq!(page.status(), StatusCode::OK);
+        assert!(page.headers().get(header::LOCATION).is_none());
+        let flow = cookie(&page, COOKIE).unwrap();
+        let html = text(page).await;
+        assert!(html.contains("<strong>Pixel 9</strong>"), "{html}");
+        assert!(html.contains("(ana)"));
+        assert!(html.contains("delete this account"));
+        let nonce = html
+            .split(r#"name="nonce" value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            confirm_ticket(&app, "gitlab", &flow, "", ORIGIN)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "no nonce"
+        );
+        let wrong = hex(&random().unwrap());
+        assert_eq!(
+            confirm_ticket(&app, "gitlab", &flow, &wrong, ORIGIN)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "a nonce that is not this browser's"
+        );
+        assert_eq!(
+            confirm_ticket(&app, "gitlab", &flow, &nonce, "https://evil.example")
+                .await
+                .status(),
+            StatusCode::FORBIDDEN,
+            "from another site"
+        );
+        let confirmed = confirm_ticket(&app, "gitlab", &flow, &nonce, ORIGIN).await;
+        assert_eq!(confirmed.status(), StatusCode::SEE_OTHER);
+        assert!(
+            location(&confirmed).starts_with(&base),
+            "on to the provider"
+        );
+        assert_eq!(
+            confirm_ticket(&app, "gitlab", &flow, &nonce, ORIGIN)
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST,
+            "a confirmation works once"
+        );
+
+        // Someone else opening a link ticket sees whose account they would link.
+        let opened = json(ask("Bearer alice-token".into(), "alice", "github", "link").await).await;
+        let link = query(opened, "github");
+        let page = send(&app, "GET", &format!("/auth/oauth/github{link}"), &[], "").await;
+        let html = text(page).await;
+        assert!(html.contains("Link this sign-in to a player?"));
+        assert!(html.contains("(alice)"), "the target player is named");
+
+        // A token signed out before the provider answers gets nothing.
+        let opened = json(ask(ana.clone(), "ana", "gitlab", "reauth").await).await;
+        let (nonce, flow) = ticket_page_of(&app, "gitlab", &query(opened, "gitlab")).await;
+        let confirmed = confirm_ticket(&app, "gitlab", &flow, &nonce, ORIGIN).await;
+        let state = param(&location(&confirmed), "state");
+        let flow = cookie(&confirmed, COOKIE).unwrap();
+        let signed_out = send(
+            &app,
+            "DELETE",
+            "/api/accounts/tokens",
+            &[("authorization", &ana)],
+            "",
+        )
+        .await;
+        assert!(signed_out.status().is_success());
+        let late = send(
+            &app,
+            "GET",
+            &format!("/auth/oauth/gitlab/callback?code=good-code&state={state}"),
+            &[("cookie", &flow)],
+            "",
+        )
+        .await;
+        assert_eq!(late.status(), StatusCode::UNAUTHORIZED);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, ana.parse().unwrap());
+        assert_eq!(
+            app.access.reauthenticated_until(&headers, "ana", now_ms()),
+            None
+        );
+        cleanup(app, path);
+    }
+
+    #[test]
+    fn tickets_expire_are_one_per_token_and_go_with_their_player() {
+        let flows = Flows::default();
+        let ticket = |user: &str, token: &str, expires| Ticket {
+            user: user.into(),
+            provider: Provider::Github,
+            reauth: true,
+            token: token.into(),
+            device: None,
+            expires,
+        };
+        flows.add_ticket("a".into(), ticket("ana", "t1", 100), 0);
+        assert!(flows.take_ticket("a", 100).is_none(), "expired");
+        flows.add_ticket("b".into(), ticket("ana", "t1", 100), 0);
+        flows.add_ticket("c".into(), ticket("ana", "t1", 100), 0);
+        assert!(
+            flows.take_ticket("b", 1).is_none(),
+            "a newer one replaced it"
+        );
+        assert!(flows.take_ticket("c", 1).is_some());
+        for n in 0..10 {
+            flows.add_ticket(
+                format!("ana{n}"),
+                ticket("ana", &format!("t{n}"), 100 + n),
+                0,
+            );
+        }
+        flows.add_ticket("bo".into(), ticket("bo", "bo", 100), 0);
+        assert_eq!(
+            flows
+                .tickets
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|t| t.user == "ana")
+                .count(),
+            TICKETS_PER_PLAYER
+        );
+        assert!(
+            flows.take_ticket("ana0", 1).is_none(),
+            "the oldest gives way"
+        );
+        flows.add_confirm("n".into(), ticket("ana", "t9", 100), 0);
+        flows.forget("ana");
+        assert!(flows.take_ticket("ana9", 1).is_none());
+        assert!(flows.take_confirm("n", 1).is_none());
+        assert!(
+            flows.take_ticket("bo", 1).is_some(),
+            "other players keep theirs"
+        );
     }
 
     #[tokio::test]

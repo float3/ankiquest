@@ -8,7 +8,7 @@ Regenerate after an intended change and commit the result:
 UPDATE_API_EXAMPLES=1 cargo test api_examples
 ```
 
-Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`, group invite codes by `example-invite-N`.
+Random values are replaced, numbered in order of appearance: device tokens by `example-token-N`, win link tokens by `example-link-N`, device ids by `example-device-N`, group invite codes by `example-invite-N`, app sign-in tickets by `example-ticket-N`.
 
 | file | request |
 |---|---|
@@ -48,5 +48,6 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `account.json` | `GET /api/accounts/{user}` |
 | `password_change.json` | `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others": false}` |
 | `devices_sign_out.json` | `POST /api/devices/{user}` `{"action": "sign_out_others"}` |
+| `sign_in_browser.json` | `POST /api/sign-in/{user}` `{"action": "browser", "provider", "purpose": "reauth"}` |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.

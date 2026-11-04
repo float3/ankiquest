@@ -14,6 +14,7 @@ these additions preserve bearer authentication and the existing notification arr
 | feature | meaning |
 |---|---|
 | `activity` | the durable inbox, `/api/activity/{user}` (below) |
+| `app_sign_in` | `POST /api/sign-in/{user}` `{"action": "browser", "provider", "purpose": "link" \| "reauth"}` gives an address to link a provider or sign in with it again in a browser (see `docs/server.md`, sign in with Google, GitHub or GitLab) |
 | `cookie_session` | the web dashboard works with the session cookie alone when the native app hands it only `{user}`, no token |
 | `deck_share` | telling chosen friends about a deck just finished, `POST /api/decks/{user}/share` (see [sharing.md](sharing.md)) |
 | `devices` | password change and the device list and sign-out (`/api/devices/{user}`, see `docs/server.md`) |
@@ -24,7 +25,7 @@ these additions preserve bearer authentication and the existing notification arr
 | `share_cards` | server-drawn cards and public pages under `/w/` |
 | `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |
 
-An account without a password (signed up with a provider) has to sign in with that provider again before it can be deleted or set its first password: those requests answer `403` with `"reauth": true` until it has, and a device token never counts. Apps send the player to Settings in their web view, which offers **Sign in again** (`/auth/oauth/{provider}?reauth=1`); it counts for ten minutes in that web view's session. See `docs/server.md`.
+An account without a password (signed up with a provider) has to sign in with that provider again before it can be deleted or set its first password: those requests answer `403` with `"reauth": true` until it has, and a device token never counts. On a server with `app_sign_in`, apps ask for a browser address with `{"action": "browser", "purpose": "reauth"}`, open it in the system browser, and the sign-in then counts for ten minutes for their token. Older servers offer only **Sign in again** in Settings on the website (`/auth/oauth/{provider}?reauth=1`), which counts for that browser's session. See `docs/server.md`.
 
 A name is never removed or renamed. New names are added as their features land. A server without this endpoint (`404`) has none of them. Clients ignore names they don't know. `version` changes only if the shape of this answer changes.
 
@@ -39,6 +40,7 @@ The Android app's account settings are native and use these endpoints with the d
 | `GET /api/sign-in/{user}` | `account`, `password` and `providers` (`provider`, `name`, `linked`) |
 | `POST /api/sign-in/{user}` `{"action": "unlink", "provider"}` | the same, after unlinking |
 | `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others"}` | the same, after the change |
+| `POST /api/sign-in/{user}` `{"action": "browser", "provider", "purpose"}` | `url` to open in the browser, `expires_at` |
 | `GET /api/devices/{user}`, `POST` `{"action": "sign_out", "id"}` or `{"action": "sign_out_others"}` | `devices` |
 | `GET /api/accounts/{user}` | `user`, `display`, `created_at`, `password`, `confirmed_until` |
 | `GET /api/export/{user}` | the data download, saved by the app as it came |

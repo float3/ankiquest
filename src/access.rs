@@ -31,6 +31,9 @@ pub(crate) const REAUTH_MS: i64 = 10 * 60 * 1000;
 struct Sessions {
     expires: HashMap<String, Session>,
     failures: HashMap<IpAddr, Attempts>,
+    /// Device tokens, by hash, whose member last signed in with a provider again in a browser
+    /// the device opened for it: the member and when.
+    tokens: HashMap<String, (String, i64)>,
 }
 
 #[derive(Clone)]
@@ -130,11 +133,13 @@ impl Access {
 
     /// Ends every session signed in as `user`, so a later account with the same name starts signed out.
     pub(crate) fn revoke_member(&self, user: &str) {
-        self.sessions
-            .lock()
-            .unwrap()
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions
             .expires
             .retain(|_, session| session.member.as_deref() != Some(user));
+        sessions.tokens.retain(|_, (member, _)| member != user);
+        drop(sessions);
+        self.oauth.forget(user);
     }
 
     /// The live sessions `user` opened by signing in on the website rather than with a device token.
@@ -172,7 +177,24 @@ impl Access {
         }
     }
 
-    /// Until when the browser session behind `headers` counts as freshly signed in as `user`.
+    /// Records that `user` just signed in with a provider again in a browser that the device
+    /// holding the token hashed as `token` opened for it (see `oauth`, app sign-ins).
+    /// False when too many are recorded to keep another.
+    pub(crate) fn reauthenticate_token(&self, token: &str, user: &str, now: i64) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.tokens.retain(|_, (_, at)| *at + REAUTH_MS > now);
+        if sessions.tokens.len() >= MAX_SESSIONS && !sessions.tokens.contains_key(token) {
+            return false;
+        }
+        sessions
+            .tokens
+            .insert(token.to_string(), (user.to_string(), now));
+        true
+    }
+
+    /// Until when the browser session behind `headers`, or the device token it carries, counts
+    /// as freshly signed in as `user`. A token counts only after its member signed in with a
+    /// provider again in a browser it opened, never on its own.
     pub(crate) fn reauthenticated_until(
         &self,
         headers: &HeaderMap,
@@ -180,7 +202,11 @@ impl Access {
         now: i64,
     ) -> Option<i64> {
         if headers.contains_key(header::AUTHORIZATION) {
-            return None;
+            let token = crate::accounts::token_hash(bearer(headers)?);
+            let sessions = self.sessions.lock().unwrap();
+            let (member, at) = sessions.tokens.get(&token)?;
+            let until = at + REAUTH_MS;
+            return (member == user && until > now).then_some(until);
         }
         let sessions = self.sessions.lock().unwrap();
         let session = sessions.expires.get(session_cookie(headers)?)?;
@@ -321,6 +347,25 @@ fn token_owner(app: &App, given: &str) -> Option<String> {
         0 => app.accounts.token_owner(given),
         _ => None,
     }
+}
+
+/// Who the device token hashed as `hash` signs in as: an account's token, or a configured
+/// player's.
+pub(crate) fn token_hash_owner(app: &App, hash: &str) -> Option<String> {
+    app.accounts.hash_owner(hash).or_else(|| {
+        let matches: Vec<_> = app
+            .config
+            .users
+            .iter()
+            .filter(|(_, user)| {
+                user.token.as_deref().is_some_and(|token| {
+                    !token.is_empty() && constant_eq(&crate::accounts::token_hash(token), hash)
+                })
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        (matches.len() == 1).then(|| matches[0].clone())
+    })
 }
 
 /// The hash of `given` when it is an account's device token for `owner`.
@@ -767,6 +812,28 @@ mod tests {
         bearer.insert(header::AUTHORIZATION, "Bearer x".parse().unwrap());
         assert_eq!(access.reauthenticated_until(&bearer, "ana", 2000), None);
         assert!(!access.reauthenticate(&HeaderMap::new(), "ana", 1000));
+    }
+
+    #[test]
+    fn a_token_counts_only_after_a_browser_it_opened_signed_in_again() {
+        let access = Access::default();
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer x".parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&headers, "ana", 1), None);
+        assert!(access.reauthenticate_token(&crate::accounts::token_hash("x"), "ana", 1000));
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 2000),
+            Some(1000 + REAUTH_MS)
+        );
+        assert_eq!(access.reauthenticated_until(&headers, "bo", 2000), None);
+        assert_eq!(
+            access.reauthenticated_until(&headers, "ana", 1000 + REAUTH_MS),
+            None,
+            "it runs out"
+        );
+        let mut other = HeaderMap::new();
+        other.insert(header::AUTHORIZATION, "Bearer y".parse().unwrap());
+        assert_eq!(access.reauthenticated_until(&other, "ana", 2000), None);
     }
 
     #[test]

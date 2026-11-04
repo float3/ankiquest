@@ -3,7 +3,8 @@
 //!
 //! The clock is pinned to [`NOW_MS`]. Random values are replaced before comparing, numbered in
 //! the order they appear: device tokens by `example-token-N`, win link tokens by
-//! `example-link-N`, device ids by `example-device-N` and group invite codes by `example-invite-N`.
+//! `example-link-N`, device ids by `example-device-N`, group invite codes by `example-invite-N`
+//! and app sign-in tickets by `example-ticket-N`.
 
 use crate::app::App;
 use crate::game::{Clock, Event};
@@ -581,6 +582,18 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+
+    let browser = f
+        .call(
+            "POST",
+            "/api/sign-in/ana",
+            Some(&ana),
+            json!({"action": "browser", "provider": "github", "purpose": "reauth"}),
+        )
+        .await;
+    let ticket = browser["url"].as_str().unwrap().split("ticket=").nth(1);
+    f.keep_secret(&Value::from(ticket.unwrap()), "example-ticket");
+    examples.push(("sign_in_browser", browser));
 
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
