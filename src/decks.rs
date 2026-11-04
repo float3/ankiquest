@@ -257,6 +257,8 @@ impl Store {
 
     /// Suppression consumes existing history as well as pending pushes. Re-enabling
     /// affects future completions; it never revives announcements cancelled here.
+    /// Clients now save these through /api/deck-subscriptions; tests still seed with it.
+    #[cfg(test)]
     pub fn set_incoming_settings(
         &mut self,
         user: &str,

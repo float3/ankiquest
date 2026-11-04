@@ -219,35 +219,6 @@ pub(crate) async fn get_incoming_preferences(
         .map_err(store_error)
 }
 
-pub(crate) async fn set_incoming_preferences(
-    State(app): State<Arc<App>>,
-    UrlPath(user): UrlPath<String>,
-    headers: HeaderMap,
-    Json(update): Json<decks::IncomingSettings>,
-) -> Result<Json<IncomingPreferences>, StatusCode> {
-    if !authorized(&app, &user, &headers) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    if !decks::valid_incoming_settings(&update) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let mut store = app.store.lock().unwrap();
-    let current = incoming_preferences(&app, &store, &user).map_err(store_error)?;
-    if update
-        .muted_senders
-        .iter()
-        .any(|user| !current.senders.iter().any(|sender| sender.user == *user))
-    {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    store
-        .set_incoming_settings(&user, &update)
-        .map_err(store_error)?;
-    incoming_preferences(&app, &store, &user)
-        .map(Json)
-        .map_err(store_error)
-}
-
 async fn set_deck_subscriptions(
     State(app): State<Arc<App>>,
     UrlPath(user): UrlPath<String>,
@@ -278,15 +249,10 @@ async fn set_deck_subscriptions(
 }
 
 pub(crate) fn routes() -> Router<Arc<App>> {
-    Router::new()
-        .route(
-            "/api/notification-preferences/{user}",
-            get(get_incoming_preferences).post(set_incoming_preferences),
-        )
-        .route(
-            "/api/deck-subscriptions/{user}",
-            get(get_incoming_preferences).post(set_deck_subscriptions),
-        )
+    Router::new().route(
+        "/api/deck-subscriptions/{user}",
+        get(get_incoming_preferences).post(set_deck_subscriptions),
+    )
 }
 
 #[cfg(test)]
@@ -970,106 +936,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incoming_preferences_are_private_validated_and_available_before_studying() {
-        let (app, path) = fixture();
-        let settings =
-            get_incoming_preferences(State(app.clone()), UrlPath("hill".into()), headers("hill"))
-                .await
-                .unwrap()
-                .0;
-        assert!(settings.settings.enabled);
-        assert!(settings.settings.muted_senders.is_empty());
-        assert_eq!(
-            settings
-                .senders
-                .iter()
-                .map(|p| p.user.as_str())
-                .collect::<Vec<_>>(),
-            vec!["cerro", "friend"]
-        );
-        assert!(app.profile("hill").is_none());
-        for muted_senders in [
-            vec!["hill".into()],
-            vec!["unknown".into()],
-            vec!["cerro".into(), "cerro".into()],
-        ] {
-            assert_eq!(
-                set_incoming_preferences(
-                    State(app.clone()),
-                    UrlPath("hill".into()),
-                    headers("hill"),
-                    Json(decks::IncomingSettings {
-                        enabled: false,
-                        muted_senders
-                    })
-                )
-                .await
-                .unwrap_err(),
-                StatusCode::BAD_REQUEST
-            );
-        }
-        assert!(
-            app.store
-                .lock()
-                .unwrap()
-                .incoming_settings("hill")
-                .unwrap()
-                .enabled
-        );
-        assert!(
-            serde_json::from_value::<decks::IncomingSettings>(serde_json::json!({
-                "enabled":false,"muted_senders":[],"user":"cerro"
-            }))
-            .is_err()
-        );
-        {
-            let mut store = app.store.lock().unwrap();
-            store
-                .send(
-                    &notifications::Outgoing {
-                        to: "hill",
-                        from: "former-player",
-                        title: "Deck complete",
-                        body: "Private deck name",
-                        kind: "completion",
-                    },
-                    0,
-                    now_ms(),
-                )
-                .unwrap();
-        }
-        let saved = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: false,
-                muted_senders: vec!["former-player".into()],
-            }),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert!(!saved.settings.enabled);
-        assert_eq!(saved.settings.muted_senders, vec!["former-player"]);
-        assert!(
-            !serde_json::to_string(&saved)
-                .unwrap()
-                .contains("Private deck name")
-        );
-        assert!(
-            app.store
-                .lock()
-                .unwrap()
-                .incoming_settings("cerro")
-                .unwrap()
-                .enabled
-        );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
-    #[tokio::test]
     async fn recipient_mutes_change_upload_delivery_without_changing_outgoing_settings() {
         let (app, path) = fixture();
         let _ = upload(
@@ -1088,17 +954,17 @@ mod tests {
         )
         .await
         .unwrap();
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: true,
-                muted_senders: vec!["cerro".into()],
-            }),
-        )
-        .await
-        .unwrap();
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: true,
+                    muted_senders: vec!["cerro".into()],
+                },
+            )
+            .unwrap();
         let completion = upload(
             State(app.clone()),
             UrlPath("cerro".into()),
@@ -1138,17 +1004,17 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(outgoing.decks[0].recipients, vec!["friend", "hill"]);
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: true,
-                muted_senders: vec![],
-            }),
-        )
-        .await
-        .unwrap();
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: true,
+                    muted_senders: vec![],
+                },
+            )
+            .unwrap();
         assert!(
             upload(
                 State(app.clone()),
@@ -1169,18 +1035,18 @@ mod tests {
                 .0
                 .is_empty()
         );
-        // Old clients save only outgoing preferences; recipient choices survive.
-        let _ = set_incoming_preferences(
-            State(app.clone()),
-            UrlPath("hill".into()),
-            headers("hill"),
-            Json(decks::IncomingSettings {
-                enabled: false,
-                muted_senders: vec!["cerro".into()],
-            }),
-        )
-        .await
-        .unwrap();
+        // Saving only outgoing preferences keeps the recipient's choices.
+        app.store
+            .lock()
+            .unwrap()
+            .set_incoming_settings(
+                "hill",
+                &decks::IncomingSettings {
+                    enabled: false,
+                    muted_senders: vec!["cerro".into()],
+                },
+            )
+            .unwrap();
         let _ = set_decks(
             State(app.clone()),
             UrlPath("hill".into()),

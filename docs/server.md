@@ -258,7 +258,7 @@ clients may include a `decks` array in the review upload. each entry has `id` (a
 
 `GET /api/deck-subscriptions/<user>` requires the recipient's token or personal member session and returns `{"enabled":true,"muted_senders":[],"unsubscribed_senders":[],"sharing_senders":["hill"],"senders":[{"user":"hill","display":"Hill"}]}`. `sharing_senders` lists owners of enabled decks that currently select this recipient, even if the recipient has paused all alerts. the editor shows those senders plus saved unsubscriptions and legacy mutes; `senders` supplies identity labels and validation choices. `POST` accepts `{"enabled":true,"unsubscribed_senders":["hill"]}` and returns the updated settings. at most 100 distinct sender IDs can be selected. IDs must be in the available senders; unknown fields, duplicates, invalid names, and unsubscribing from yourself are rejected. the response exposes identities, never another person's deck names. Personal-session writes require the site's CSRF header. saving subscriptions also clears legacy mutes; the website first includes those mutes in the unsubscribe selection.
 
-the older `GET`/`POST /api/notification-preferences/<user>` API remains compatible with `{"enabled":false,"muted_senders":["hill"]}`. it can still change alert filters, but cannot undo an unsubscribe. older outgoing settings cannot restore a recipient who has unsubscribed either.
+the older `/api/notification-preferences/<user>` endpoint has been removed. mutes saved through it still apply until the player next saves subscriptions. older outgoing settings cannot restore a recipient who has unsubscribed.
 
 ## NixOS
 

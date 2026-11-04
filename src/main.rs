@@ -293,7 +293,7 @@ mod tests {
     use crate::decks::{get_decks, set_decks};
     use crate::inbox::{ReplyRequest, get_notifications, reply};
     use crate::study::{profile, upload};
-    use crate::subscriptions::{get_incoming_preferences, set_incoming_preferences};
+    use crate::subscriptions::get_incoming_preferences;
     use crate::test_support::*;
 
     #[tokio::test]
@@ -473,20 +473,6 @@ mod tests {
                 get_incoming_preferences(State(app.clone()), UrlPath("cerro".into()), auth.clone())
                     .await
                     .unwrap_err(),
-                StatusCode::UNAUTHORIZED
-            );
-            assert_eq!(
-                set_incoming_preferences(
-                    State(app.clone()),
-                    UrlPath("cerro".into()),
-                    auth.clone(),
-                    Json(decks::IncomingSettings {
-                        enabled: false,
-                        muted_senders: vec![]
-                    })
-                )
-                .await
-                .unwrap_err(),
                 StatusCode::UNAUTHORIZED
             );
             assert_eq!(
