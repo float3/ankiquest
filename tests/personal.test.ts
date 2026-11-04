@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import type {Browser, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 const now = Date.now();
 const token = 'test-owner-token';
 const initial = () => ({
@@ -59,7 +59,7 @@ async function fixture(browser: Browser, options: {member?:boolean,locale?:strin
 }
 async function noOverflow(page: Page,label: string){const size=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));assert(size.scroll<=size.width,`${label}: ${JSON.stringify(size)}`);}
 (async()=>{
-  const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'msedge'});
+  const browser=await launch();
   const screenshots=process.env.ANKIQUEST_PERSONAL_QA_DIR;
   if(screenshots)fs.mkdirSync(screenshots,{recursive:true});
   let checks=0;
@@ -122,6 +122,15 @@ async function noOverflow(page: Page,label: string){const size=await page.evalua
     await f.page.waitForFunction(()=>document.querySelector('#decks-form .status')?.textContent.includes('Saved'));
     assert.deepEqual(f.data.writes.at(-1)!.body.decks,[{id:'1',enabled:true,recipients:['bob']}]);
     assert.deepEqual(f.errors,[]);checks++;await f.context.close();
+    // The leaderboard links to cards on /settings; they render after loading, so the page scrolls itself.
+    for(const card of ['deck-sharing','deck-alerts','streak-protection']) {
+      const linked=await fixture(browser);
+      await linked.page.goto('http://ankiquest.test/settings#'+card);
+      await linked.page.locator('#'+card+' form, #'+card+' #freeze-toggle').first().waitFor();
+      await linked.page.waitForFunction(id=>{const top=document.getElementById(id)!.getBoundingClientRect().top;return scrollY>0&&top>=-1&&top<innerHeight/2;},card);
+      if(card==='deck-sharing')assert(await linked.page.locator('#deck-sharing details').evaluate((details: HTMLDetailsElement)=>details.open),'a linked deck card opens its deck list');
+      assert.deepEqual(linked.errors,[]);checks++;await linked.context.close();
+    }
     const gate=await fixture(browser,{member:false});
     await gate.page.goto('http://ankiquest.test/today');
     await gate.page.locator('#personal-gate:visible').waitFor();

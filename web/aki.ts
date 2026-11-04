@@ -8,7 +8,9 @@ import {escape} from "./common";
   const ankilopePoses: Record<string, string> = {welcome:"welcome", review:"study", celebrate:"celebrate", streak:"study", freeze:"study", winner:"celebrate", face:"face"};
   const choices = new Set<string>(["aki", "ankilope", "none"]);
   let choice = "aki", identity: string | null | undefined = null, identityEpoch = 0;
-  const source = (pose: string) => choice === "ankilope" ? `/ankilope/${ankilopePoses[pose] || "welcome"}.png` : `/aki/${pose}.png`;
+  // The face is only ever drawn small, as the brand icon, so it uses the small copy.
+  const file = (pose: string) => pose === "face" ? "face-192" : pose;
+  const source = (pose: string) => choice === "ankilope" ? `/ankilope/${file(ankilopePoses[pose] || "welcome")}.png` : `/aki/${file(pose)}.png`;
   const image = (pose = "welcome", extra = "") => {
     pose = poses.has(pose) ? pose : "welcome";
     return `<img class="aki-art ${escape(extra)}" data-companion-pose="${pose}" src="${source(pose)}" width="128" height="128" alt="" aria-hidden="true" decoding="async" loading="lazy">`;
@@ -27,8 +29,7 @@ import {escape} from "./common";
     if (profile?.streak_state === "studied" && (profile?.today?.reviews ?? 0) > 0) return "streak";
     return "review";
   }
-  const messages: Record<Mood | "welcome", string> = {
-    welcome: "A small step starts with one card.",
+  const messages: Record<Mood, string> = {
     review: "A small step starts with one card.",
     celebrate: "Your daily quests are complete. Look at you go!",
     streak: "You showed up today. That is progress worth keeping.",
@@ -50,11 +51,6 @@ import {escape} from "./common";
       element.dataset.aki = pose;
       element.insertAdjacentHTML("afterbegin", image(pose));
     }
-    // Dialog contents are recreated after close. Mark only the content, not the persistent dialog.
-    for (const title of select("#streak-freezes h3:not([data-aki])")) {
-      title.dataset.aki = "freeze";
-      title.insertAdjacentHTML("beforebegin", image("freeze", "aki-dialog-art"));
-    }
   }
   async function loadChoice(user: string | null | undefined) {
     if (identity !== user) setChoice("aki");
@@ -68,7 +64,7 @@ import {escape} from "./common";
       if (epoch === identityEpoch) setChoice(saved.companion);
     } catch (_) { /* Keep the last visible choice while offline. */ }
   }
-  window.AnkiQuestAki = {image, mood, profile, decorate, setChoice, choice:()=>choice};
+  window.AnkiQuestAki = {image, profile, decorate, setChoice, choice:()=>choice};
   addEventListener("ankiquest:identity", event => loadChoice(event.detail?.user));
   addEventListener("ankiquest:locked", () => loadChoice(null));
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && identity) loadChoice(identity); });

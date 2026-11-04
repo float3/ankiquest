@@ -2,16 +2,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {addSite, chromium, open, page as built, prefix, root, script} from './support/web.ts';
+import {addSite, launch, open, page as built, prefix, root, script} from './support/web.ts';
 const html = built('index');
 const renderer = prefix('pages/index', 'async function render(');
 const styles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join('\n');
 const scaffold = html.match(/<body\b[^>]*>([\s\S]*?)<script>/)![1];
 
 (async () => {
-  const browser = await chromium.launch({headless:true,
-    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel:process.env.PLAYWRIGHT_CHANNEL} : process.platform==='win32' ? {channel:'msedge'} : {}),
-  });
+  const browser = await launch();
   let checks = 0;
   try {
     for (const locale of ['en-US','es-ES']) for (const width of [320,390,1440]) for (const colorScheme of ['light','dark'] as const) {

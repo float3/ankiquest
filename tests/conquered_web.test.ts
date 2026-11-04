@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {test} from 'node:test';
 import type {Browser} from 'playwright';
-import {chromium, fulfillAsset, page as built, root} from './support/web.ts';
+import {fulfillAsset, launch, page as built, root} from './support/web.ts';
 
 const AT = 1789000000456;
 
@@ -51,7 +51,7 @@ async function visit(browser: Browser, owner: boolean, leech: boolean, shot = ''
 }
 
 test('a conquered card is a big companion card; only its owner can tell friends', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   const shots = process.env.CONQUERED_SCREENSHOTS;
   try {
     const mine = await visit(browser, true, false, shots ? path.join(shots, 'conquered.png') : '');
@@ -64,7 +64,7 @@ test('a conquered card is a big companion card; only its owner can tell friends'
 });
 
 test('the owner may show what the card was; a suggestion stays in the fragment until they save it', async () => {
-  const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const browser = await launch();
   const shots = process.env.CONQUERED_SCREENSHOTS;
   try {
     const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 1000}});

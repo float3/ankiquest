@@ -33,8 +33,6 @@ a shared website password remains read-only. seeing a profile does not establish
 
 disconnect/Lock site invalidates the session and clears private page state. back/forward restoration and returning to the page refresh the access check. private dialogs and form credentials are cleared on page exit. failed writes remain visibly unconfirmed; offline Activity refresh preserves already loaded entries with an error message.
 
-older servers without member identity can retain the existing in-memory token connection while the page/dialog remains open. if the Activity endpoint is absent, the page falls back to the old seven-day notifications list and explicitly states that persistent read status and longer history need a server update.
-
 ## browser verification
 
 `tests/mobile_web.test.ts` starts an isolated server with synthetic players and reviews, then checks real API-backed browser actions. it covers owner/read-only separation, account continuity, challenge ordering/creation/acceptance, no retroactive progress, replies and read persistence, profile settings, deep links, offline recovery, credential storage, logout and layout at 320/390/1440 pixels in light and dark themes.

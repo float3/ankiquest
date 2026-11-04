@@ -3,15 +3,14 @@ import assert from 'node:assert/strict';
 import {test, before, after} from 'node:test';
 import type {TestContext} from 'node:test';
 import type {Browser, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built} from './support/web.ts';
+import {fulfillAsset, launch, page as built} from './support/web.ts';
 
 const origin = 'http://ankiquest.test';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 interface Call { method: string; path: string; query: string; body: unknown; auth: string | undefined }
 let browser: Browser | undefined;
 before(async () => {
-  browser = await chromium.launch({headless: true,
-    ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : process.platform === 'win32' ? {channel: 'msedge'} : {})});
+  browser = await launch();
 });
 after(async () => browser?.close());
 

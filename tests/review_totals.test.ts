@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {addSite, chromium, open, page as built, prefix, script} from './support/web.ts';
+import {addSite, launch, open, page as built, prefix, script} from './support/web.ts';
 test('Overview and Year review keep identical numeric review totals in English and Spanish',async()=>{
- const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:process.platform==='win32'?{channel:'msedge'}:{})});
+ const browser=await launch();
  try {
   const html=built('community');
   // Everything before the page starts rendering.

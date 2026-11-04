@@ -7,30 +7,34 @@ function fixture(language = 'en') {
   run('aki', context);
   return context.AnkiQuestAki as AnkiQuestAkiApi;
 }
+/** The pose Aki takes on a profile page. */
+function mood(aki: AnkiQuestAkiApi, profile: CompanionProfile) {
+  return /data-aki-companion="(\w+)"/.exec(aki.profile(profile))![1];
+}
 test('a stored freeze alone never promises protection',()=>{
   const aki=fixture();
-  assert.equal(aki.mood({freezes:3,streak_state:'pending',today:{reviews:0}} as CompanionProfile),'review');
-  assert.equal(aki.mood({streak_state:'protected',today:{reviews:0}}),'freeze');
-  assert.equal(aki.mood({streak_state:'protected',today:{reviews:1}}),'review');
+  assert.equal(mood(aki,{freezes:3,streak_state:'pending',today:{reviews:0}} as CompanionProfile),'review');
+  assert.equal(mood(aki,{streak_state:'protected',today:{reviews:0}}),'freeze');
+  assert.equal(mood(aki,{streak_state:'protected',today:{reviews:1}}),'review');
 });
 test('celebration requires a nonempty set of confirmed completed quests',()=>{
   const aki=fixture();
-  assert.equal(aki.mood({quests:[]}),'review');
-  assert.equal(aki.mood({quests:[{done:false}]}),'review');
-  assert.equal(aki.mood({quests:[{done:true},{done:false}]}),'review');
-  assert.equal(aki.mood({quests:[{done:true}]}),'celebrate');
-  assert.equal(aki.mood({quests:[{done:'true'}]}),'review');
+  assert.equal(mood(aki,{quests:[]}),'review');
+  assert.equal(mood(aki,{quests:[{done:false}]}),'review');
+  assert.equal(mood(aki,{quests:[{done:true},{done:false}]}),'review');
+  assert.equal(mood(aki,{quests:[{done:true}]}),'celebrate');
+  assert.equal(mood(aki,{quests:[{done:'true'}]}),'review');
 });
 test('streak encouragement requires actual studying today',()=>{
   const aki=fixture();
-  assert.equal(aki.mood({streak_state:'studied',today:{reviews:0}}),'review');
-  assert.equal(aki.mood({streak_state:'studied',today:{reviews:1}}),'streak');
+  assert.equal(mood(aki,{streak_state:'studied',today:{reviews:0}}),'review');
+  assert.equal(mood(aki,{streak_state:'studied',today:{reviews:1}}),'streak');
 });
 test('yesterday\'s cached profile never promises current protection or completion',()=>{
   const aki=fixture();
   const expired=Date.now()-1;
-  assert.equal(aki.mood({day_ends_at:expired,streak_state:'protected',today:{reviews:0}}),'review');
-  assert.equal(aki.mood({day_ends_at:expired,quests:[{done:true}]}),'review');
+  assert.equal(mood(aki,{day_ends_at:expired,streak_state:'protected',today:{reviews:0}}),'review');
+  assert.equal(mood(aki,{day_ends_at:expired,quests:[{done:true}]}),'review');
 });
 test('pose paths are fixed and optional classes cannot inject attributes',()=>{
   const markup=fixture().image('../config.json', '\" onerror=\"alert(1)');
@@ -57,12 +61,10 @@ test('Aki encouragement is translated before it reaches the page',()=>{
 });
 test('every supported web language has Aki encouragement',()=>{
   const messages=[
-    'Aki is here to help. One card, one small step.',
     'A small step starts with one card.',
     'Your daily quests are complete. Look at you go!',
     'You showed up today. That is progress worth keeping.',
     'Your streak is protected by a freeze. A fresh start is waiting.',
-    'Aki, your study companion.',
   ];
   for (const language of ['es','fr','de','pt'] as const) {
     const messagesIn=catalog(language);

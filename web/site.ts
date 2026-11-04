@@ -1,7 +1,7 @@
 import "./i18n";
 import "./aki";
 import {escape, nativeAccount} from "./common";
-import {ownerHeaders, send, type SendOptions} from "./http";
+import {ownerHeaders, send} from "./http";
 
 /* Shared navigation, presentation components, and the browser access gate. */
 (() => {
@@ -64,7 +64,7 @@ import {ownerHeaders, send, type SendOptions} from "./http";
   const invalidateStatus = () => { statusPromise = undefined; statusEpoch++; };
   async function logoutSession() {
     const response = await sessionRequest("/auth/logout");
-    if (!response.ok && response.status !== 404) {
+    if (!response.ok) {
       await AnkiQuestI18n.ready;
       throw new Error(aqText("Could not disconnect. Check your connection and try again."));
     }
@@ -97,7 +97,6 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       if (nativeKey(nativeAccount()) === key) return;
     }
   }
-  // A token is kept only for older servers which do not issue an owner session.
   async function connectMember(user: string, token: string, current: () => boolean = () => true): Promise<OwnerSession> {
     const started = connectionEpoch;
     const owner = await fetch("/api/community/reminders/" + encodeURIComponent(user), {cache: "no-store", headers: {Authorization: "Bearer " + token}});
@@ -115,10 +114,9 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       }
       const response = await sessionRequest("/auth/session", token);
       if (!active()) {
-        if (response.status !== 404 && epoch === connectionEpoch) await reconcileNativeAccount(epoch);
+        if (epoch === connectionEpoch) await reconcileNativeAccount(epoch);
         throw await changedConnection();
       }
-      if (response.status === 404) return {user, token};
       if (!response.ok) {
         await AnkiQuestI18n.ready;
         throw new Error(aqText("Could not connect your account. Check the token and try again."));
@@ -173,11 +171,6 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       }
     }
   }
-  async function readJSON<T = unknown>(url: string, options: SendOptions = {}): Promise<T> {
-    const response = await send(url, options);
-    if (!response.ok) throw new Error(`The server could not load this page (${response.status}).`);
-    return response.json();
-  }
   function setProfile(user: string, current = false) {
     const target = lastIdentity || user;
     document.querySelectorAll<HTMLAnchorElement>("[data-profile-link]").forEach(link => {
@@ -195,7 +188,7 @@ import {ownerHeaders, send, type SendOptions} from "./http";
     const active = header.dataset.siteSection || "leaderboard";
     await AnkiQuestI18n.ready;
     const links: [string, string, string][] = [["today", "/today", aqText("Today")], ["community", "/community", aqText("Community")], ["settings", "/settings", aqText("Settings")], ["leaderboard", "/week", aqText("Leaderboard")], ["records", "/records", aqText("Records")]];
-    header.innerHTML = aqHtml`<a class="brand" href="${href("/")}" aria-label="AnkiQuest home"><img src="/aki/face.png" alt="">ankiquest</a><nav class="site-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav><div class="top-actions"><a class="site-dev" href="${href("/dev")}" hidden>Dev</a><a data-profile-link hidden>Profile</a><a class="button-link primary site-signin" href="/login" hidden>Sign in</a><button type="button" class="site-lock" hidden>Lock site</button></div><p class="site-status error" role="status" hidden></p>`;
+    header.innerHTML = aqHtml`<a class="brand" href="${href("/")}" aria-label="AnkiQuest home"><img src="/aki/face-192.png" alt="">ankiquest</a><nav class="site-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav><div class="top-actions"><a class="site-dev" href="${href("/dev")}" hidden>Dev</a><a data-profile-link hidden>Profile</a><a class="button-link primary site-signin" href="/login" hidden>Sign in</a><button type="button" class="site-lock" hidden>Lock site</button></div><p class="site-status error" role="status" hidden></p>`;
     if (embedded) header.insertAdjacentHTML("afterend", aqHtml`<nav class="tabs embedded-nav" aria-label="Main navigation">${links.map(([key, path, label]) => aqHtml`<a href="${href(path)}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</nav>`);
     const controls = header.querySelector(".top-actions")!;
     if (actions) while (actions.firstChild) controls.insertBefore(actions.firstChild, controls.querySelector(".site-lock"));
@@ -215,7 +208,7 @@ import {ownerHeaders, send, type SendOptions} from "./http";
     });
     await refreshAccess();
   }
-  window.AnkiQuestSite = {embedded, escape, href, avatar, kpi, setProfile, checkAccess, readJSON, status, member, ownerHeaders, connectMember, disconnectMember};
+  window.AnkiQuestSite = {embedded, href, avatar, kpi, setProfile, checkAccess, status, member, ownerHeaders, connectMember, disconnectMember};
   document.addEventListener("DOMContentLoaded", mountHeader, {once: true});
   addEventListener("pageshow", event => { if (event.persisted) refreshAccess(true); });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAccess(true); });

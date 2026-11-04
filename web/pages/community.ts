@@ -1,6 +1,6 @@
 "use strict";
 import {friendNudges} from "./friend-nudges";
-import {escape as esc, nativeAccount} from "../common";
+import {day as date, escape as esc, hourOptions, lexical, nativeAccount, number} from "../common";
 import {failure, send, type SendOptions} from "../http";
 
 /* Payloads from /api/community (src/competition.rs) and the private community APIs. */
@@ -24,10 +24,10 @@ interface Recipient { user:string; display:string; }
 interface ChallengeMember { user:string; display:string; status:string; progress:number; }
 interface Challenge { id:number; title:string; kind:string; cooperative:boolean; creator:string; start_at:number; end_at:number; target:number; members:ChallengeMember[]; progress:number; status:string; weekly:boolean; started:boolean; start_when_ready:boolean; }
 interface WeeklySuggestion { week_start:number; expires_at:number; friend:Recipient; target:number; duration_days:number; dismissed:boolean; challenge_id:number|null; }
-interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion?:WeeklySuggestion|null; }
-/** An activity item (src/decks.rs `Notification`); `legacy` pages come from the older /api/notifications. */
+interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion:WeeklySuggestion|null; }
+/** An activity item (src/decks.rs `Notification`). */
 interface Notice { id:number; title:string; body:string; created_at:number; sender:string; replied:boolean; kind:string; read_at?:number|null; challenge_id?:number|null; route?:string|null; action_required?:boolean; reply_to?:{title:string; body:string}; win?:number|null; image?:string|null; reacted?:boolean; }
-interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; legacy?:boolean; }
+interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; }
 interface SentNotice extends Notice { recipient:string; }
 interface SentPage { items:SentNotice[]; next_before?:number|null; }
 interface NewChallenge { title:string; kind:FormDataEntryValue|null; cooperative:boolean; target:number; duration_days:number; recipients:FormDataEntryValue[]; start_when_ready:boolean; request_id?:string|null; }
@@ -36,10 +36,8 @@ interface NewChallenge { title:string; kind:FormDataEntryValue|null; cooperative
 
 const $ = <T extends HTMLElement = HTMLElement>(id:string) => document.getElementById(id) as T;
 function formField<T extends Element>(form:HTMLFormElement,name:string,type:abstract new()=>T):T { const item=form.elements.namedItem(name);if(item instanceof type)return item;throw new TypeError(`The form has no ${name} field.`); }
-const number = (value:unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
 const amount = (value:unknown) => Math.max(0, Number(value) || 0);
 const errorMessage = (error:unknown) => error instanceof Error ? error.message : String(error);
-const errorStatus = (error:unknown) => error instanceof Error && "status" in error ? error.status : undefined;
 // Set with the first render, once translations are ready (see the end of this file).
 let translated = false;
 const now = new Date();
@@ -61,13 +59,11 @@ const reminderDefinitions = () => reminderLabels ??= [
 ];
 /** Runs `work` now, or after the first render if translations are still loading. */
 function afterReady(work:()=>void) { if(translated)work();else void AnkiQuestI18n.ready.then(work); }
-function date(value:unknown, options:Intl.DateTimeFormatOptions={month:"short",day:"numeric",year:"numeric"}) { if(!value) return "—"; const parsed=new Date(String(value).slice(0,10)+"T12:00:00Z"); return Number.isNaN(parsed.getTime())?String(value):new Intl.DateTimeFormat(AnkiQuestI18n.language,{...options,timeZone:"UTC"}).format(parsed); }
 function dayBefore(value:string) { const parsed=new Date(value+"T12:00:00Z"); parsed.setUTCDate(parsed.getUTCDate()-1); return parsed.toISOString().slice(0,10); }
 function monthName(value:string) { if(!value) return aqText("No study month yet"); return date(value+"-01",{month:"long",year:"numeric"}); }
 function name(user:string) { return state.data?.players.find(player=>player.user===user)?.display || user; }
 function avatar(user:string, display=name(user)) { return AnkiQuestSite.avatar(user, display); }
 function empty(title:string, detail="") { return aqHtml`<div class="empty"><strong>${esc(title)}</strong>${esc(detail)}</div>`; }
-function kpi(label:string, value:unknown, detail:unknown, tone="") { return AnkiQuestSite.kpi(label, value, detail, tone); }
 function chip(text:string,tone="") { return aqHtml`<span class="chip ${tone}">${esc(text)}</span>`; }
 function playerCell(user:string,display=name(user)) { return aqHtml`<span class="table-player">${avatar(user,display)}<button type="button" data-select-player="${esc(user)}">${esc(display)}</button></span>`; }
 function isFinal(period:Period) { return period.status==="final"; }
@@ -101,7 +97,7 @@ function renderOverview() {
   const season=[...data.seasons].reverse().find(matchesPeriod);
   const weeks=data.weeks.filter(period=>isFinal(period)&&matchesPeriod(period)).slice(-3).reverse();
   const days=sum(players,"day_wins"), weekly=sum(players,"week_wins");
-  $("view-overview").innerHTML=aqHtml`<div class="kpis">${kpi(aqText("Study days"),number(sum(summaries,"study_days")),state.player?`Days studied in ${state.year}`:`Combined player-days in ${state.year}`,"green")}${kpi(aqText("Daily victories"),number(days),aqText("Lifetime wins, including shared wins"),"gold")}${kpi(aqText("Weekly titles"),number(weekly),aqText("Lifetime weekly championships"))}${kpi(aqText("Reviews"),number(sum(summaries,"reviews")),`Completed during ${state.year}`,"blue")}</div>
+  $("view-overview").innerHTML=aqHtml`<div class="kpis">${AnkiQuestSite.kpi(aqText("Study days"),number(sum(summaries,"study_days")),state.player?`Days studied in ${state.year}`:`Combined player-days in ${state.year}`,"green")}${AnkiQuestSite.kpi(aqText("Daily victories"),number(days),aqText("Lifetime wins, including shared wins"),"gold")}${AnkiQuestSite.kpi(aqText("Weekly titles"),number(weekly),aqText("Lifetime weekly championships"))}${AnkiQuestSite.kpi(aqText("Reviews"),number(sum(summaries,"reviews")),`Completed during ${state.year}`,"blue")}</div>
   <div class="grid"><article class="card"><div class="card-head"><div><h2>Small steps. Real milestones.</h2><p>Consistency, improvement, and returning to study.</p></div></div>${awardList(awards.slice().reverse().slice(0,5))}</article><article class="card"><div class="card-head"><div><h2>${season?esc(monthName(season.key)):aqText("Monthly seasons")}</h2><p>A fresh start each month. Lifetime trophies stay with you.</p></div>${season?periodBadges(season):""}</div>${season?compactStandings(season,5):empty(aqText("The first season starts with studying."),aqText("Monthly progress will appear here."))}</article></div>
   <div class="grid"><article class="card"><div class="card-head"><div><h2>Recent weekly champions</h2><p>Finalized results in ${state.year}.</p></div><button class="link-button" data-goto="calendar" type="button">See calendar →</button></div>${weeks.length?aqHtml`<ul class="list">${weeks.map(period=>aqHtml`<li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${esc(period.winners.length?period.winners.map(name).join(" & "):aqText("No winner"))}</strong><small>${esc(periodName(period))}</small></div><button type="button" class="link-button" data-period="week:${esc(period.key)}">Details</button></li>`).join("")}</ul>`:empty(aqText("Your next chapter is being written."),aqText("Final weekly champions will appear after the competition closes."))}</article><article class="card"><div class="card-head"><div><h2>Keep the momentum</h2><p>Support for the days when life gets busy.</p></div><span class="symbol" aria-hidden="true">↗</span></div><p class="section-intro">Set a gentle daily nudge, get a warning when your streak has no freeze left, and celebrate your week with a personal recap.</p><div class="form-actions"><button data-goto="reminders" type="button">Choose my reminders</button><button data-goto="challenges" class="primary" type="button">Start a friendly challenge</button></div></article></div>`;
 }
@@ -149,7 +145,6 @@ function winnerCountTable() {
   const controls=aqHtml`<div class="win-controls"><div class="segmented" role="group" aria-label="Winner history scope"><button type="button" data-trophy-win-scope="shared" aria-pressed="${shared}">Shared history</button><button type="button" data-trophy-win-scope="lifetime" aria-pressed="${!shared}">Lifetime</button></div><label class="win-sort" for="trophy-win-metric">Rank by <select id="trophy-win-metric">${[["day",aqText("Days won")],["week",aqText("Weeks won")],["month",aqText("Months won")]].map(([key,label])=>aqHtml`<option value="${key}"${metric===key?" selected":""}>${label}</option>`).join("")}</select></label></div>`;
   if(!data?.shared||!data?.lifetime)return controls+empty(aqText("Winner counts are unavailable."),aqText("The calendar and your trophy cabinet are still available below."));
   const scope=shared?data.shared:data.lifetime,ready=!shared||amount(data.shared.player_count)>=2,key=`${metric}_wins` as const;
-  const lexical=(a:string,b:string)=>a<b?-1:a>b?1:0;
   const players=(scope.players||[]).filter(player=>player.history_start).sort((a,b)=>amount(b[key])-amount(a[key])||lexical(String(a.display),String(b.display))||lexical(String(a.user),String(b.user)));
   const waiting=(data.waiting_players||[]).filter(player=>!state.player||player.user===state.player).sort((a,b)=>lexical(String(a.display),String(b.display))||lexical(String(a.user),String(b.user)));
   const lifetimeStart=data.meta?.start_source==="configured"?`since the configured server start${data.meta.start_date?` on ${esc(date(data.meta.start_date))}`:""}`:`across available retained history${data.meta?.start_date?` from ${esc(date(data.meta.start_date))}`:""} (which may predate this server)`;
@@ -195,7 +190,7 @@ function renderYear() {
   const monthly=Array.from({length:12},(_,index)=>{const key=`${state.year}-${String(index+1).padStart(2,"0")}`;return summaries.reduce((total,summary)=>total+amount((summary.months||[]).find(item=>item.month===key)?.xp),0);});
   const max=Math.max(...monthly,1), bestMonth=monthly.some(value=>value>0)?months()[monthly.indexOf(Math.max(...monthly))]:aqText("Still ahead");
   const trophies=players.flatMap(player=>(player.trophies||[]).filter(trophy=>String(trophy.date).startsWith(String(state.year))).map(trophy=>({...trophy,display:player.display})));
-  $("view-year").innerHTML=aqHtml`<div class="year-header"><div><div class="eyebrow">Look how far you’ve come</div><h2>${state.player?esc(name(state.player))+"’s year":aqText("A year of showing up")}</h2><p>${state.player?aqText("Every session added up. Here’s the story of your study year."):aqText("Your community’s shared effort, one study session at a time.")}</p></div><span class="year-number">${state.year}</span></div><div class="kpis">${kpi(aqText("Study days"),number(days),state.player?aqText("Days you chose to show up"):aqText("Combined player-days"),"green")}${kpi(aqText("Reviews"),number(reviews),aqText("Cards reviewed this year"),"blue")}${kpi(aqText("Best streak"),number(best)+" days",state.player?aqText("Your best streak this year"):aqText("Best player streak this year"))}${kpi(aqText("XP earned"),number(xp),aqText("Your progress, added up"),"gold")}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>A year in progress</h2><p>Strongest month: <strong>${esc(bestMonth)}</strong></p></div></div><div class="bars" role="img" aria-label="${esc(months().map((month,index)=>month+": "+number(monthly[index])+" XP").join("; "))}">${monthly.map((value,index)=>aqHtml`<div class="bar-item${value===max&&value>0?" highlight":""}" title="${esc(months()[index])}: ${number(value)} XP"><i style="height:${Math.max(1,value/max*140)}px"></i><span>${esc(months()[index].slice(0,3))}</span></div>`).join("")}</div><p class="settings-hint">Monthly XP follows the competition calendar. Partial months use available history.</p></article><article class="card"><div class="card-head"><div><h2>A year to remember</h2><p>The wins are part of the story. Showing up is the rest.</p></div></div><ul class="list"><li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${number(wins)} daily wins</strong><small>Days at the top, including shared wins</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">✦</span><div class="row-text"><strong>${number(weeks)} weekly titles</strong><small>Championships earned in ${state.year}</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">↗</span><div class="row-text"><strong>${number(trophies.length)} trophies earned</strong><small>${trophies.length?esc(trophies.slice(-2).map(item=>item.title).join(" · ")):aqText("Your next milestone is ahead")}</small></div></li></ul></article></div>${!reviews?empty(aqText("Your story for this year is still beginning."),aqText("Choose another year to look back, or study today to start a new chapter.")):""}`;
+  $("view-year").innerHTML=aqHtml`<div class="year-header"><div><div class="eyebrow">Look how far you’ve come</div><h2>${state.player?esc(name(state.player))+"’s year":aqText("A year of showing up")}</h2><p>${state.player?aqText("Every session added up. Here’s the story of your study year."):aqText("Your community’s shared effort, one study session at a time.")}</p></div><span class="year-number">${state.year}</span></div><div class="kpis">${AnkiQuestSite.kpi(aqText("Study days"),number(days),state.player?aqText("Days you chose to show up"):aqText("Combined player-days"),"green")}${AnkiQuestSite.kpi(aqText("Reviews"),number(reviews),aqText("Cards reviewed this year"),"blue")}${AnkiQuestSite.kpi(aqText("Best streak"),number(best)+" days",state.player?aqText("Your best streak this year"):aqText("Best player streak this year"))}${AnkiQuestSite.kpi(aqText("XP earned"),number(xp),aqText("Your progress, added up"),"gold")}</div><div class="grid"><article class="card"><div class="card-head"><div><h2>A year in progress</h2><p>Strongest month: <strong>${esc(bestMonth)}</strong></p></div></div><div class="bars" role="img" aria-label="${esc(months().map((month,index)=>month+": "+number(monthly[index])+" XP").join("; "))}">${monthly.map((value,index)=>aqHtml`<div class="bar-item${value===max&&value>0?" highlight":""}" title="${esc(months()[index])}: ${number(value)} XP"><i style="height:${Math.max(1,value/max*140)}px"></i><span>${esc(months()[index].slice(0,3))}</span></div>`).join("")}</div><p class="settings-hint">Monthly XP follows the competition calendar. Partial months use available history.</p></article><article class="card"><div class="card-head"><div><h2>A year to remember</h2><p>The wins are part of the story. Showing up is the rest.</p></div></div><ul class="list"><li class="list-row"><span class="symbol" aria-hidden="true">♜</span><div class="row-text"><strong>${number(wins)} daily wins</strong><small>Days at the top, including shared wins</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">✦</span><div class="row-text"><strong>${number(weeks)} weekly titles</strong><small>Championships earned in ${state.year}</small></div></li><li class="list-row"><span class="symbol" aria-hidden="true">↗</span><div class="row-text"><strong>${number(trophies.length)} trophies earned</strong><small>${trophies.length?esc(trophies.slice(-2).map(item=>item.title).join(" · ")):aqText("Your next milestone is ahead")}</small></div></li></ul></article></div>${!reviews?empty(aqText("Your story for this year is still beginning."),aqText("Choose another year to look back, or study today to start a new chapter.")):""}`;
 }
 function renderAll() {
   if(!state.data) return;
@@ -216,7 +211,6 @@ function renderPrivate() {
   if(state.privateError) { ["challenges","reminders"].forEach(panel=>$("view-"+panel).innerHTML=banner+aqHtml`<div class="notice error" role="alert">${esc(state.privateError)} <button type="button" data-private-retry>Try again</button></div>`);return; }
   renderReminderForm(banner);renderChallenges(banner);
 }
-function hourOptions(selected:unknown) { return Array.from({length:24},(_,hour)=>aqHtml`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join(""); }
 function renderReminderForm(banner:string) {
   const prefs=state.reminderDraft||state.reminders;if(!prefs) { $("view-reminders").innerHTML=banner;return; }
   $("view-reminders").innerHTML=banner+aqHtml`<article class="card"><div class="card-head"><div><h2>A nudge when it helps</h2><p>Choose each reminder. You’re in control of the frequency.</p></div><span class="symbol" aria-hidden="true">◷</span></div><form id="reminder-form"><div class="settings-list">${reminderDefinitions().map(([key,title,description])=>aqHtml`<label class="check"><input type="checkbox" name="${key}" ${prefs[key]?"checked":""}><span><strong>${title}</strong><small>${description}</small></span></label>`).join("")}</div><div class="settings-timing"><label class="field"><span>Daily reminder at</span><select name="reminder_hour">${hourOptions(prefs.reminder_hour)}</select></label><label class="field"><span>Quiet hours start</span><select name="quiet_start">${hourOptions(prefs.quiet_start)}</select></label><label class="field"><span>Quiet hours end</span><select name="quiet_end">${hourOptions(prefs.quiet_end)}</select></label><label class="field"><span>Daily limit</span><select name="daily_limit">${[1,2,3,4,5].map(value=>aqHtml`<option value="${value}" ${value===prefs.daily_limit?"selected":""}>${esc(value===1 ? aqText`${value} notification` : aqText`${value} notifications`)}</option>`).join("")}</select></label></div><p class="settings-hint">Reminder times use your AnkiQuest timezone. Streak warnings follow your Anki day cutoff and stop after studying is recorded. Quiet hours and your daily limit apply to these reminders, including urgent ones. Set the same quiet start and end to disable quiet hours.</p><p class="settings-hint">These preferences control server reminders. Device-only AnkiDroid and desktop add-on alarms are managed separately in each client's settings. Delivery uses the notification channel configured for your AnkiQuest account. Freeze refill reminders apply when quest-earned freezes are enabled.</p><p id="reminder-status" class="status" role="status"></p><div class="form-actions"><button class="primary" type="submit">Save reminder preferences</button></div></form></article>`;
@@ -267,7 +261,7 @@ function renderChallenges(banner:string) {
 }
 function renderFriendAchievements() {
   const items = (state.friendAchievements?.items || []).filter(item => (item.kind === "completion" || item.kind === "conquest") && item.sender && item.sender !== state.session!.user);
-  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and hard cards they learned at last.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div>${item.kind === "conquest" ? aqHtml`<span class="chip gold">Card conquered</span>` : aqHtml`<span class="chip green">Deck complete</span>`}</div><p>${esc(item.body)}</p>${item.replied ? aqHtml`<p class="settings-hint">Congratulations sent</p>` : aqHtml`<button type="button" data-congratulate>Congratulate</button>`}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml`<p role="status">Loading achievements…</p>` : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.friendAchievements?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only achievements shared with your account appear here.</p></section>`;
+  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and hard cards they learned at last.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div>${item.kind === "conquest" ? aqHtml`<span class="chip gold">Card conquered</span>` : aqHtml`<span class="chip green">Deck complete</span>`}</div><p>${esc(item.body)}</p>${item.replied ? aqHtml`<p class="settings-hint">Congratulations sent</p>` : aqHtml`<button type="button" data-congratulate>Congratulate</button>`}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml`<p role="status">Loading achievements…</p>` : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${aqText`The last ${state.activityDays} days`}. Only achievements shared with your account appear here.</p></section>`;
 }
 function renderChallenge(challenge:Challenge, detail = false) {
   const me = challenge.members.find(member => member.user === state.session!.user), ended = challengeEnded(challenge);
@@ -307,9 +301,9 @@ function renderInbox(payload:ActivityPage|null, items:Notice[]) {
   const attention=Array.isArray(payload?.attention)?payload.attention:[];
   const showAttention=state.activityCategory==="all"&&attention.length>0;
   const visible=showAttention?items.filter(item=>!attention.some(important=>important.id===item.id)):items;
-  const categories=payload?.legacy?"":aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories().map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload?.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
+  const categories=aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories().map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload?.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
   const emptyText=state.activityUnreadOnly?aqText("No unread notifications here."):state.activityCategory==="needs_action"?aqText("No invitations need a response."):state.activityCategory!=="all"?aqText("Nothing in this category yet."):showAttention?aqText("Everything else is up to date."):aqText("You're all caught up.");
-  return aqHtml`${renderAttention(payload)}${categories}${payload?.legacy ? aqHtml`<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>` : aqHtml`<label class="activity-window">Show <select id="activity-window"><option value="30" ` + (state.activityDays === 30 ? "selected" : "") + aqHtml`>Last 30 days</option><option value="90" ` + (state.activityDays === 90 ? "selected" : "") + aqHtml`>Last 90 days</option></select></label>`}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml`<p role="status">Loading…</p>` : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
+  return aqHtml`${renderAttention(payload)}${categories}${aqHtml`<label class="activity-window">Show <select id="activity-window"><option value="30" ` + (state.activityDays === 30 ? "selected" : "") + aqHtml`>Last 30 days</option><option value="90" ` + (state.activityDays === 90 ? "selected" : "") + aqHtml`>Last 90 days</option></select></label>`}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml`<p role="status">Loading…</p>` : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
 }
 function renderAttention(payload:ActivityPage|null) {
   if(!payload?.action_count || state.activityCategory==="needs_action")return "";
@@ -324,7 +318,7 @@ function renderActivityDays(items:Notice[]) {
 }
 function renderMailbox(payload:ActivityPage|null, unread:number) {
   const box = state.activityBox;
-  return aqHtml`<div class="actions activity-box"><div class="segmented" role="group" aria-label="Activity mailbox"><button type="button" data-activity-box="inbox" aria-pressed="${box === "inbox"}">Inbox</button><button type="button" data-activity-box="sent" aria-pressed="${box === "sent"}">Sent</button></div>${box === "inbox" && unread && !payload?.legacy ? aqHtml`<button type="button" data-activity-read-all>Mark all as read</button>` : ""}</div>`;
+  return aqHtml`<div class="actions activity-box"><div class="segmented" role="group" aria-label="Activity mailbox"><button type="button" data-activity-box="inbox" aria-pressed="${box === "inbox"}">Inbox</button><button type="button" data-activity-box="sent" aria-pressed="${box === "sent"}">Sent</button></div>${box === "inbox" && unread ? aqHtml`<button type="button" data-activity-read-all>Mark all as read</button>` : ""}</div>`;
 }
 function renderSent() {
   if (state.sentLoading && !state.sent) return aqHtml`<p role="status" class="loading-copy">Loading…</p>`;
@@ -361,7 +355,7 @@ function renderCheer(item:Notice) {
 }
 function renderActivityItem(item:Notice) {
   const id = Number(item.id), challenge = Number(item.challenge_id), target = Number.isSafeInteger(challenge) && challenge > 0 ? challenge : /^\/community#challenge-([1-9]\d*)$/.exec(item.route || "")?.[1];
-  const unread = !state.activity?.legacy && !item.read_at;
+  const unread = !item.read_at;
   const answerable = !!item.sender && !item.replied && !target;
   const quickReply = item.kind === "completion" || item.kind === "conquest" || item.kind === "share" ? aqText("Good job!") : item.kind === "reply" || item.kind === "reaction" ? aqText("Thanks!") : item.kind === "nudge" ? aqText("On it!") : "";
   const reaction = item.kind === "reaction", heading = reaction && item.body ? `${item.title}: ${item.body}` : item.title;
@@ -445,13 +439,7 @@ async function loadFriendAchievements(more=false) {
   if(state.challenges)renderChallenges(accountBanner());
   try {
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
-    let payload:ActivityPage;
-    try { payload=await ownerRequest<ActivityPage>(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
-    catch(error) {
-      if(errorStatus(error)===400)payload=await ownerRequest<ActivityPage>(base+(before?"&before="+encodeURIComponent(before):""),undefined,session);
-      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);payload={items:items.slice().reverse(),next_before:null,legacy:true};}
-      else throw error;
-    }
+    const payload=await ownerRequest<ActivityPage>(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session);
     if(state.session!==session||epoch!==state.achievementEpoch)return;
     const items=(Array.isArray(payload.items)?payload.items:[]).filter(item=>item.kind==="completion"||item.kind==="conquest");
     state.friendAchievements={...payload,items:before?[...(state.friendAchievements?.items||[]),...items.filter(item=>!state.friendAchievements!.items.some(old=>old.id===item.id))]:items};
@@ -463,15 +451,9 @@ async function loadActivity(more=false) {
   const epoch=++state.activityEpoch,before=more?state.activity?.next_before:null;
   state.activityLoading=true;state.activityError="";renderActivity(accountBanner());
   try {
-    let payload:ActivityPage;
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
     const filters=`${state.activityCategory!=="all"?"&category="+encodeURIComponent(state.activityCategory):""}${state.activityUnreadOnly?"&unread_only=true":""}`;
-    try { payload=await ownerRequest<ActivityPage>(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session); }
-    catch(error) {
-      if(errorStatus(error)===400&&filters){state.activityCategory="all";state.activityUnreadOnly=false;payload=await ownerRequest<ActivityPage>(base,undefined,session);}
-      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);state.activityCategory="all";state.activityUnreadOnly=false;payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};}
-      else throw error;
-    }
+    const payload=await ownerRequest<ActivityPage>(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session);
     if(state.session!==session||epoch!==state.activityEpoch)return;
     const items=Array.isArray(payload.items)?payload.items:[];
     state.activity={...payload,items:before?[...(state.activity?.items||[]),...items.filter(item=>!state.activity!.items.some(old=>old.id===item.id))]:items};
@@ -487,12 +469,12 @@ async function loadSent(more=false) {
     if(state.session!==session||epoch!==state.sentEpoch)return;
     const items=Array.isArray(page.items)?page.items:[];
     state.sent={...page,items:before?[...(state.sent?.items||[]),...items]:items};
-  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=errorStatus(error)===404?aqText("This server does not keep sent messages yet."):error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):errorMessage(error); }
+  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.sentEpoch){state.sentLoading=false;renderActivity(accountBanner());} }
 }
 async function markAllRead(button:HTMLButtonElement) {
   const session=state.session,through=Number(state.activity?.latest_id)||Math.max(0,...(state.activity?.items||[]).map(item=>Number(item.id)).filter(Number.isSafeInteger));
-  if(!session||!through||state.activity?.legacy)return;
+  if(!session||!through)return;
   button.disabled=true;
   try {
     await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{through},session);
@@ -502,7 +484,7 @@ async function markAllRead(button:HTMLButtonElement) {
   } catch(error) { if(state.session!==session)return;button.disabled=false;const status=$("activity-action-status");if(status){status.className="status error";status.textContent=aqText("Could not mark everything read.")+" "+errorMessage(error);} }
 }
 async function markRead(id:string|number|undefined,rerender=true) {
-  const session=state.session;if(!session||state.activity?.legacy)return;
+  const session=state.session;if(!session)return;
   await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{ids:[Number(id)]},session);
   if(state.session!==session)return;
   const matches=[...(state.activity?.items||[]),...(state.activity?.attention||[]),...(state.friendAchievements?.items||[])].filter(item=>Number(item.id)===Number(id));

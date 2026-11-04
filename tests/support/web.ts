@@ -2,17 +2,76 @@
 // scripts bundled from web/ the way build.rs bundles them, pages with their inline
 // scripts filled in, and the translation module.
 import {buildSync} from "esbuild";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawn} from "node:child_process";
 import fs from "node:fs";
 import {createRequire} from "node:module";
+import net from "node:net";
 import path from "node:path";
 import vm from "node:vm";
-import type {Page, Route} from "playwright";
+import type {Browser, LaunchOptions, Page, Route} from "playwright";
 
 export const root = path.resolve(import.meta.dirname, "..", "..");
 
 /** Playwright, or the module named by PLAYWRIGHT_MODULE, resolved from tests/ as `require` did. */
 export const {chromium} = createRequire(path.join(root, "tests", "index.js"))(process.env.PLAYWRIGHT_MODULE || "playwright") as typeof import("playwright");
+
+/**
+ * A headless browser: the PLAYWRIGHT_CHANNEL browser when set (CI sets "chromium"), otherwise
+ * Edge on Windows, where it is always installed, and Playwright's own Chromium elsewhere.
+ */
+export function launch(options: LaunchOptions = {}): Promise<Browser> {
+  const channel = process.env.PLAYWRIGHT_CHANNEL || (process.platform === "win32" ? "msedge" : undefined);
+  return chromium.launch({headless: true, ...(channel ? {channel} : {}), ...options});
+}
+
+/** A server started by `startServer`. */
+export interface Server {
+  /** Where it listens, such as http://127.0.0.1:41234. */
+  base: string;
+  /** Stops it and closes its log; safe to call more than once. */
+  stop(): Promise<void>;
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const {port} = socket.address() as net.AddressInfo;
+      socket.close(() => resolve(port));
+    });
+  });
+}
+
+/**
+ * Starts the compiled server (ANKIQUEST_BIN, or target/debug/ankiquest) on a free local port, with
+ * `config` plus its `addr` and `state_dir` written to `dir`/config.json and its output appended to
+ * `dir`/server.log. Resolves once it answers /auth/status.
+ */
+export async function startServer(dir: string, config: Record<string, unknown>): Promise<Server> {
+  const exe = process.env.ANKIQUEST_BIN || path.join(root, "target", "debug", process.platform === "win32" ? "ankiquest.exe" : "ankiquest");
+  const port = await freePort(), base = `http://127.0.0.1:${port}`;
+  const file = path.join(dir, "config.json"), logFile = path.join(dir, "server.log");
+  fs.writeFileSync(file, JSON.stringify({addr: `127.0.0.1:${port}`, state_dir: dir, ...config}));
+  const log = fs.openSync(logFile, "a");
+  const child = spawn(exe, [file], {windowsHide: true, stdio: ["ignore", log, log]});
+  let stopped: Promise<void> | undefined;
+  const stop = () => stopped ??= (async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise(resolve => child.once("exit", resolve));
+      child.kill();
+      await exited;
+    }
+    fs.closeSync(log);
+  })();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (child.exitCode !== null) break;
+    try { if ((await fetch(base + "/auth/status")).ok) return {base, stop}; } catch (_) { /* not listening yet */ }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  await stop();
+  throw new Error(`the server did not start: ${fs.readFileSync(logFile, "utf8")}`);
+}
 
 const scripts = new Map<string, string>();
 
@@ -68,7 +127,7 @@ export function page(name: string): string {
 let wasm: Buffer | undefined;
 
 /** The translation module, built with the same profile as the server's. */
-export function wasmBytes(): Buffer {
+function wasmBytes(): Buffer {
   if (!wasm) {
     execFileSync("cargo", ["build", "--quiet", "--package=ankiquest-i18n-wasm", "--target=wasm32-unknown-unknown", "--profile=wasm"], {cwd: root, stdio: "inherit"});
     wasm = fs.readFileSync(path.join(root, "target/wasm32-unknown-unknown/wasm/ankiquest_i18n_wasm.wasm"));
@@ -79,7 +138,7 @@ export function wasmBytes(): Buffer {
 let compiled: WebAssembly.Module | undefined;
 
 /** The compiled translation module, which `web/i18n.ts` accepts as `AnkiQuestI18nModule`. */
-export function wasmModule(): WebAssembly.Module {
+function wasmModule(): WebAssembly.Module {
   compiled ??= new WebAssembly.Module(new Uint8Array(wasmBytes()));
   return compiled;
 }

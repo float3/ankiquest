@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {addSite, chromium, open, page as built, prefix, root as repository, script} from './support/web.ts';
+import {addSite, launch, open, page as built, prefix, root as repository, script} from './support/web.ts';
 
 const source = built('community');
 const siteStyles = fs.readFileSync(path.join(repository, 'static/site.css'), 'utf8');
@@ -19,10 +19,7 @@ const evidence = process.env.ANKIQUEST_AVATAR_EVIDENCE;
 if (evidence) fs.mkdirSync(evidence, { recursive: true });
 
 async function main() {
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
-  });
+  const browser = await launch();
   const results: object[] = [], failures: string[] = [];
   try {
     for (const width of [390, 1440]) {

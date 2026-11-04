@@ -1,4 +1,5 @@
 /* Friend nudges use the same private account as the community page. */
+import {escape as esc} from "../common";
 
 interface NudgeFriend { user: string; display: string; enabled: boolean; sent_today: boolean; muted_by_me: boolean; }
 interface NudgeSettings { receiving: boolean; automatic_receiving: boolean; friends: NudgeFriend[]; }
@@ -15,7 +16,7 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message : S
 
 /** Creates the dialog and its listeners; call once, synchronously at page load. */
 export function friendNudges(account: NudgeAccount): void {
-  const {t: aqText, html: aqHtml} = AnkiQuestI18n, {escape: esc, avatar} = AnkiQuestSite;
+  const {t: aqText, html: aqHtml} = AnkiQuestI18n, {avatar} = AnkiQuestSite;
   const dialog = document.createElement("dialog");
   dialog.className = "dialog";
   // The dialog stays closed until the page has rendered, which waits for translations too.
@@ -50,7 +51,7 @@ export function friendNudges(account: NudgeAccount): void {
       const payload = await account.request<NudgeSettings>(`/api/friend-nudges/${encodeURIComponent(captured.user)}`, undefined, captured);
       if (current(captured, epoch)) render(payload);
     } catch (error) {
-      if (current(captured, epoch)) dialog.innerHTML = aqHtml`<p role="alert">${esc(statusOf(error) === 404 ? aqText("Update the server to use friend nudges.") : messageOf(error))}</p><button type="button" data-nudge-close>Close</button>`;
+      if (current(captured, epoch)) dialog.innerHTML = aqHtml`<p role="alert">${esc(messageOf(error))}</p><button type="button" data-nudge-close>Close</button>`;
     }
   }
   async function change(control: HTMLInputElement | HTMLButtonElement, mode: Change) {

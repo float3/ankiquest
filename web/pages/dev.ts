@@ -1,3 +1,4 @@
+import {escape as esc} from "../common";
 import {send} from "../http";
 
 /** `/api/dev/<user>/stats` (`Stats` in src/dev.rs). */
@@ -25,7 +26,6 @@ interface Announcement {
 interface LogEntry {at: number; user: string | null; message: string}
 
 const DAY_MS = 86_400_000;
-const esc = AnkiQuestSite.escape;
 const app = document.getElementById("app")!;
 const num = (n: number) => n.toLocaleString("en");
 const date = (day: number) => new Date(day * DAY_MS).toISOString().slice(0, 10);

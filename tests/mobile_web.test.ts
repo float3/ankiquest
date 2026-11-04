@@ -4,23 +4,18 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
-import type {ChildProcess} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
 import type {Browser, Page} from 'playwright';
-import {chromium, fulfillAsset, page as built, root as repo} from './support/web.ts';
+import {fulfillAsset, launch, page as built, startServer, type Server} from './support/web.ts';
 const out = process.env.QA_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'ankiquest-mobile-web-'));
 fs.mkdirSync(out, {recursive: true});
 const run = fs.mkdtempSync(path.join(out, 'fixture-'));
 const token = 'test-alice-member-token', bobToken = 'test-bob-member-token', password = 'test-read-only-password';
 const checks: string[] = [], errors: string[] = [];
 checks.push = function(...items: string[]) { const length=Array.prototype.push.apply(this,items);console.log(items.join('\n'));return length; };
-let browser: Browser | undefined, server: ChildProcess | undefined, base: string, log: number | undefined;
-const exe = process.env.ANKIQUEST_BIN || path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'ankiquest.exe' : 'ankiquest');
+let browser: Browser | undefined, server: Server | undefined, base: string;
 const sourceAssets = process.argv.includes('--source-assets');
-async function freePort() { return new Promise<number>((resolve, reject) => { const s = net.createServer();s.once('error', reject);s.listen(0, '127.0.0.1', () => { const port = (s.address() as net.AddressInfo).port;s.close(() => resolve(port)); }); }); }
 interface Member { user: string; status: string; progress: number }
 interface Goal { id: number; title: string; weekly?: boolean; started?: boolean; progress: number; start_at: number; end_at: number; members: Member[] }
 interface Challenges { challenges: Goal[]; weekly_suggestion?: { week_start: number; challenge_id: number | null; friend: { user: string } } }
@@ -30,7 +25,6 @@ async function api<T = unknown>(route: string, body?: unknown, credential = toke
   assert.equal(response.status, expected, route + ': ' + (response.status === expected ? '' : await response.text()));
   return (expected === 204 ? null : response.json()) as T;
 }
-async function ready() { for(let n=0;n<100;n++){ if(server!.exitCode !== null) throw Error('fixture exited: ' + fs.readFileSync(path.join(run,'server.log'),'utf8'));try{if((await fetch(base+'/auth/status')).ok)return;}catch{}await new Promise(resolve=>setTimeout(resolve,100)); }throw Error('fixture failed to start'); }
 async function overflow(page: Page, label: string) {
   const width = await page.evaluate(() => ({viewport:innerWidth, content:document.documentElement.scrollWidth}));
   assert(width.content <= width.viewport, label + ': ' + JSON.stringify(width));
@@ -46,7 +40,6 @@ async function signIn(page: Page, credential: string) {
 }
 async function screenshot(page: Page, name: string) { await page.screenshot({path:path.join(out,name+'.png'),fullPage:true}); }
 async function main() {
-  const port = await freePort();base='http://127.0.0.1:'+port;
   fs.writeFileSync(path.join(run,'password'),password);
   const db = new DatabaseSync(path.join(run,'ankiquest.db'));
   db.exec('CREATE TABLE reviews(user TEXT NOT NULL,id INTEGER NOT NULL,cid INTEGER NOT NULL,last_ivl INTEGER NOT NULL,time_ms INTEGER NOT NULL,kind INTEGER NOT NULL,PRIMARY KEY(user,id)) WITHOUT ROWID;CREATE TABLE clocks(user TEXT PRIMARY KEY,offset_west_min INTEGER NOT NULL,rollover_hour INTEGER NOT NULL);BEGIN');
@@ -57,15 +50,12 @@ async function main() {
     for(let ago=16;ago>=1;ago--)for(let n=0;n<20+index*7;n++)insert.run(user,midnight-ago*86400000+12*3600000+n*5000,ago*1000+n,1,5000,1);
   }
   db.exec('COMMIT');db.close();
-  fs.writeFileSync(path.join(run,'config.json'),JSON.stringify({addr:'127.0.0.1:'+port,state_dir:run,private_site:true,site_password_file:path.join(run,'password'),week_timezone:'UTC',week_rollover_hour:4,users:{alice:{display:'Alice <team>',token},bob:{display:'Bob Rivera',token:bobToken},cleo:{display:'Cléo Martín',token:'test-cleo-token'}}}));
-  log=fs.openSync(path.join(run,'server.log'),'a');
-  server=spawn(exe,[path.join(run,'config.json')],{windowsHide:true,stdio:['ignore',log,log]});
-  await ready();
-  for(const name of ['welcome','review','celebrate','streak','freeze','winner','face']) {
+  server=await startServer(run,{private_site:true,site_password_file:path.join(run,'password'),week_timezone:'UTC',week_rollover_hour:4,users:{alice:{display:'Alice <team>',token},bob:{display:'Bob Rivera',token:bobToken},cleo:{display:'Cléo Martín',token:'test-cleo-token'}}});base=server.base;
+  for(const name of ['welcome','review','celebrate','streak','freeze','winner','face','face-192','face-32']) {
     const art=await fetch(base+'/aki/'+name+'.png');assert.equal(art.status,200);assert.equal(art.headers.get('content-type'),'image/png');
   }
   assert.equal((await fetch(base+'/aki/unknown.png',{redirect:'manual'})).status,303,'unknown art paths do not bypass private access');
-  checks.push('only the seven Aki images are available before private sign-in');
+  checks.push('only the Aki images and icons are available before private sign-in');
   const history=new DatabaseSync(path.join(run,'ankiquest.db'));
   history.exec('PRAGMA busy_timeout=5000');
   history.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','','An earlier study update','Your activity stays available after a notification is dismissed.',Math.floor(Date.now()/86400000)-10,Date.now()-10*86400000,'message');
@@ -78,11 +68,11 @@ async function main() {
   records.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','bob','A note from Bob','Nice work on your studying!',Math.floor(Date.now()/86400000),Date.now(),'message');
   records.prepare('INSERT INTO notifications(recipient,sender,title,body,day,created_at,kind) VALUES(?,?,?,?,?,?,?)').run('alice','bob','Deck complete','Bob Rivera finished Spanish for today.',Math.floor(Date.now()/86400000),Date.now(),'completion');
   records.close();
-  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:{})});
+  browser=await launch();
   const context=await browser.newContext({locale:"en-US",viewport:{width:390,height:844}});
   if(sourceAssets)await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
-    const name=url.pathname==='/community'?'community':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index':url.pathname==='/login'?'login':null;
+    const name=url.pathname==='/community'?'community':url.pathname==='/settings'?'personal':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index':url.pathname==='/login'?'login':null;
     if(name)await route.fulfill({status:200,contentType:'text/html',body:built(name)});else if(!await fulfillAsset(route,url.pathname))await route.continue();
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
@@ -146,12 +136,18 @@ async function main() {
   checks.push('sent replies show when they were read; mark all as read empties the inbox count');
   await page.goto(base+'/#alice');await page.locator('#manage-freezes').waitFor();
   await page.locator('[data-aki-companion] .aki-art').waitFor();
-  await page.locator('#manage-freezes').click();await page.locator('#freeze-preferences').waitFor();
-  await page.locator('#streak-freezes .aki-dialog-art').waitFor();
-  assert.equal(await page.locator('#streak-freezes .aki-art').count(),1);
-  assert.equal(await page.locator('#freeze-token:visible').count(),0);await page.locator('#freeze-enabled').check();await page.locator('#freeze-preferences button[type=submit]').click();await page.locator('#freeze-status').filter({hasText:'is on'}).waitFor();await page.locator('#freeze-close').click();
-  await page.locator('#manage-decks').click();await page.locator('#deck-settings').waitFor();assert.equal(await page.locator('#deck-token:visible').count(),0);await page.locator('#deck-close').click();
-  checks.push('freeze/deck preferences reuse owner session without repeated token');
+  assert.equal(await page.locator('#manage-decks').getAttribute('href'),'/settings#deck-sharing');
+  assert.equal(await page.locator('#manage-received-notifications').getAttribute('href'),'/settings#deck-alerts');
+  // The Android app hands the page its member after installing that member's session cookie.
+  const android=await context.newPage();android.on('pageerror',error=>errors.push(error.message));
+  await android.addInitScript(()=>{window.ankiquestSession={user:'alice'};});
+  await android.goto(base+'/#alice');await android.locator('#manage-freezes').click();
+  await android.waitForURL('**/settings#streak-protection');await android.locator('#freeze-toggle').waitFor();
+  assert(await android.locator('#personal-gate').isHidden(),'the Android session needs no token on /settings');
+  await android.locator('#freeze-toggle').setChecked(!await android.locator('#freeze-toggle').isChecked());
+  await android.locator('#freeze-status').filter({hasText:'Saved'}).waitFor();
+  await android.close();
+  checks.push('profile settings links open /settings with the Android session and no token');
   for(const width of [320,390,1440])for(const theme of ['light','dark'] as const) {
     await page.setViewportSize({width,height:width<400?844:1000});await page.emulateMedia({colorScheme:theme});
     for(const [route,name] of [['/community#challenges','friends'],['/community#activity','activity'],['/community#challenge-'+invitation.id,'goal'],['/community#reminders','reminders'],['/community#overview','history'],['/?embed=1#alice','profile']]) {
@@ -159,6 +155,7 @@ async function main() {
       const readySelector=({profile:'#manage-freezes',history:'#view-overview .kpi',friends:'#view-challenges .challenge',activity:'#view-activity .activity-item',goal:'#view-challenges [data-goal]',reminders:'#reminder-form'} as Record<string,string>)[name]!;
       await page.locator(readySelector).first().waitFor();
       await overflow(page,name+' '+width+' '+theme);
+      if(name==='profile')assert.equal(await page.locator('#manage-decks').getAttribute('href'),'/settings?embed=1#deck-sharing','settings links stay embedded');
       if(name==='profile'&&width===320) {
         await page.waitForFunction(()=>(document.querySelector<HTMLImageElement>('[data-aki-companion] .aki-art')?.naturalWidth ?? 0)>0);
         await page.screenshot({path:path.join(out,'aki-profile-320-'+theme+'-live.png'),fullPage:false});
@@ -217,4 +214,4 @@ async function main() {
   assert.deepEqual(errors,[]);
   const result={checks,errors,sourceAssets,output:out};fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }
-main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();if(server)server.kill();if(log!==undefined)fs.closeSync(log);});
+main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await server?.stop();});

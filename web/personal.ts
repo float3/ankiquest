@@ -1,6 +1,5 @@
 /* Private Today, study history, session recap and account settings. */
-import {alertSenders, type AlertSettings} from "./deck-alerts";
-import {escape as esc, nativeAccount} from "./common";
+import {day, escape as esc, hourOptions, nativeAccount, number} from "./common";
 import {failure, refused, request as call, send} from "./http";
 
 (() => {
@@ -27,16 +26,18 @@ import {failure, refused, request as call, send} from "./http";
     reminders?: Reminders | null;
     freezes?: {enabled: boolean; freezes: number; capacity: number} | null;
     nudges?: {receiving: boolean; automatic_receiving: boolean; friends: (Person & {muted_by_me: boolean})[]} | null;
-    subscriptions?: (AlertSettings & {enabled: boolean}) | null;
+    subscriptions?: Subscriptions | null;
     decks?: {decks: {id: string; name: string; enabled: boolean; recipients: string[]}[]; recipients: Person[]; celebrations: boolean} | null;
     sharing?: Sharing | null;
     goal?: Goal | null;
   }
+  /** `/api/deck-subscriptions/{user}` (`ReceivingSettings` in src/decks.rs). */
+  interface Subscriptions { enabled: boolean; senders: Person[]; unsubscribed_senders: string[]; sharing_senders: string[]; muted_senders?: string[] }
   interface Account { created_at: number; password?: boolean; confirmed_until?: number | null }
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
   interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; last_used_at?: number | null; current: boolean }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
-  interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean; muted?: Person[] }
+  interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean; muted: Person[] }
   interface Invite { name: string; members: number }
   type SettingName = keyof Settings;
   interface State {
@@ -49,9 +50,8 @@ import {failure, refused, request as call, send} from "./http";
   const {t:tr, html} = AnkiQuestI18n;
   const site = AnkiQuestSite;
   const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
-  const number = (value: unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
   const when = (value: unknown) => new Date(Number(value)).toLocaleString(AnkiQuestI18n.language, {dateStyle:"medium", timeStyle:"short"});
-  const date = (value: string) => new Intl.DateTimeFormat(AnkiQuestI18n.language, {dateStyle:"full", timeZone:"UTC"}).format(new Date(value + "T12:00:00Z"));
+  const date = (value: string) => day(value, {dateStyle:"full"});
   const path = location.pathname.replace(/\/+$/, "");
   const page = path === "/history" ? "history" : path === "/settings" ? "settings" : path === "/friends" ? "friends" : path.startsWith("/join/") ? "join" : "today";
   const inviteCode = page === "join" ? decodeURIComponent(path.slice("/join/".length)) : "";
@@ -195,6 +195,7 @@ import {failure, refused, request as call, send} from "./http";
           else { settings[names[index]] = null; state.errors[names[index]] = (result.reason as Error).message; }
         });
         renderSettings();
+        showLinkedCard();
       } else {
         const year = state.year == null ? "" : `?year=${state.year}`;
         const [profile,study,challenges,activity,wins] = await Promise.allSettled([
@@ -449,9 +450,8 @@ import {failure, refused, request as call, send} from "./http";
   const members = (count: number) => count === 1 ? tr("1 member") : tr`${count} members`;
   function renderFriends() {
     const social = state.social!, me = state.session!.user;
-    const muted = new Set((social.muted ?? []).map(person => person.user));
-    // Older servers have no mute; they send no `muted` list.
-    const mute = (person: Person) => !social.muted || person.user === me ? ""
+    const muted = new Set(social.muted.map(person => person.user));
+    const mute = (person: Person) => person.user === me ? ""
       : muted.has(person.user) ? action(tr("Unmute"),{action:"unmute",user:person.user})
       : action(tr("Mute"),{action:"mute",user:person.user},`data-confirm="${esc(tr`Mute ${person.display}? You won't hear from them. They are not told.`)}"`);
     const visibility = html`<article class="card"><div class="card-head"><div><h2>${tr("Your profile")}</h2><p>${social.public ? tr("Anyone can see your profile.") : tr("Only your friends and groups can see your profile.")}</p></div></div>${check("",tr("Public profile"),social.public,tr("Show my profile and standings on the global leaderboard."),"data-social-public")}</article>`;
@@ -467,7 +467,7 @@ import {failure, refused, request as call, send} from "./http";
     const member = (item: Group, person: Person) => personRow(person,mute(person)+(item.owner && person.user !== me ? action(tr("Remove"),{action:"remove",group:item.id,member:person.user},`data-confirm="${esc(tr`Remove ${person.display} from ${item.name}?`)}"`) : ""));
     const group = (item: Group) => html`<details class="card social-group" data-group="${item.id}" open><summary><strong>${esc(item.name)}</strong><small>${esc(members(item.members.length))}</small></summary>${invite(item)}<div class="stack">${item.members.map(person=>member(item,person)).join("")}</div><div class="setting-actions">${action(tr("Leave group"),{action:"leave",group:item.id},`data-confirm="${esc(tr`Leave ${item.name}?`)}"`)}</div></details>`;
     const groupsCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Groups")}</h2><p>${tr("Everyone in a group sees each other on the group's leaderboard.")}</p></div></div><form id="group-form" class="social-form"><label class="field"><span>${tr("Group name")}</span><input name="name" required maxlength="40" autocomplete="off"></label><button class="primary" type="submit">${tr("Create group")}</button></form></article>${social.groups.map(group).join("")}`;
-    const mutedCard = social.muted?.length ? html`<article class="card" id="muted-people"><div class="card-head"><div><h2>${tr("Muted")}</h2><p>${tr("No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.")}</p></div></div><div class="stack">${social.muted.map(person=>personRow(person,mute(person))).join("")}</div></article>` : "";
+    const mutedCard = social.muted.length ? html`<article class="card" id="muted-people"><div class="card-head"><div><h2>${tr("Muted")}</h2><p>${tr("No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.")}</p></div></div><div class="stack">${social.muted.map(person=>personRow(person,mute(person))).join("")}</div></article>` : "";
     $("personal-content").innerHTML = html`<div class="personal-settings">${visibility}${friendsCard}${groupsCard}${mutedCard}</div><p id="social-status" class="status" role="status"></p>`;
   }
   function renderJoin() {
@@ -507,16 +507,28 @@ import {failure, refused, request as call, send} from "./http";
   function check(name: string,title: string,checked: boolean,description="",extra="") {
     return html`<label class="check"><input type="checkbox" ${name?`name="${esc(name)}"`:""} ${extra} ${checked?"checked":""}><span><strong>${esc(title)}</strong>${description?html`<small>${esc(description)}</small>`:""}</span></label>`;
   }
-  const hourOptions = (selected: number) => Array.from({length:24},(_,hour)=>html`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join("");
+  /**
+   * The senders to offer and those to show as unsubscribed. Saving replaces older
+   * mutes with unsubscribes, so mutes start checked; people who are gone stay
+   * listed while they are still unsubscribed or muted, so they can be cleared.
+   */
+  function alertSenders(data: Subscriptions): {senders: Person[]; unsubscribed: Set<string>} {
+    const unsubscribed = new Set([...data.unsubscribed_senders, ...(data.muted_senders ?? [])]);
+    const relevant = new Set([...data.sharing_senders, ...unsubscribed]);
+    const people = new Map(data.senders.filter(person => relevant.has(person.user)).map(person => [person.user, person]));
+    for (const sender of unsubscribed) if (!people.has(sender)) people.set(sender, {user: sender, display: sender});
+    const senders = [...people.values()].sort((a, b) => a.display.localeCompare(b.display) || a.user.localeCompare(b.user));
+    return {senders, unsubscribed};
+  }
   function settingError(name: SettingName) { return html`<p class="status error" role="alert">${esc(state.errors[name] || tr("This setting could not load. Refresh to try again."))}</p>`; }
   function renderSettings(card: SettingName | null = null) {
     const {companion,reminders:prefs,freezes,nudges,subscriptions,decks,sharing,goal} = state.settings;
-    const companionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Your study companion")}</h2><p>${tr("Choose who cheers you on. This choice follows your account across devices.")}</p></div></div>${companion?html`<form id="companion-form"><div class="companion-options" role="radiogroup" aria-label="${tr("Your study companion")}"><label class="companion-option"><input type="radio" name="companion" value="aki" ${companion.companion==="aki"?"checked":""}><img src="/aki/face.png" alt=""><strong>Aki</strong></label><label class="companion-option"><input type="radio" name="companion" value="ankilope" ${companion.companion==="ankilope"?"checked":""}><img src="/ankilope/face.png" alt=""><strong>Ankilope</strong></label><label class="companion-option companion-none"><input type="radio" name="companion" value="none" ${companion.companion==="none"?"checked":""}><span aria-hidden="true">○</span><strong>${tr("No companion")}</strong></label></div><p class="settings-hint">${tr("Your companion only changes the artwork and encouragement you see.")}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save companion")}</button></div><p class="status" role="status"></p></form>`:settingError("companion")}</article>`;
+    const companionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Your study companion")}</h2><p>${tr("Choose who cheers you on. This choice follows your account across devices.")}</p></div></div>${companion?html`<form id="companion-form"><div class="companion-options" role="radiogroup" aria-label="${tr("Your study companion")}"><label class="companion-option"><input type="radio" name="companion" value="aki" ${companion.companion==="aki"?"checked":""}><img src="/aki/face-192.png" alt=""><strong>Aki</strong></label><label class="companion-option"><input type="radio" name="companion" value="ankilope" ${companion.companion==="ankilope"?"checked":""}><img src="/ankilope/face-192.png" alt=""><strong>Ankilope</strong></label><label class="companion-option companion-none"><input type="radio" name="companion" value="none" ${companion.companion==="none"?"checked":""}><span aria-hidden="true">○</span><strong>${tr("No companion")}</strong></label></div><p class="settings-hint">${tr("Your companion only changes the artwork and encouragement you see.")}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save companion")}</button></div><p class="status" role="status"></p></form>`:settingError("companion")}</article>`;
     const reminderCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Reminders")}</h2><p>${tr("Choose when AnkiQuest checks in.")}</p></div></div>${prefs ? html`<form id="reminders-form"><div class="stack">${reminders.map(([key,label])=>check(key,label,prefs[key])).join("")}</div><div class="time-grid"><label class="field"><span>${tr("Daily reminder")}</span><select name="reminder_hour">${hourOptions(prefs.reminder_hour)}</select></label><label class="field"><span>${tr("Quiet from")}</span><select name="quiet_start">${hourOptions(prefs.quiet_start)}</select></label><label class="field"><span>${tr("Quiet until")}</span><select name="quiet_end">${hourOptions(prefs.quiet_end)}</select></label><label class="field"><span>${tr("Daily limit")}</span><select name="daily_limit">${[1,2,3,4,5].map(n=>html`<option value="${n}" ${n===prefs.daily_limit?"selected":""}>${n}</option>`).join("")}</select></label></div><p class="settings-hint">${tr("Reminder times use your AnkiQuest timezone. Equal quiet-hour times disable quiet hours.")}</p><div class="setting-actions"><button class="primary" type="submit">${tr("Save reminders")}</button></div><p class="status" role="status"></p></form>` : settingError("reminders")}</article>`;
     const nudgeCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Encouragement")}</h2><p>${tr("Friendly nudges and progress celebrations.")}</p></div></div>${nudges ? html`${check("",tr("Allow friends to nudge me"),nudges.receiving,"",'data-nudge-field="receiving"')}${check("",tr("Automatic progress nudges"),nudges.automatic_receiving,"",'data-nudge-field="automatic"')}<fieldset><legend>${tr("Friends who can nudge me")}</legend>${nudges.friends.length ? nudges.friends.map(friend=>check("",friend.display,!friend.muted_by_me,"",`data-nudge-sender="${esc(friend.user)}"`)).join("") : html`<p class="settings-hint">${tr("No friends to choose yet.")}</p>`}</fieldset><p id="nudge-status" class="status" role="status"></p>` : settingError("nudges")}</article>`;
-    const freezeCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Streak protection")}</h2><p>${freezes?tr`${freezes.freezes} of ${freezes.capacity} freezes ready`:tr("Keep a little backup for busy days.")}</p></div></div>${freezes?html`${check("",tr("Use saved freezes automatically"),freezes.enabled,"",'id="freeze-toggle"')}<p class="settings-hint">${tr("Your saved freezes stay with you when protection is off.")}</p><p id="freeze-status" class="status" role="status"></p>`:settingError("freezes")}</article>`;
+    const freezeCard = html`<article class="card" id="streak-protection"><div class="card-head"><div><h2>${tr("Streak protection")}</h2><p>${freezes?tr`${freezes.freezes} of ${freezes.capacity} freezes ready`:tr("Keep a little backup for busy days.")}</p></div></div>${freezes?html`${check("",tr("Use saved freezes automatically"),freezes.enabled,"",'id="freeze-toggle"')}<p class="settings-hint">${tr("Your saved freezes stay with you when protection is off.")}</p><p id="freeze-status" class="status" role="status"></p>`:settingError("freezes")}</article>`;
     const {senders, unsubscribed} = subscriptions ? alertSenders(subscriptions) : {senders: [], unsubscribed: new Set<string>()};
-    const subscriptionCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Deck completion alerts I receive")}</h2><p>${tr("Choose the people whose completed decks reach you.")}</p></div></div>${subscriptions?html`<form id="subscriptions-form">${check("enabled",tr("Receive deck completion alerts"),subscriptions.enabled)}<fieldset><legend>${tr("Unsubscribe from specific people")}</legend>${senders.map(person=>check("",person.display,unsubscribed.has(person.user),"",`data-unsubscribe="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No one is sharing decks with you yet.")}</p>`}</fieldset><div class="setting-actions"><button class="primary" type="submit">${tr("Save alert preferences")}</button></div><p class="status" role="status"></p></form>`:settingError("subscriptions")}</article>`;
+    const subscriptionCard = html`<article class="card" id="deck-alerts"><div class="card-head"><div><h2>${tr("Deck completion alerts I receive")}</h2><p>${tr("Choose the people whose completed decks reach you.")}</p></div></div>${subscriptions?html`<form id="subscriptions-form">${check("enabled",tr("Receive deck completion alerts"),subscriptions.enabled)}<fieldset><legend>${tr("Unsubscribe from specific people")}</legend>${senders.map(person=>check("",person.display,unsubscribed.has(person.user),"",`data-unsubscribe="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No one is sharing decks with you yet.")}</p>`}</fieldset><div class="setting-actions"><button class="primary" type="submit">${tr("Save alert preferences")}</button></div><p class="status" role="status"></p></form>`:settingError("subscriptions")}</article>`;
     const deckCard = html`<article class="card" id="deck-sharing"><div class="card-head"><div><h2>${tr("What I share")}</h2><p>${tr("Choose which finished decks friends can hear about.")}</p></div></div>${decks?html`<form id="decks-form"><details><summary>${tr("Manage deck sharing")}</summary>${decks.decks.length?decks.decks.map((deck,index)=>html`<fieldset data-deck-index="${index}"><legend>${esc(deck.name)}</legend>${check("",tr("Share completion"),deck.enabled,"",'data-deck-enabled')}<div class="stack">${decks.recipients.map(person=>check("",person.display,deck.recipients.includes(person.user),"",`data-deck-recipient="${esc(person.user)}"`)).join("") || html`<p class="settings-hint">${tr("No friends are available yet.")}</p>`}</div></fieldset>`).join(""):html`<p class="settings-hint">${tr("Upload reviews from Anki to see your decks here.")}</p>`}</details>${check("",tr("Celebrate milestones"),decks.celebrations!==false,"",'id="celebrations-toggle"')}<div class="setting-actions"><button class="primary" type="submit">${tr("Save deck sharing")}</button></div><p class="status" role="status"></p></form>`:settingError("decks")}</article>`;
     const markup = html`<section class="personal-lead"><div class="eyebrow">${tr("Your account")}</div><h2>${esc(state.session!.user)}</h2><p>${tr("All changes here apply to your AnkiQuest account across devices.")}</p></section><div class="personal-settings">${companionCard}${reminderCard}${nudgeCard}${freezeCard}${goalCard(goal)}${sharingCard(sharing)}${subscriptionCard}${deckCard}<article class="card"><h2>${tr("Privacy and account")}</h2><p class="section-intro">${tr("Your member token controls personal changes. The shared website password only lets members view the community.")}</p><div class="setting-actions"><a class="button-link" href="${esc(site.href("/week","#"+encodeURIComponent(state.session!.user)))}">${tr("Edit profile picture")}</a><button type="button" id="personal-disconnect">${tr("Disconnect account")}</button></div><p class="status" role="status"></p></article>${signInCard()}${devicesCard()}${privacyCard()}</div>`;
     const selector = card && {companion:"#companion-form",reminders:"#reminders-form",nudges:"#nudge-status",freezes:"#freeze-toggle",subscriptions:"#subscriptions-form",decks:"#decks-form",sharing:"#sharing-form",goal:"#goal-form"}[card];
@@ -526,6 +538,14 @@ import {failure, refused, request as call, send} from "./http";
     const replacement = fresh.querySelector(selector)!.closest(".card")!;
     if (card === "decks") replacement.querySelector("details")!.open = current.querySelector("details")?.open || false;
     current.replaceWith(replacement);
+  }
+  /** Scrolls to the card the URL names, such as /settings#deck-sharing from the leaderboard: the
+      cards render after their settings load, too late for the browser's own jump to the fragment. */
+  function showLinkedCard() {
+    const card = location.hash.length > 1 ? document.getElementById(location.hash.slice(1)) : null;
+    if (!card?.classList.contains("card") || !$("personal-content").contains(card)) return;
+    card.querySelector("details")?.setAttribute("open", "");
+    card.scrollIntoView({block: "start"});
   }
   function sharingCard(sharing: Sharing | null | undefined) {
     const choice = (kind: string, label: string) => {

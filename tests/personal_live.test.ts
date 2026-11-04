@@ -4,50 +4,25 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
-import {spawn} from 'node:child_process';
-import type {ChildProcess} from 'node:child_process';
 import type {Browser} from 'playwright';
-import {chromium, root as repo} from './support/web.ts';
+import {launch, startServer, type Server} from './support/web.ts';
 
-const exe = process.env.ANKIQUEST_BIN || path.join(repo, 'target', 'debug', process.platform === 'win32' ? 'ankiquest.exe' : 'ankiquest');
 const run = fs.mkdtempSync(path.join(os.tmpdir(), 'ankiquest-personal-live-'));
 const token = 'alice-personal-test-token';
 const password = 'members-personal-test-password';
-let server: ChildProcess | undefined, browser: Browser | undefined, log: number | undefined;
-
-async function freePort() {
-  return new Promise<number>((resolve, reject) => {
-    const socket = net.createServer();
-    socket.once('error', reject);
-    socket.listen(0, '127.0.0.1', () => {
-      const port = (socket.address() as net.AddressInfo).port;
-      socket.close(() => resolve(port));
-    });
-  });
-}
+let server: Server | undefined, browser: Browser | undefined;
 
 async function main() {
-  const port = await freePort();
-  const base = `http://127.0.0.1:${port}`;
   const passwordFile = path.join(run, 'password');
   fs.writeFileSync(passwordFile, password);
-  fs.writeFileSync(path.join(run, 'config.json'), JSON.stringify({
-    addr:`127.0.0.1:${port}`, state_dir:run, private_site:true, site_password_file:passwordFile,
-    week_timezone:'UTC', week_rollover_hour:4,
+  server = await startServer(run, {
+    private_site:true, site_password_file:passwordFile, week_timezone:'UTC', week_rollover_hour:4,
     users:{alice:{display:'Alice',token}},
-  }));
-  log = fs.openSync(path.join(run, 'server.log'), 'a');
-  const child = server = spawn(exe, [path.join(run, 'config.json')], {windowsHide:true,stdio:['ignore',log,log]});
-  for (let i=0;i<100;i++) {
-    if (child.exitCode !== null) throw Error(fs.readFileSync(path.join(run, 'server.log'), 'utf8'));
-    try { if ((await fetch(base + '/auth/status')).ok) break; } catch {}
-    if (i===99) throw Error('Server did not start');
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
+  });
+  const {base} = server;
   assert.equal((await fetch(base + '/api/study/alice')).status, 401);
 
-  browser = await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL ? {channel:process.env.PLAYWRIGHT_CHANNEL} : {})});
+  browser = await launch();
   const context = await browser.newContext({locale:'en-US',viewport:{width:390,height:844}});
   const page = await context.newPage();
   const errors: string[] = [];
@@ -104,8 +79,6 @@ async function main() {
 
 main().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {
   if (browser) await browser.close();
-  const child = server;
-  if (child && child.exitCode === null) {child.kill();await new Promise(resolve => child.once('exit', resolve));}
-  if (log !== undefined) fs.closeSync(log);
+  await server?.stop();
   fs.rmSync(run, {recursive:true,force:true});
 });

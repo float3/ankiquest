@@ -1,9 +1,7 @@
-import {nativeAccount} from "../common";
+import {escape as esc, nativeAccount, number as num} from "../common";
 import {request} from "../http";
 
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
-const esc = AnkiQuestSite.escape;
-const num = (n: number) => n.toLocaleString(AnkiQuestI18n.language);
 const DAY_MS = 86_400_000;
 
 /** `/api/conquests/<user>/<at>` (`Shared` in src/conquests.rs). */
@@ -289,7 +287,7 @@ async function load() {
   }
   const session = await owner();
   try {
-    const data = await AnkiQuestSite.readJSON<Shared>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}`, {session});
+    const data = await request<Shared>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}`, {session});
     render(data, session);
   } catch (_) {
     app.innerHTML = aqHtml`<p class="notice error" role="alert">This card could not be found. It may be private, or the review behind it was undone.</p>`;
