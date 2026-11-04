@@ -3,6 +3,7 @@ use crate::access::authorized;
 use crate::app::{App, now_ms};
 use crate::competition::Participant;
 use crate::game::DAY_MS;
+use crate::i18n::{english, phrase};
 use crate::store::Store;
 use crate::web_util::store_error;
 use crate::{competition, decks, weekly_challenges};
@@ -380,28 +381,37 @@ pub(crate) fn notice(
     let (heading, body) = if crate::weekly_challenges::started(conn, id)?.is_some() {
         match kind {
             "challenge_invite" => (
-                "Weekly challenge invitation",
-                format!("{from} invited you to a weekly goal: study on 3 days each."),
+                phrase("Weekly challenge invitation"),
+                english(
+                    "{0} invited you to a weekly goal: study on 3 days each.",
+                    &[from],
+                ),
             ),
             "challenge_accepted" => (
-                "Weekly challenge started",
-                format!("{from} accepted your weekly goal. Your seven days start now."),
+                phrase("Weekly challenge started"),
+                english(
+                    "{0} accepted your weekly goal. Your seven days start now.",
+                    &[from],
+                ),
             ),
             _ => (
-                "Weekly challenge complete",
-                "You both finished your weekly goal. Well done!".into(),
+                phrase("Weekly challenge complete"),
+                english("You both finished your weekly goal. Well done!", &[]),
             ),
         }
     } else {
         match kind {
             "challenge_invite" => (
-                "Challenge invitation",
-                format!("{from} invited you to {title}."),
+                phrase("Challenge invitation"),
+                english("{0} invited you to {1}.", &[from, title]),
             ),
-            "challenge_accepted" => ("Invitation accepted", format!("{from} joined {title}.")),
+            "challenge_accepted" => (
+                phrase("Invitation accepted"),
+                english("{0} joined {1}.", &[from, title]),
+            ),
             _ => (
-                "Challenge complete",
-                format!("You reached the goal in {title}."),
+                phrase("Challenge complete"),
+                english("You reached the goal in {0}.", &[title]),
             ),
         }
     };

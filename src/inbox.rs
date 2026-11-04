@@ -3,7 +3,7 @@
 use crate::access::authorized;
 use crate::app::{App, now_ms};
 use crate::web_util::{base_url, failed_for, store_error};
-use crate::{challenges, decks, i18n, notifications, reminders, wins};
+use crate::{challenges, decks, i18n, notifications, reminders, shares, wins};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
@@ -46,6 +46,7 @@ pub(crate) async fn get_notifications(
         }
         let sender_display = app.display(&notice.sender);
         i18n::notification(&mut notice, &language, &sender_display);
+        shares::localize(&store.conn, &mut notice, &language).map_err(store_error)?;
         wins::decorate(&mut notice, &base);
         result.push(notice);
     }
@@ -101,6 +102,7 @@ async fn activity(
     let base = base_url(&app, &headers);
     for notice in activity.items.iter_mut().chain(&mut activity.attention) {
         i18n::notification(notice, &language, &app.display(&notice.sender));
+        shares::localize(&store.conn, notice, &language).map_err(store_error)?;
         wins::decorate(notice, &base);
     }
     Ok(Json(activity))
@@ -167,6 +169,7 @@ async fn sent_activity(
         .map_err(store_error)?;
     for item in &mut page.items {
         i18n::notification(&mut item.notice, &language, &app.display(&user));
+        shares::localize(&store.conn, &mut item.notice, &language).map_err(store_error)?;
     }
     Ok(Json(page))
 }

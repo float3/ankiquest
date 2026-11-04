@@ -534,7 +534,7 @@ mod tests {
         let first = upload_as(&app, "hill", plain_upload(reviews_at(start, 2))).await;
         assert_eq!(first.feedback, feedback::Feedback::default());
         let more = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
-        let status = more.feedback.status.unwrap();
+        let status = more.feedback.status.unwrap().to_string();
         assert!(status.starts_with('+'), "{status}");
         assert!(status.contains("Lv "), "{status}");
         let again = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
@@ -586,7 +586,12 @@ mod tests {
             }
         };
         assert_eq!(ask(None).await.feedback.status, None);
-        let status = ask(Some(pending[1].id)).await.feedback.status.unwrap();
+        let status = ask(Some(pending[1].id))
+            .await
+            .feedback
+            .status
+            .unwrap()
+            .to_string();
         assert!(status.starts_with('+'), "{status}");
         assert_eq!(ask(Some(pending[2].id)).await.feedback.status, None);
         drop(app);

@@ -110,7 +110,7 @@ fn send(
     now: i64,
 ) -> Result<usize, Error> {
     let day = store.clock(sender)?.day(now);
-    let title = format!("🎉 {display} shared a win");
+    let title = crate::i18n::english("🎉 {0} shared a win", &[display]);
     let mut sent = 0;
     for friend in friends {
         if muted(&store.conn, friend, sender)? {
@@ -189,12 +189,12 @@ pub(crate) fn send_wins(
         }
         let (title, body) = if let [win] = fresh.as_slice() {
             (
-                format!("🎉 {display} shared a win"),
+                crate::i18n::english("🎉 {0} shared a win", &[display]),
                 format!("{}: “{}”", win.title, win.body),
             )
         } else {
             (
-                format!("🎉 {display}: {} wins", fresh.len()),
+                crate::i18n::english("🎉 {0}: {1} wins", &[display, &fresh.len().to_string()]),
                 fresh
                     .iter()
                     .map(|win| win.title.as_str())
@@ -234,6 +234,60 @@ pub(crate) fn send_wins(
     }
     tx.commit()?;
     Ok(sent)
+}
+
+/// Words a share or cheer about wins again from the wins themselves, in `language`: their
+/// stored English titles are translated one by one, never read back out of the joined text.
+pub(crate) fn localize(
+    conn: &Connection,
+    notice: &mut crate::notifications::Notification,
+    language: &str,
+) -> rusqlite::Result<()> {
+    if crate::i18n::normalize(language) == "en" {
+        return Ok(());
+    }
+    let system = |value: &str| crate::i18n::system(value, language);
+    match notice.kind.as_str() {
+        "share" => {
+            let wins = conn
+                .prepare(
+                    "select w.title, w.body from win_deliveries d join wins w on w.id = d.win
+                     where d.notification = ?1 order by w.id",
+                )?
+                .query_map([notice.id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            match wins.as_slice() {
+                [] => {}
+                [(title, body)] => notice.body = format!("{}: “{}”", system(title), system(body)),
+                many => {
+                    notice.body = many
+                        .iter()
+                        .map(|(title, _)| system(title))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                }
+            }
+        }
+        "reaction" => {
+            if let Some(title) = notice
+                .win
+                .map(|win| {
+                    conn.query_row("select title from wins where id = ?1", [win], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .optional()
+                })
+                .transpose()?
+                .flatten()
+            {
+                notice.body = format!("“{}”", system(&title));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Sends `user`'s new automatic wins to their friends, each with its link; once per tick.
@@ -347,7 +401,10 @@ async fn share(
                 .map_err(store_error)?
                 .day(now_ms());
             Win {
-                what: format!("#{place} on this week's leaderboard"),
+                what: crate::i18n::english(
+                    "#{0} on this week's leaderboard",
+                    &[&place.to_string()],
+                ),
                 topic: Some(format!("place:{place}")),
                 key: format!("place:{place}:{day}"),
             }
@@ -414,7 +471,7 @@ pub(crate) fn react(
             &Outgoing {
                 to: &sender,
                 from: user,
-                title: &format!("🎉 {display} cheered"),
+                title: &crate::i18n::english("🎉 {0} cheered", &[display]),
                 body: &format!("“{}”", win_title.unwrap_or(title)),
                 kind: "reaction",
             },
@@ -628,6 +685,85 @@ mod tests {
             1,
             "a win over the cap can still be shared by hand"
         );
+    }
+
+    #[test]
+    fn shared_wins_are_worded_from_the_wins_in_the_readers_language() {
+        let (mut store, _path) = crate::decks::tests::temporary_store();
+        let win = |store: &Store, key: &str, title: &str, body: &str| {
+            let id = wins::create(
+                &store.conn,
+                "hill",
+                key,
+                20_000,
+                1_000,
+                title,
+                body,
+                &json!({}),
+            )
+            .unwrap()
+            .unwrap();
+            wins::win(&store.conn, "hill", id).unwrap()
+        };
+        let level = win(
+            &store,
+            "level:4",
+            "Level 4",
+            "You reached level 4 with 900 XP.",
+        );
+        let secured = win(
+            &store,
+            "secured:1",
+            "Streak secured!",
+            "Today counts toward your 5-day streak.",
+        );
+        let friends = strings(&["cerro", "aldanita"]);
+        send_wins(
+            &mut store,
+            "hill",
+            "Hill",
+            &friends[..1],
+            &[level.clone(), secured],
+            false,
+            3_000,
+        )
+        .unwrap();
+        send_wins(
+            &mut store,
+            "hill",
+            "Hill",
+            &friends[1..],
+            &[level],
+            false,
+            3_000,
+        )
+        .unwrap();
+        let mut digest = store.notifications("cerro", 3_000).unwrap().remove(0);
+        crate::i18n::notification(&mut digest, "es", "Hill");
+        localize(&store.conn, &mut digest, "es").unwrap();
+        assert_eq!(digest.title, "🎉 Hill: 2 logros");
+        assert_eq!(digest.body, "Nivel 4 · ¡Racha asegurada!");
+        let mut single = store.notifications("aldanita", 3_000).unwrap().remove(0);
+        crate::i18n::notification(&mut single, "de", "Hill");
+        localize(&store.conn, &mut single, "de").unwrap();
+        assert_eq!(single.title, "🎉 Hill hat einen Erfolg geteilt");
+        assert_eq!(
+            single.body,
+            "Level 4: “Du hast Level 4 mit 900 XP erreicht.”"
+        );
+
+        assert_eq!(
+            react(&mut store.conn, "aldanita", "Aldana", single.id, 4_000).unwrap(),
+            Some(false)
+        );
+        let mut cheer = store.notifications("hill", 4_000).unwrap().remove(0);
+        crate::i18n::notification(&mut cheer, "fr", "Aldana");
+        localize(&store.conn, &mut cheer, "fr").unwrap();
+        assert_eq!(cheer.title, "🎉 Aldana t’a applaudi");
+        assert_eq!(cheer.body, "“Niveau 4”");
+        let mut english = store.notifications("hill", 4_000).unwrap().remove(0);
+        localize(&store.conn, &mut english, "en").unwrap();
+        assert_eq!(english.body, "“Level 4”");
     }
 
     #[tokio::test]

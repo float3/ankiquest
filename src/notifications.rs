@@ -551,7 +551,10 @@ impl Store {
                     &Outgoing {
                         to: user,
                         from: "",
-                        title: &format!("{} new unlocks", events.len()),
+                        title: &crate::i18n::english(
+                            "{0} new unlocks",
+                            &[&events.len().to_string()],
+                        ),
                         body: &titles.join(", "),
                         kind,
                     },
