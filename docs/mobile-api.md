@@ -42,7 +42,7 @@ The Android app's account settings are native and use these endpoints with the d
 | `GET /api/devices/{user}`, `POST` `{"action": "sign_out", "id"}` or `{"action": "sign_out_others"}` | `devices` |
 | `GET /api/accounts/{user}` | `user`, `display`, `created_at`, `password`, `confirmed_until` |
 | `GET /api/export/{user}` | the data download, saved by the app as it came |
-| `DELETE /api/accounts/{user}` `{"password"}` or `{"confirm": "<user>"}` | `204` |
+| `DELETE /api/accounts/{user}` `{"password"}`, or no body for an account without a password that signed in again | `204` |
 
 The `403` with `"reauth": true` described under capabilities applies to the first password and to deleting an account without a password.
 
