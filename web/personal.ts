@@ -32,6 +32,7 @@ import {failure, refused, request as call, send} from "./http";
     sharing?: Sharing | null;
     goal?: Goal | null;
   }
+  interface Account { created_at: number; password?: boolean; confirmed_until?: number | null }
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
   interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; current: boolean }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
@@ -41,7 +42,7 @@ import {failure, refused, request as call, send} from "./http";
   interface State {
     session: OwnerSession | null; epoch: number; profile: Profile | null; study: StudyHistory | null; challenges: Challenges | null; activity: Activity | null;
     settings: Settings; errors: Record<string, string>; year: number | null; selected: string | null; native: boolean;
-    social: Social | null; invite: Invite | null; account: {created_at: number; password?: boolean} | null; signIn: SignIn | null; devices: Device[] | null;
+    social: Social | null; invite: Invite | null; account: Account | null; signIn: SignIn | null; devices: Device[] | null;
     wins: Win[] | null; winsError: string; winsMore: boolean; winsLoading: boolean; winStatus: Record<number, {text: string; error: boolean}>;
   }
 
@@ -182,7 +183,7 @@ import {failure, refused, request as call, send} from "./http";
       } else if (page === "settings") {
         const names: SettingName[] = ["companion","reminders","freezes","nudges","subscriptions","decks","sharing","goal"];
         const calls = [owner("/api/companion",undefined,session),owner("/api/community/reminders",undefined,session),owner("/api/streak-freezes",undefined,session),owner("/api/friend-nudges",undefined,session),owner("/api/deck-subscriptions",undefined,session),owner("/api/decks",undefined,session),owner("/api/sharing",undefined,session),owner("/api/goal",undefined,session)];
-        const [results, account, signIn, devices] = await Promise.all([Promise.allSettled(calls), owner<{created_at: number; password?: boolean}>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null), owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null)]);
+        const [results, account, signIn, devices] = await Promise.all([Promise.allSettled(calls), owner<Account>("/api/accounts",undefined,session).catch(() => null), owner<SignIn>("/api/sign-in",undefined,session).catch(() => null), owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null)]);
         if (state.session !== session || state.epoch !== epoch) return;
         state.account = account;
         state.signIn = signIn;
@@ -566,15 +567,26 @@ import {failure, refused, request as call, send} from "./http";
     if (!/^\d+$/.test(raw) || value < limits.min || value > limits.max) return tr`Choose a whole number from ${number(limits.min)} to ${number(limits.max)}.`;
     return {mode, value};
   }
+  /** Whether this browser may change how a passwordless account signs in, or delete it. */
+  function confirmed() {
+    return state.account?.password !== false || (state.account.confirmed_until ?? 0) > Date.now();
+  }
+  /** Asks a passwordless account to sign in again with a provider it linked. */
+  function reauthBlock() {
+    const linked = (state.signIn?.providers ?? []).filter(item => item.linked);
+    const links = linked.map(item => html`<a class="button-link" data-reauth="${esc(item.provider)}" href="/auth/oauth/${esc(item.provider)}?reauth=1">${esc(tr`Sign in again with ${item.name}`)}</a>`).join("");
+    return html`<div class="reauth"><p class="settings-hint">${tr("To set a password, link another sign-in or delete your account, first sign in again with a sign-in you linked. It counts for ten minutes in this browser.")}</p>${links ? html`<div class="setting-actions">${links}</div>` : ""}</div>`;
+  }
   function signInCard() {
     const methods = state.signIn;
     if (!methods || (!methods.providers.length && !methods.account)) return "";
     const last = methods.account && !methods.password && methods.providers.filter(item => item.linked).length === 1;
     const rows = methods.providers.map(item => html`<div class="sign-in-row"><strong>${esc(item.name)}</strong>${item.linked
       ? html`<button type="button" data-unlink="${esc(item.provider)}" ${last ? "disabled" : ""}>${tr("Unlink")}</button>`
-      : html`<a class="button-link" href="/auth/oauth/${esc(item.provider)}?link=1">${tr("Link")}</a>`}</div>`).join("");
+      : confirmed() ? html`<a class="button-link" href="/auth/oauth/${esc(item.provider)}?link=1">${tr("Link")}</a>`
+      : html`<button type="button" disabled>${tr("Link")}</button>`}</div>`).join("");
     const token = methods.account && methods.providers.length ? html`<div class="setting-actions"><button type="button" id="new-device-token">${tr("New device token")}</button></div><p class="settings-hint">${tr("For Anki and AnkiDroid: sign in there with your username and this token.")}</p><code id="device-token" class="device-token" hidden></code>` : "";
-    return html`<article class="card"><h2>${tr("Sign-in methods")}</h2>${rows}${last ? html`<p class="settings-hint">${tr("Link another sign-in before unlinking this one.")}</p>` : ""}${token}<p id="sign-in-status" class="status" role="status"></p>${methods.account ? passwordForm(methods.password) : ""}</article>`;
+    return html`<article class="card"><h2>${tr("Sign-in methods")}</h2>${rows}${last ? html`<p class="settings-hint">${tr("Link another sign-in before unlinking this one.")}</p>` : ""}${token}<p id="sign-in-status" class="status" role="status"></p>${methods.account ? confirmed() ? passwordForm(methods.password) : reauthBlock() : ""}</article>`;
   }
   function passwordForm(has: boolean) {
     const current = has ? html`<label class="field"><span>${tr("Current password")}</span><input name="current" type="password" required autocomplete="current-password" maxlength="256"></label>` : "";
@@ -590,6 +602,7 @@ import {failure, refused, request as call, send} from "./http";
     try {
       const response = await send(`/api/sign-in/${encodeURIComponent(session.user)}`, {session, json:body});
       if (state.session !== session) return;
+      if (!response.ok && response.status === 403 && !field("current")) { state.account = state.account && {...state.account, confirmed_until: null}; renderSettings(); return; }
       if (!response.ok) throw Error(response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : response.status === 400 && body.password.length < 10 ? tr("Passwords need at least 10 characters.") : (await failure(response)).message);
       state.signIn = await response.json();
       if (others) state.devices = (await owner<{devices: Device[]}>("/api/devices",undefined,session).catch(() => null))?.devices ?? state.devices;
@@ -655,11 +668,14 @@ import {failure, refused, request as call, send} from "./http";
     }
   }
   function privacyCard() {
+    const intro = html`<h3>${tr("Delete your account")}</h3><p class="settings-hint">${tr("This removes your account, your study data, your settings and everything you shared, straight away. It cannot be undone.")}</p>`;
     const confirm = state.account?.password === false
-      ? html`<label class="field"><span>${tr("Type your username to confirm")}</span><input name="confirm" required autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="32"></label>`
+      ? html`<p class="settings-hint">${tr("You signed in again, so for a few minutes you can delete your account here.")}</p>`
       : html`<label class="field"><span>${tr("Password")}</span><input name="password" type="password" required autocomplete="current-password" maxlength="256"></label>`;
-    const remove = state.account ? html`<form id="delete-account-form" class="danger-zone"><h3>${tr("Delete your account")}</h3><p class="settings-hint">${tr("This removes your account, your study data, your settings and everything you shared, straight away. It cannot be undone.")}</p>${confirm}<div class="setting-actions"><button type="submit" class="danger">${tr("Delete my account")}</button></div><p class="status" role="status"></p></form>` : "";
-    return html`<article class="card"><h2>${tr("Your data")}</h2><p class="section-intro">${tr("Download everything AnkiQuest stores about you, as one file.")}</p><div class="setting-actions"><button type="button" id="personal-export">${tr("Download my data")}</button><a class="button-link" href="${esc(site.href("/privacy"))}">${tr("Privacy notice")}</a></div><p id="export-status" class="status" role="status"></p>${remove}</article>`;
+    const remove = !state.account ? ""
+      : confirmed() ? html`<form id="delete-account-form" class="danger-zone">${intro}${confirm}<div class="setting-actions"><button type="submit" class="danger">${tr("Delete my account")}</button></div><p class="status" role="status"></p></form>`
+      : html`<div id="delete-account-reauth" class="danger-zone">${intro}${reauthBlock()}</div>`;
+    return html`<article class="card" id="your-data"><h2>${tr("Your data")}</h2><p class="section-intro">${tr("Download everything AnkiQuest stores about you, as one file.")}</p><div class="setting-actions"><button type="button" id="personal-export">${tr("Download my data")}</button><a class="button-link" href="${esc(site.href("/privacy"))}">${tr("Privacy notice")}</a></div><p id="export-status" class="status" role="status"></p>${remove}</article>`;
   }
   async function downloadData(button: HTMLButtonElement) {
     const session = state.session;
@@ -687,7 +703,7 @@ import {failure, refused, request as call, send} from "./http";
       return;
     }
     const field = form.elements.namedItem("password") as HTMLInputElement | null;
-    const body = field ? {password: field.value} : {confirm: (form.elements.namedItem("confirm") as HTMLInputElement).value.trim()};
+    const body = field ? {password: field.value} : {};
     form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach(control => control.disabled = true);
     status.className = "status"; status.textContent = tr("Deleting…");
     try {
@@ -697,7 +713,8 @@ import {failure, refused, request as call, send} from "./http";
         showGate(tr("Your account and its data were deleted."));
         return;
       }
-      throw Error(response.status === 400 && !field ? tr("Type your username to confirm") : response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : tr("Your account could not be deleted. Please try again."));
+      if (response.status === 403 && !field) { state.account = state.account && {...state.account, confirmed_until: null}; renderSettings(); return; }
+      throw Error(response.status === 403 ? tr("That password is not right.") : response.status === 429 ? tr("Too many attempts. Try again in one minute.") : tr("Your account could not be deleted. Please try again."));
     } catch (cause) {
       if (state.session !== session) return;
       form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach(control => control.disabled = false);

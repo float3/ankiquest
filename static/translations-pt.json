@@ -1214,7 +1214,6 @@
   "Link another sign-in before unlinking this one.": "Associe outra forma de entrar antes de desassociar esta.",
   "Unlinked.": "Desassociado.",
   "Shown once. Copy it now.": "Só é mostrado uma vez. Copie-o agora.",
-  "Type your username to confirm": "Escreva o seu nome de utilizador para confirmar",
   "Sign in · ankiquest": "Entrar · ankiquest",
   "Choose a username": "Escolha um nome de utilizador",
   "Back to settings": "Voltar às definições",
@@ -1334,5 +1333,10 @@
   "Sign out all other devices": "Terminar sessão em todos os outros dispositivos",
   "Signed out.": "Sessão terminada.",
   "Your other devices were signed out.": "A sessão foi terminada nos teus outros dispositivos.",
-  "That device is already signed out.": "Esse dispositivo já terminou a sessão."
+  "That device is already signed out.": "Esse dispositivo já terminou a sessão.",
+  "Sign in again with {0}": "Entrar novamente com {0}",
+  "To set a password, link another sign-in or delete your account, first sign in again with a sign-in you linked. It counts for ten minutes in this browser.": "Para definir uma palavra-passe, associar outro início de sessão ou eliminar a tua conta, entra primeiro novamente com um início de sessão que associaste. Vale durante dez minutos neste navegador.",
+  "You signed in again, so for a few minutes you can delete your account here.": "Entraste novamente, por isso durante alguns minutos podes eliminar a tua conta aqui.",
+  "Sign in with your provider again first.": "Entra primeiro novamente com o teu fornecedor.",
+  "That is not the account you linked. Sign in with the one linked to this player.": "Essa não é a conta que associaste. Entra com a que está associada a este jogador."
 }
