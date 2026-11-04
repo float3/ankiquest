@@ -4,7 +4,6 @@
    `ankiquestLanguage` after a page finishes loading, then dispatches
    `ankiquest-auth`. */
 
-import type {SendOptions} from "./http";
 import type {I18n} from "./i18n";
 
 export {};
@@ -34,13 +33,11 @@ declare global {
 
   interface AnkiQuestSiteApi {
     embedded: boolean;
-    escape(value: unknown): string;
     href(path: string, hash?: string): string;
     avatar(user: string, display?: string): string;
     kpi(label: string, value: unknown, detail: unknown, tone?: string): string;
     setProfile(user: string, current?: boolean): void;
     checkAccess(response: Response, options?: RequestInit): Promise<void>;
-    readJSON<T = unknown>(url: string, options?: SendOptions): Promise<T>;
     status(fresh?: boolean, notify?: boolean): Promise<Access | null>;
     member(user?: string): Promise<{user: string} | null>;
     ownerHeaders(session: OwnerSession | null | undefined, body?: unknown): Record<string, string>;

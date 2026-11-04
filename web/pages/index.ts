@@ -1,5 +1,5 @@
-import {escape as esc, nativeAccount} from "../common";
-import {send} from "../http";
+import {day, escape as esc, lexical, nativeAccount, number as num} from "../common";
+import {request, send} from "../http";
 
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 
@@ -87,7 +87,6 @@ const app = document.getElementById("app")!;
 document.querySelector<HTMLElement>("[data-site-header]")!.dataset.siteSection = location.pathname.replace(/\/+$/, "") === "/records" ? "records" : "leaderboard";
 document.querySelector<HTMLAnchorElement>("[data-community-link]")!.href = AnkiQuestSite.href("/community");
 document.querySelector(".skip")!.addEventListener("click", event => { event.preventDefault(); app.focus(); });
-const num = (n: number) => n.toLocaleString(AnkiQuestI18n.language);
 const pct = (a: number, b: number) => b ? Math.min(100, Math.round(a / b * 100)) : 0;
 const entries = <K extends string, V>(object: Record<K, V>) => Object.entries(object) as [K, V][];
 
@@ -141,8 +140,8 @@ async function viewer(): Promise<OwnerSession | null> {
 
 function scopeChoices(session: OwnerSession): Promise<ScopeChoice[]> {
   if (scopeCache?.user !== session.user) {
-    const request = AnkiQuestSite.readJSON<SocialOverview>("/api/social/" + encodeURIComponent(session.user), {headers: AnkiQuestSite.ownerHeaders(session)});
-    const choices = request.then((social): ScopeChoice[] => social.groups.length || social.friends.length
+    const social = request<SocialOverview>("/api/social/" + encodeURIComponent(session.user), {session});
+    const choices = social.then((social): ScopeChoice[] => social.groups.length || social.friends.length
       ? [["circle", aqText("Friends and groups")], ["global", aqText("Everyone")], ...social.groups.map((group): ScopeChoice => ["group:" + group.id, group.name])]
       : []).catch(() => []);
     scopeCache = {user: session.user, choices};
@@ -294,11 +293,6 @@ function board(rows: Standing[], me: string) {
 }
 
 const winCount = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
-function winDate(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(String(value) + "T00:00:00Z");
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString(AnkiQuestI18n.language, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
-}
 function winnerContent() {
   const data = winnerState.data, shared = winnerState.scope === "shared", metric = winnerState.metric;
   const heading = aqHtml`<div class="win-heading"><h2 id="winner-history-title">Winner history</h2><a id="winner-calendar-link" href="${AnkiQuestSite.href("/community?period=" + metric, "#calendar")}">Open winner calendar →</a></div>`;
@@ -308,14 +302,13 @@ function winnerContent() {
   const scope = shared ? data.shared : data.lifetime;
   const ready = !shared || winCount(data.shared?.player_count) >= 2;
   const key = `${metric}_wins` as const;
-  const lexical = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
   const players = (scope?.players || []).filter(player=>player.history_start).sort((a,b) => winCount(b[key])-winCount(a[key]) || lexical(String(a.display),String(b.display)) || lexical(String(a.user),String(b.user)));
   const waiting = (data.waiting_players || []).slice().sort((a,b) => lexical(String(a.display),String(b.display)) || lexical(String(a.user),String(b.user)));
   const lifetimeStart = data.meta?.start_source === "configured"
-    ? `since the configured server start${data.meta.start_date ? ` on ${esc(winDate(data.meta.start_date))}` : ""}`
-    : `across available retained history${data.meta?.start_date ? ` from ${esc(winDate(data.meta.start_date))}` : ""} (which may predate this server)`;
+    ? `since the configured server start${data.meta.start_date ? ` on ${esc(day(data.meta.start_date))}` : ""}`
+    : `across available retained history${data.meta?.start_date ? ` from ${esc(day(data.meta.start_date))}` : ""} (which may predate this server)`;
   const note = shared
-    ? ready ? `Same window for all ${num(winCount(data.shared.player_count))} players with recorded history, from ${esc(winDate(scope.start_date))}. The window starts with the newest player’s first recorded study date. Only full weeks and months within that window count.`
+    ? ready ? `Same window for all ${num(winCount(data.shared.player_count))} players with recorded history, from ${esc(day(scope.start_date))}. The window starts with the newest player’s first recorded study date. Only full weeks and months within that window count.`
       : aqText("Shared history needs at least two players with recorded study history. Earlier solo wins remain in Lifetime.")
     : `Raw win totals ${lifetimeStart}, including earlier solo wins and partial periods. Players may have different amounts of recorded history.`;
   let rank = 0, previous: number | null = null;
@@ -323,7 +316,7 @@ function winnerContent() {
     const score = winCount(player[key]);
     if (previous !== score) rank = index + 1;
     previous = score;
-    return aqHtml`<tr><td>${ready && score > 0 ? rank : "—"}</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>${ready ? `History from ${esc(winDate(player.history_start))}` : aqText("Waiting for a second player")}</small></td>${(["day","week","month"] as const).map(kind=>aqHtml`<td class="${kind===metric?"win-selected":""}">${ready ? num(winCount(player[`${kind}_wins`])) : "—"}</td>`).join("")}</tr>`;
+    return aqHtml`<tr><td>${ready && score > 0 ? rank : "—"}</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>${ready ? `History from ${esc(day(player.history_start))}` : aqText("Waiting for a second player")}</small></td>${(["day","week","month"] as const).map(kind=>aqHtml`<td class="${kind===metric?"win-selected":""}">${ready ? num(winCount(player[`${kind}_wins`])) : "—"}</td>`).join("")}</tr>`;
   }).join("");
   const waitingRows = waiting.map(player=>aqHtml`<tr class="win-waiting"><td>—</td><td><a href="#${esc(encodeURIComponent(player.user))}">${esc(player.display)}</a><small>Waiting for study history</small></td><td>—</td><td>—</td><td>—</td></tr>`).join("");
   const table = players.length || waiting.length ? aqHtml`<table id="winner-history-table" class="win-table"><caption class="win-sr">${shared?aqText("Shared history"):aqText("Lifetime")} wins, ranked by ${aqText({day:"days",week:"weeks",month:"months"}[metric])} won</caption><thead><tr><th scope="col"><span class="win-sr">Rank</span>#</th><th scope="col">Player</th>${[["day",aqText("Days")],["week",aqText("Weeks")],["month",aqText("Months")]].map(([kind,label])=>aqHtml`<th scope="col"${kind===metric?' aria-sort="descending" class="win-selected"':""}>${label}<span class="win-sr"> won</span></th>`).join("")}</tr></thead><tbody>${playerRows}${waitingRows}</tbody></table>` : aqHtml`<p class="empty">The first recorded study sessions will start your winner history.</p>`;
@@ -339,7 +332,7 @@ function refreshWinnerContent() {
 async function loadWinners() {
   const id = ++winnerState.request;
   try {
-    const data = await AnkiQuestSite.readJSON<WinnerHistory>("/api/winners");
+    const data = await request<WinnerHistory>("/api/winners");
     if (!data.shared || !Array.isArray(data.shared.players) || !Array.isArray(data.lifetime?.players)) throw new Error(aqText("Incomplete winner history"));
     if (id !== winnerState.request) return;
     winnerState.data = data;
@@ -510,7 +503,7 @@ async function render() {
     const scoped = (url: string) => scope ? url + (url.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope) : url;
     if (!canRender()) return;
     if (currentView() === "records") {
-      const held = await AnkiQuestSite.readJSON<RecordBoard[]>(scoped("/api/records"), auth);
+      const held = await request<RecordBoard[]>(scoped("/api/records"), auth);
       if (!canRender()) return;
       document.title = aqText("Records · AnkiQuest");
       AnkiQuestSite.setProfile(me);
@@ -520,8 +513,8 @@ async function render() {
     const period = currentPeriod();
     loadWinners();
     const [rows, week] = await Promise.all([
-      AnkiQuestSite.readJSON<Standing[]>(scoped("/api/leaderboard?period=" + period), auth),
-      AnkiQuestSite.readJSON<WeekInfo>("/api/week").catch(() => null),
+      request<Standing[]>(scoped("/api/leaderboard?period=" + period), auth),
+      request<WeekInfo>("/api/week").catch(() => null),
     ]);
     weekEnds = week?.ends_at ?? 0;
     if (user) {

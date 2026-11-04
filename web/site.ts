@@ -1,7 +1,7 @@
 import "./i18n";
 import "./aki";
 import {escape, nativeAccount} from "./common";
-import {ownerHeaders, send, type SendOptions} from "./http";
+import {ownerHeaders, send} from "./http";
 
 /* Shared navigation, presentation components, and the browser access gate. */
 (() => {
@@ -171,11 +171,6 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       }
     }
   }
-  async function readJSON<T = unknown>(url: string, options: SendOptions = {}): Promise<T> {
-    const response = await send(url, options);
-    if (!response.ok) throw new Error(`The server could not load this page (${response.status}).`);
-    return response.json();
-  }
   function setProfile(user: string, current = false) {
     const target = lastIdentity || user;
     document.querySelectorAll<HTMLAnchorElement>("[data-profile-link]").forEach(link => {
@@ -213,7 +208,7 @@ import {ownerHeaders, send, type SendOptions} from "./http";
     });
     await refreshAccess();
   }
-  window.AnkiQuestSite = {embedded, escape, href, avatar, kpi, setProfile, checkAccess, readJSON, status, member, ownerHeaders, connectMember, disconnectMember};
+  window.AnkiQuestSite = {embedded, href, avatar, kpi, setProfile, checkAccess, status, member, ownerHeaders, connectMember, disconnectMember};
   document.addEventListener("DOMContentLoaded", mountHeader, {once: true});
   addEventListener("pageshow", event => { if (event.persisted) refreshAccess(true); });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAccess(true); });

@@ -216,7 +216,7 @@ import {send} from "./http";
       busy = true; controls(); message(deleting ? aqText("Removing picture…") : aqText("Saving picture…"));
       try {
         const image = deleting ? null : await new Promise<Blob | null>(resolve => canvas!.toBlob(resolve, "image/png"));
-        if (!deleting && !image) throw new Error("Could not prepare this picture. Try another JPEG or PNG.");
+        if (!deleting && !image) throw new Error(aqText("Could not prepare this picture."));
         if (closed) return;
         const response = await send(`/api/avatar/${encodeURIComponent(user)}`, {
           method: deleting ? "DELETE" : "POST", signal: controller.signal, gate: false,

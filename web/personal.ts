@@ -1,5 +1,5 @@
 /* Private Today, study history, session recap and account settings. */
-import {escape as esc, nativeAccount} from "./common";
+import {day, escape as esc, hourOptions, nativeAccount, number} from "./common";
 import {failure, refused, request as call, send} from "./http";
 
 (() => {
@@ -50,9 +50,8 @@ import {failure, refused, request as call, send} from "./http";
   const {t:tr, html} = AnkiQuestI18n;
   const site = AnkiQuestSite;
   const $ = <E extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as E;
-  const number = (value: unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
   const when = (value: unknown) => new Date(Number(value)).toLocaleString(AnkiQuestI18n.language, {dateStyle:"medium", timeStyle:"short"});
-  const date = (value: string) => new Intl.DateTimeFormat(AnkiQuestI18n.language, {dateStyle:"full", timeZone:"UTC"}).format(new Date(value + "T12:00:00Z"));
+  const date = (value: string) => day(value, {dateStyle:"full"});
   const path = location.pathname.replace(/\/+$/, "");
   const page = path === "/history" ? "history" : path === "/settings" ? "settings" : path === "/friends" ? "friends" : path.startsWith("/join/") ? "join" : "today";
   const inviteCode = page === "join" ? decodeURIComponent(path.slice("/join/".length)) : "";
@@ -521,7 +520,6 @@ import {failure, refused, request as call, send} from "./http";
     const senders = [...people.values()].sort((a, b) => a.display.localeCompare(b.display) || a.user.localeCompare(b.user));
     return {senders, unsubscribed};
   }
-  const hourOptions = (selected: number) => Array.from({length:24},(_,hour)=>html`<option value="${hour}" ${hour===Number(selected)?"selected":""}>${String(hour).padStart(2,"0")}:00</option>`).join("");
   function settingError(name: SettingName) { return html`<p class="status error" role="alert">${esc(state.errors[name] || tr("This setting could not load. Refresh to try again."))}</p>`; }
   function renderSettings(card: SettingName | null = null) {
     const {companion,reminders:prefs,freezes,nudges,subscriptions,decks,sharing,goal} = state.settings;
