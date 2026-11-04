@@ -186,6 +186,7 @@ async fn main() -> Result<(), Error> {
         players: RwLock::new(players),
         standings: Default::default(),
         heartbeat: Default::default(),
+        rank_weeks: Default::default(),
         store: Mutex::new(store),
     });
 

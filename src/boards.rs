@@ -10,8 +10,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 /// How many people a record names: the holder and whoever came closest.
 const PODIUM: usize = 3;
@@ -116,6 +116,24 @@ struct RankResponse {
     change: Option<feedback::Notice>,
 }
 
+/// The competition week of the last order each device was answered with, for clients that
+/// do not send `week` back. A device's first answer in a week compares nothing, so an order
+/// seen before the weekly reset is never read as this week's. Devices are told apart by the
+/// owner's token or browser session; everyone else shares one entry per player. Kept in
+/// memory only: after a restart every device's first answer has no change either.
+#[derive(Default)]
+pub(crate) struct RankWeeks(Mutex<HashMap<(String, String), i64>>);
+
+impl RankWeeks {
+    /// Notes that `device` was answered with `user`'s order in `week`, and whether the answer
+    /// it had before belonged to that week too.
+    fn answered(&self, device: String, user: &str, week: i64) -> bool {
+        let mut weeks = self.0.lock().unwrap();
+        weeks.retain(|_, seen| *seen >= week);
+        weeks.insert((device, user.to_string()), week) == Some(week)
+    }
+}
+
 /// How `me` moved among the players who have earned XP this week. Everyone else sits at
 /// zero, ordered by lifetime XP, and moving past them is no news: right after the weekly
 /// reset whoever studies first (often someone in an earlier time zone) would otherwise
@@ -151,7 +169,8 @@ async fn rank(
 ) -> Result<Json<RankResponse>, StatusCode> {
     let language =
         i18n::selected(&headers, &app.store.lock().unwrap(), &user).map_err(store_error)?;
-    let users = if authorized(&app, &user, &headers) {
+    let owner = authorized(&app, &user, &headers);
+    let users = if owner {
         app.circle(&app.store.lock().unwrap().conn, &user)
             .map_err(store_error)?
     } else {
@@ -167,8 +186,15 @@ async fn rank(
             week_xp: standing.week_xp,
         })
         .collect();
-    // An order from another week says nothing about this one.
-    let same_week = query.week.is_none_or(|seen| seen == week);
+    let device = owner
+        .then(|| {
+            let credential = access::credential(&app, &headers);
+            credential.token.or(credential.session)
+        })
+        .flatten()
+        .unwrap_or_default();
+    let answered_this_week = app.rank_weeks.answered(device, &user, week);
+    let same_week = query.week.map_or(answered_this_week, |seen| seen == week);
     let mut change = same_week
         .then(|| rank_change_this_week(&query.previous, &places, &user))
         .flatten();
@@ -421,7 +447,7 @@ mod tests {
             HeaderMap::new(),
             Json(RankQuery {
                 previous: vec!["hill".into(), "cerro".into()],
-                week: None,
+                week: Some(app.week.start_of(now_ms())),
             }),
         )
         .await
@@ -466,6 +492,116 @@ mod tests {
         .await
         .unwrap()
         .0
+    }
+
+    async fn phone_rank(app: &Arc<App>, user: &str, previous: &[&str]) -> RankResponse {
+        rank(
+            State(app.clone()),
+            UrlPath(user.into()),
+            headers(user),
+            Json(RankQuery {
+                previous: previous.iter().map(|user| user.to_string()).collect(),
+                week: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0
+    }
+
+    /// The scenario from issue #125: Hill in Berlin and Cerro in Buenos Aires on a Berlin
+    /// week. Phones that keep only the order compare it across the weekly reset.
+    #[tokio::test]
+    async fn an_order_seen_before_the_reset_is_not_compared_across_time_zones() {
+        let (store, path) = temporary_store();
+        let config = serde_json::from_value(serde_json::json!({
+            "users": {
+                "cerro": {"display": "Cerro", "token": "cerro-secret"},
+                "hill": {"display": "Hill", "token": "hill-secret"}
+            }
+        }))
+        .unwrap();
+        let mut app = app_from(store, config);
+        let berlin = chrono_tz::Europe::Berlin;
+        app.week = Week {
+            tz: berlin,
+            rollover_hour: 4,
+        };
+        let app = Arc::new(app);
+        let at_berlin = |day, hour, minute| {
+            use chrono::TimeZone;
+            berlin
+                .with_ymd_and_hms(2026, 9, day, hour, minute, 0)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let in_berlin = Clock {
+            offset_west_min: -120,
+            rollover_hour: 4,
+        };
+        let in_buenos_aires = Clock {
+            offset_west_min: 180,
+            rollover_hour: 4,
+        };
+        let study = |clock, first, count| Upload {
+            clock,
+            ..plain_upload(reviews_at(first, count))
+        };
+
+        crate::app::fix_now_ms(Some(at_berlin(20, 18, 0)));
+        upload_as(&app, "hill", study(in_berlin, at_berlin(20, 17, 0), 40)).await;
+        upload_as(
+            &app,
+            "cerro",
+            study(in_buenos_aires, at_berlin(20, 16, 0), 10),
+        )
+        .await;
+        let sunday = phone_rank(&app, "cerro", &[]).await;
+        assert_eq!(sunday.order, vec!["hill", "cerro"]);
+        assert!(phone_rank(&app, "hill", &[]).await.change.is_none());
+
+        crate::app::fix_now_ms(Some(at_berlin(21, 9, 30)));
+        assert!(app.week.start_of(now_ms()) > sunday.week);
+        upload_as(
+            &app,
+            "cerro",
+            study(in_buenos_aires, at_berlin(21, 9, 10), 5),
+        )
+        .await;
+        crate::app::fix_now_ms(Some(at_berlin(21, 10, 30)));
+        upload_as(&app, "hill", study(in_berlin, at_berlin(21, 10, 0), 2)).await;
+
+        crate::app::fix_now_ms(Some(at_berlin(21, 11, 0)));
+        let monday = phone_rank(&app, "cerro", &["hill", "cerro"]).await;
+        assert_eq!(monday.order, vec!["cerro", "hill"]);
+        assert!(
+            monday.change.is_none(),
+            "Cerro led all week; Hill only led last week: {:?}",
+            monday.change.map(|change| change.title)
+        );
+        assert!(
+            phone_rank(&app, "hill", &["hill", "cerro"])
+                .await
+                .change
+                .is_none(),
+            "nobody passed Hill this week either"
+        );
+
+        crate::app::fix_now_ms(Some(at_berlin(21, 12, 0)));
+        upload_as(&app, "hill", study(in_berlin, at_berlin(21, 11, 30), 30)).await;
+        let climbed = phone_rank(&app, "hill", &["cerro", "hill"]).await;
+        assert_eq!(climbed.order, vec!["hill", "cerro"]);
+        assert_eq!(climbed.change.unwrap().title, "👑 You took the crown");
+        assert_eq!(
+            phone_rank(&app, "cerro", &["cerro", "hill"])
+                .await
+                .change
+                .unwrap()
+                .title,
+            "👑 Hill took the crown"
+        );
+        crate::app::fix_now_ms(None);
+        cleanup(app, path);
     }
 
     #[tokio::test]
