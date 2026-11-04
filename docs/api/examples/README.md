@@ -23,6 +23,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `react.json` | `POST /api/react/{user}` |
 | `profile.json` | `GET /api/profile/{user}`, owner view with `goal` |
 | `leaderboard.json` | `GET /api/leaderboard` |
+| `leaderboard_day.json` | `GET /api/leaderboard?period=day` |
+| `week.json` | `GET /api/week` |
+| `player_profile.json` | `GET /api/profile/{user}` for another player, as the leaderboard opens it: no `goal` |
 | `rank.json` | `POST /api/rank/{user}` |
 | `notifications.json` | `GET /api/notifications/{user}`: a celebration with `win`, a friend's `share` with `image` and `reacted`, a `reaction` |
 | `goal.json` | `GET /api/goal/{user}` |
@@ -39,5 +42,7 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `social.json` | `GET /api/social/{user}`: a friend, a request each way, a muted player, a group the player owns and one they joined |
 | `invite.json` | `GET /api/invites/{code}` |
 | `social_change.json` | `POST /api/social/{user}` `{"action": "befriend", "user"}`, accepting a request |
+| `records.json` | `GET /api/records` |
+| `study.json` | `GET /api/study/{user}`: three study days and a day off |
 
 The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.

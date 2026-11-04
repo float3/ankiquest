@@ -316,6 +316,15 @@ async fn examples_match_the_handlers() {
         ("profile", "GET", "/api/profile/hill", Value::Null),
         ("leaderboard", "GET", "/api/leaderboard", Value::Null),
         (
+            "leaderboard_day",
+            "GET",
+            "/api/leaderboard?period=day",
+            Value::Null,
+        ),
+        ("week", "GET", "/api/week", Value::Null),
+        // Another player's profile, as the leaderboard opens it: no `goal`.
+        ("player_profile", "GET", "/api/profile/cerro", Value::Null),
+        (
             "rank",
             "POST",
             "/api/rank/hill",
@@ -492,6 +501,41 @@ async fn examples_match_the_handlers() {
         .await,
     ));
 
+    // Records and study history come last: Hill's earlier study days, uploaded here, change no
+    // example above. Two and three days ago, so the history has more than today.
+    let earlier: Vec<Value> = [(3, 4), (2, 6)]
+        .iter()
+        .flat_map(|&(days_ago, count)| {
+            let first = NOW_MS - days_ago * 86_400_000 - 60 * 60_000;
+            (0..count).map(move |index| {
+                json!({
+                    "id": first + index * 1_000,
+                    "cid": 2_000 + days_ago * 100 + index,
+                    "last_ivl": 1,
+                    "ivl": 3,
+                    "time_ms": 9_000,
+                    "kind": 1
+                })
+            })
+        })
+        .collect();
+    f.call(
+        "POST",
+        "/api/reviews/hill",
+        Some("hill-secret"),
+        json!({"reviews": earlier, "clock": {"offset_west_min": 0, "rollover_hour": 4}}),
+    )
+    .await;
+    examples.push((
+        "records",
+        f.call("GET", "/api/records", Some("hill-secret"), Value::Null)
+            .await,
+    ));
+    examples.push((
+        "study",
+        f.call("GET", "/api/study/hill", Some("hill-secret"), Value::Null)
+            .await,
+    ));
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
     // and belongs to one of Friend's.

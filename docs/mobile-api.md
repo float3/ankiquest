@@ -8,7 +8,7 @@ these additions preserve bearer authentication and the existing notification arr
 `GET /api/capabilities` needs no sign-in, also on a private site, and may be cached for five minutes (`Cache-Control: max-age=300`). It answers what this server supports, so a client can turn a feature on when the server has it instead of waiting for a deploy:
 
 ```json
-{ "version": 1, "features": ["activity", "cookie_session", "deck_share", "devices", "goal_backlog_days", "reactions", "share_cards", "wins"] }
+{ "version": 1, "features": ["activity", "cookie_session", "deck_share", "devices", "goal_backlog_days", "mute", "reactions", "review_offsets", "share_cards", "wins"] }
 ```
 
 | feature | meaning |
@@ -20,6 +20,7 @@ these additions preserve bearer authentication and the existing notification arr
 | `goal_backlog_days` | the `backlog` goal clears the backlog in `value` days, with `since`, `chosen` and `restart` (see [sharing.md](sharing.md)) |
 | `mute` | muting a person, `POST /api/social/{user}` `{ "action": "mute" \| "unmute", "user" }`; `muted` in the social overview (see [community.md](community.md)) |
 | `reactions` | cheering a friend's share, `POST /api/react/{user}` |
+| `review_offsets` | an uploaded review row may carry `offset_west_min`, the device's UTC offset when the review was made, and the server dates time-zone changes from it (see `docs/server.md`, "getting reviews in"). Older servers ignore the field, so sending it is harmless |
 | `share_cards` | server-drawn cards and public pages under `/w/` |
 | `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |
 
@@ -131,3 +132,21 @@ a refusal has `{ "error" }` to show: `400` for a group name, `403` for an owner 
 friends receive a `share` row from the player, with the title and body quoted in the player's own words ("I reached level 4 with 900 XP." rather than "You reached…") and the same `topic` (`place:N` for a place), so it shows the same art and can be replied to.
 
 wins, the daily goal (`/api/goal/{user}`), sharing policies (`/api/sharing/{user}`), `{ "win": id, "to": "friends" | "link" }` shares, `GET /api/wins/{user}`, `DELETE /api/wins/{user}/{id}/link`, automatic digests and `POST /api/react/{user}` are described in [sharing.md](sharing.md). Inbox rows may carry `win` (the win they are about), `share_title` and `share_body` (on the player's own shareable rows, what sharing it tells others, when that differs from `title` and `body`; clients share these and fall back to `title` and `body`), `image` (a friend's shared card) and `reacted: true` (you cheered it); the sender of a cheer gets a replyable `reaction` row. Each win reaches each friend once; friends who muted the player are skipped. Unknown or unshareable notifications are `404`, a place the player doesn't hold is `409`, and anything else is `400`.
+
+## leaderboards and profiles
+
+the app's native leaderboard and player profiles read the same JSON as the website's `/`, `/hour` … `/all` and `/week#<user>` pages.
+
+`GET /api/leaderboard?period=hour|day|week|month|year|all` answers the players the viewer may see, ordered by `xp` in that period, then `xp_total`, then `user`. An unknown or missing `period` is `week`. Each row has `user`, `display`, `level`, `xp` (the requested period), `period`, `periods` (every period's XP), `xp_total`, `week_xp`, `streak`, `streak_state`, and today's `today_reviews`, `today_minutes` and `streak_minutes` (review minutes the streak needs; 0 when any review counts), valid until `day_ends_at` (ms). Optional `scope` is `circle`, `global` or `group:<id>`, as on the website's board picker; a group the viewer is not in is `403`, anything else unknown `400`. Without it the board is the viewer's friends and groups, or everyone public.
+
+`GET /api/week` answers `{ "ends_at", "starts_at", "timezone" }`: when the competition week, and so the weekly board, began and resets (ms).
+
+`GET /api/profile/{user}` answers the player's level, XP, `periods`, `records`, streak and `streak_state`, streak freezes (`stored_freezes`, `freezes_enabled`, `freeze_earned_today`), `today`, `lifetime`, daily `quests`, `achievements`, `heatmap` and `conquests`. Only the owner's own profile has `goal`. A player the viewer may not see is `404`, the same as an unknown one. The owner's recent wins are `GET /api/wins/{user}` (see [sharing.md](sharing.md)).
+
+## records and study history
+
+the app's native records and study history screens read the same JSON as the website's `/records` and `/history` pages.
+
+`GET /api/records` answers seven boards, in this order: `hour`, `day`, `week`, `month` and `year` (the best rolling hour, 24 hours, 7, 30 and 365 days of XP anyone has had), then `streak` (longest streak) and `days` (days studied). Each is `{ "window", "unit", "holders" }`, `unit` being `xp` or `days`. `holders` are the top three players with anything at all, best first, each with `user`, `display`, `value`, `detail` (the reviews in that window; 0 for `streak` and `days`), `at` and `until` (ms). For a rolling window `at` is its first review and `until` its last; a streak's `at` is when it ended and `days`' when the player first studied, with `until` the same. Optional `scope` and who is included are as for `GET /api/leaderboard`. example: `records.json`.
+
+`GET /api/study/{user}?year=YYYY` is the owner's own study calendar, for the year asked or the player's current one: `{ "year", "years", "days", "last_review_at", "last_received_at", "latest_session" }`. `years` lists every year with history, newest first. `days` has one entry per Anki day from the player's first study day on (days without reviews included, with zeros), each with `date` (`YYYY-MM-DD`, following the player's cutoff), `at` (when that day began, ms), `reviews`, `time_ms`, `xp`, `new_cards`, `streak` (the streak on that day) and `frozen` (a streak freeze covered it). `last_review_at` is the newest uploaded review (ms) and `last_received_at` when reviews last arrived; either is null before the first upload. `latest_session` is null or `{ "started_at", "ended_at", "reviews", "time_ms", "new_cards" }`. Another player's history is `401` or `403`, a year outside the supported range `400`. example: `study.json`.
