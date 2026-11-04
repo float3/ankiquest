@@ -525,28 +525,25 @@ impl Store {
         Ok(())
     }
 
-    pub fn nudges_enabled(&self, user: &str) -> Result<bool, Error> {
+    /// A `player_settings` switch, or `default` before the player saved any.
+    fn player_setting(&self, user: &str, column: &str, default: bool) -> Result<bool, Error> {
         Ok(self
             .conn
             .query_row(
-                "select nudges from player_settings where user = ?1",
+                &format!("select {column} from player_settings where user = ?1"),
                 [user],
                 |r| r.get(0),
             )
             .optional()?
-            .unwrap_or(false))
+            .unwrap_or(default))
+    }
+
+    pub fn nudges_enabled(&self, user: &str) -> Result<bool, Error> {
+        self.player_setting(user, "nudges", false)
     }
 
     pub fn friend_nudges_receiving(&self, user: &str) -> Result<bool, Error> {
-        Ok(self
-            .conn
-            .query_row(
-                "select friend_nudges from player_settings where user = ?1",
-                [user],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(false))
+        self.player_setting(user, "friend_nudges", false)
     }
 
     pub fn friend_nudge_muted(&self, recipient: &str, sender: &str) -> Result<bool, Error> {
@@ -609,15 +606,7 @@ impl Store {
     }
 
     pub fn celebrations_enabled(&self, user: &str) -> Result<bool, Error> {
-        Ok(self
-            .conn
-            .query_row(
-                "select celebrations from player_settings where user = ?1",
-                [user],
-                |r| r.get(0),
-            )
-            .optional()?
-            .unwrap_or(true))
+        self.player_setting(user, "celebrations", true)
     }
 
     pub fn set_celebrations(&mut self, user: &str, enabled: bool) -> Result<(), Error> {

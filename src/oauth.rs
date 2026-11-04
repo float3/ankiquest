@@ -212,10 +212,6 @@ impl Settings {
     }
 }
 
-trait Expiring {
-    fn expires(&self) -> i64;
-}
-
 struct Started {
     provider: Provider,
     verifier: String,
@@ -237,18 +233,6 @@ struct Signup {
     expires: i64,
 }
 
-impl Expiring for Started {
-    fn expires(&self) -> i64 {
-        self.expires
-    }
-}
-
-impl Expiring for Signup {
-    fn expires(&self) -> i64 {
-        self.expires
-    }
-}
-
 /// Sign-ins in progress, each found through the random value in its browser's cookie.
 #[derive(Default)]
 pub(crate) struct Flows {
@@ -256,12 +240,13 @@ pub(crate) struct Flows {
     signups: Mutex<HashMap<String, Signup>>,
 }
 
-fn keep<T: Expiring>(map: &mut HashMap<String, T>, key: String, value: T, now: i64) {
-    map.retain(|_, entry| entry.expires() > now);
+/// Adds a flow to `map` after dropping expired ones, and the oldest when it is full.
+fn keep<T>(map: &mut HashMap<String, T>, key: String, value: T, now: i64, expires: fn(&T) -> i64) {
+    map.retain(|_, entry| expires(entry) > now);
     if map.len() >= MAX_FLOWS
         && let Some(oldest) = map
             .iter()
-            .min_by_key(|(_, entry)| entry.expires())
+            .min_by_key(|(_, entry)| expires(entry))
             .map(|(key, _)| key.clone())
     {
         map.remove(&oldest);
@@ -271,7 +256,13 @@ fn keep<T: Expiring>(map: &mut HashMap<String, T>, key: String, value: T, now: i
 
 impl Flows {
     fn start(&self, state: String, started: Started, now: i64) {
-        keep(&mut self.started.lock().unwrap(), state, started, now);
+        keep(
+            &mut self.started.lock().unwrap(),
+            state,
+            started,
+            now,
+            |s| s.expires,
+        );
     }
 
     /// The flow behind a callback, at most once.
@@ -284,7 +275,9 @@ impl Flows {
     }
 
     fn add_signup(&self, key: String, signup: Signup, now: i64) {
-        keep(&mut self.signups.lock().unwrap(), key, signup, now);
+        keep(&mut self.signups.lock().unwrap(), key, signup, now, |s| {
+            s.expires
+        });
     }
 
     fn signup(&self, key: &str, now: i64) -> Option<Signup> {

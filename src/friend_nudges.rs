@@ -73,22 +73,17 @@ async fn settings(
     let store = app.store.lock().unwrap();
     let day = store.clock(&user).map_err(store_error)?.day(now_ms());
     let mut friends = Vec::new();
-    for recipient in app
-        .circle(&store.conn, &user)
-        .map_err(store_error)?
-        .iter()
-        .filter(|recipient| **recipient != user && app.is_user(recipient))
-    {
+    for recipient in crate::shares::friends(&app, &store.conn, &user).map_err(store_error)? {
         friends.push(Friend {
-            user: recipient.clone(),
-            display: app.display(recipient),
+            display: app.display(&recipient),
             enabled: store
-                .friend_nudges_enabled(recipient, &user)
+                .friend_nudges_enabled(&recipient, &user)
                 .map_err(store_error)?,
-            sent_today: sent(&store, &user, recipient, day).map_err(store_error)?,
+            sent_today: sent(&store, &user, &recipient, day).map_err(store_error)?,
             muted_by_me: store
-                .friend_nudge_muted(&user, recipient)
+                .friend_nudge_muted(&user, &recipient)
                 .map_err(store_error)?,
+            user: recipient,
         });
     }
     friends.sort_by(|a, b| a.display.cmp(&b.display).then(a.user.cmp(&b.user)));

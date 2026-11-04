@@ -379,13 +379,8 @@ pub fn stats(app: &App, now: i64) -> Result<Stats, Error> {
             }
         }
     }
-    let sizes: Vec<i64> = conn
-        .prepare(
-            "select count(m.user) as size from groups g
-             left join group_members m on m.group_id = g.id group by g.id order by size desc",
-        )?
-        .query_map([], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
+    let mut sizes: Vec<i64> = groups(conn)?.into_iter().map(|g| g.members).collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
     let groups = Groups {
         count: sizes.len(),
         members: conn.query_row("select count(distinct user) from group_members", [], |r| {
@@ -492,11 +487,7 @@ async fn send(
     check(&app, &user, &headers)?;
     let title = draft.title.trim();
     let body = draft.body.trim();
-    if title.is_empty()
-        || title.chars().count() > MAX_TITLE
-        || title.chars().any(char::is_control)
-        || !valid_message(body)
-    {
+    if !crate::web_util::valid_title(title, MAX_TITLE) || !valid_message(body) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut store = app.store.lock().unwrap();

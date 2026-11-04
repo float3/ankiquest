@@ -628,20 +628,7 @@ pub(crate) async fn session(
                     "Username or password not recognized.",
                 );
             }
-            return match app
-                .access
-                .create_session(&headers, Some(user), None, now_ms())
-            {
-                Ok(token) => (
-                    StatusCode::NO_CONTENT,
-                    [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
-                )
-                    .into_response(),
-                Err(_) => json_error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Unable to create a session.",
-                ),
-            };
+            return open_session(&app, &headers, Some(user), None);
         }
         let valid = credential.as_ref().is_some_and(|credential| {
             credential.password.len() <= 1024
@@ -672,13 +659,23 @@ pub(crate) async fn session(
             opened_with = account_token(&app, &credential.password, owner.as_deref());
         }
     }
+    open_session(&app, &headers, owner, opened_with)
+}
+
+/// 204 with the new session's cookie.
+fn open_session(
+    app: &App,
+    headers: &HeaderMap,
+    owner: Option<String>,
+    opened_with: Option<String>,
+) -> Response {
     match app
         .access
-        .create_session(&headers, owner, opened_with, now_ms())
+        .create_session(headers, owner, opened_with, now_ms())
     {
         Ok(token) => (
             StatusCode::NO_CONTENT,
-            [(header::SET_COOKIE, cookie(&app, &token, SESSION_SECONDS))],
+            [(header::SET_COOKIE, cookie(app, &token, SESSION_SECONDS))],
         )
             .into_response(),
         Err(_) => json_error(

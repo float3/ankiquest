@@ -248,15 +248,32 @@ fn set_topic(conn: &Connection, id: i64, topic: Option<&str>) -> Result<(), Erro
     Ok(())
 }
 
+/// Rows of `table` other than completions, and completions the recipient still wants.
+fn completion_visible_sql(table: &str, recipient: &str) -> String {
+    format!(
+        "({table}.kind != 'completion' or ({table}.completion_cancelled = 0 and {}))",
+        completion_allowed_sql(recipient, &format!("{table}.sender"))
+    )
+}
+
+/// Trims a page fetched with `limit + 1` rows; the id to continue before when there is more.
+fn next_page<T>(items: &mut Vec<T>, limit: u32, id: impl Fn(&T) -> i64) -> Option<i64> {
+    if items.len() <= limit as usize {
+        return None;
+    }
+    items.truncate(limit as usize);
+    items.last().map(id)
+}
+
 impl Store {
     pub fn notifications(&self, user: &str, now_ms: i64) -> Result<Vec<Notification>, Error> {
         let mut stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n where n.id in (
                  select id from notifications where recipient=?1 and push_only=0
                  and created_at>=?3
-                 and (kind != 'completion' or (completion_cancelled = 0 and {}))
+                 and {}
                  order by id desc limit 500) order by n.id",
-            completion_allowed_sql("?1", "notifications.sender")
+            completion_visible_sql("notifications", "?1")
         ))?;
         Ok(stmt
             .query_map(params![user, now_ms, now_ms - INBOX_AGE_MS], notification)?
@@ -303,12 +320,12 @@ impl Store {
         let mut stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n
             where n.recipient=?1 and n.push_only=0 and n.created_at>=?3 and (?4 is null or n.id<?4)
-            and (n.kind != 'completion' or (n.completion_cancelled = 0 and {}))
+            and {}
             and (?6 is null or (?6='needs_action' and {ACTION_REQUIRED_SQL})
                 or (?6!='needs_action' and ({ACTIVITY_CATEGORY_SQL})=?6))
             and (?7=0 or n.read_at is null)
             order by n.id desc limit ?5",
-            completion_allowed_sql("?1", "n.sender")
+            completion_visible_sql("n", "?1")
         ))?;
         let mut items = stmt
             .query_map(
@@ -324,12 +341,7 @@ impl Store {
                 notification,
             )?
             .collect::<Result<Vec<_>, _>>()?;
-        let next_before = if items.len() > limit as usize {
-            items.truncate(limit as usize);
-            items.last().map(|item| item.id)
-        } else {
-            None
-        };
+        let next_before = next_page(&mut items, limit, |item| item.id);
         let mut attention_stmt = self.conn.prepare(&format!(
             "select {NOTICE_COLUMNS} from notifications n
              where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
@@ -343,8 +355,8 @@ impl Store {
             &format!(
                 "select coalesce(sum(n.read_at is null),0),coalesce(sum({ACTION_REQUIRED_SQL}),0),max(n.id)
                  from notifications n where n.recipient=?1 and n.push_only=0 and n.created_at>=?3
-                 and (n.kind != 'completion' or (n.completion_cancelled = 0 and {}))",
-                completion_allowed_sql("?1", "n.sender")
+                 and {}",
+                completion_visible_sql("n", "?1")
             ),
             params![user, now_ms, cutoff],
             |r| {
@@ -426,12 +438,7 @@ impl Store {
                 },
             )?
             .collect::<Result<Vec<_>, _>>()?;
-        let next_before = if items.len() > limit as usize {
-            items.truncate(limit as usize);
-            items.last().map(|item| item.notice.id)
-        } else {
-            None
-        };
+        let next_before = next_page(&mut items, limit, |item| item.notice.id);
         Ok(SentPage { items, next_before })
     }
 
@@ -700,7 +707,7 @@ impl Store {
                 "with ready as (
                      select *, row_number() over (partition by recipient order by retry_at, id) as turn
                      from notifications where pushed = 0 and push_cancelled = 0 and retry_at <= ?1
-                     and (kind != 'completion' or (completion_cancelled = 0 and {}))
+                     and {}
                        and created_at >= ?2
                  ), attempted as (
                      select recipient, max(retry_at) as last_retry from notifications
@@ -709,7 +716,7 @@ impl Store {
                  select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
-                completion_allowed_sql("notifications.recipient", "notifications.sender")
+                completion_visible_sql("notifications", "notifications.recipient")
             ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
@@ -730,9 +737,9 @@ impl Store {
             &format!(
                 "update notifications set retry_at = ?2, push_attempts = min(push_attempts + 1, 31)
                  where id = ?1 and pushed = 0 and push_cancelled = 0 and retry_at <= ?3 and created_at>=?4
-                 and (kind != 'completion' or (completion_cancelled = 0 and {}))
+                 and {}
                  and (kind != 'nudge' or {NUDGE_ALLOWED_SQL})",
-                completion_allowed_sql("notifications.recipient", "notifications.sender")
+                completion_visible_sql("notifications", "notifications.recipient")
             ),
             params![id, now_ms + PUSH_LEASE_MS, now_ms, now_ms - INBOX_AGE_MS],
         )? > 0)

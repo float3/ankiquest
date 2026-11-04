@@ -508,10 +508,10 @@ pub async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
             "Send the device token to sign out.",
         );
     };
-    let hash = token_hash(token);
-    let Some(owner) = app.accounts.tokens.read().unwrap().get(&hash).cloned() else {
+    let Some(owner) = app.accounts.token_owner(token) else {
         return refuse(StatusCode::UNAUTHORIZED, "Token not recognized.");
     };
+    let hash = token_hash(token);
     if let Err(error) = app
         .store
         .lock()

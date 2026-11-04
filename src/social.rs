@@ -258,18 +258,15 @@ impl App {
     }
 }
 
+/// 24 hex characters.
 fn new_invite() -> Result<String, Error> {
-    let mut random = [0u8; 12];
-    getrandom::fill(&mut random).map_err(|_| "invite randomness unavailable")?;
-    Ok(random.iter().map(|b| format!("{b:02x}")).collect())
+    let random = crate::web_util::random_bytes("invite randomness unavailable")?;
+    Ok(crate::web_util::hex(&random[..12]))
 }
 
 fn clean_name(name: &str) -> Option<String> {
     let name = name.trim();
-    (!name.is_empty()
-        && name.chars().count() <= MAX_GROUP_NAME
-        && !name.chars().any(char::is_control))
-    .then(|| name.to_string())
+    crate::web_util::valid_title(name, MAX_GROUP_NAME).then(|| name.to_string())
 }
 
 /// A player as the community page shows them.

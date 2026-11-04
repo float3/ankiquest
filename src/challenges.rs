@@ -155,7 +155,7 @@ pub fn create(
         ));
     }
     let title = request.title.trim();
-    if title.is_empty() || title.chars().count() > 80 || title.chars().any(char::is_control) {
+    if !crate::web_util::valid_title(title, 80) {
         return Err(Error::Invalid("Use a title between 1 and 80 characters."));
     }
     if !(1..=31).contains(&request.duration_days) || !(1..=100_000).contains(&request.target) {

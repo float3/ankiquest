@@ -264,15 +264,8 @@ impl App {
     }
 
     pub(crate) fn participants(&self) -> Vec<competition::Participant> {
+        let users = self.known_users();
         let players = self.players.read().unwrap();
-        let users: BTreeSet<_> = self
-            .config
-            .users
-            .keys()
-            .chain(players.keys())
-            .cloned()
-            .chain(self.accounts.users())
-            .collect();
         users
             .into_iter()
             .map(|user| {

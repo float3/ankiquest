@@ -154,6 +154,11 @@ pub(crate) fn json_error(status: StatusCode, message: &str) -> Response {
     (status, Json(serde_json::json!({"error": message}))).into_response()
 }
 
+/// A trimmed title: not empty, at most `max` characters, no control characters.
+pub(crate) fn valid_title(title: &str, max: usize) -> bool {
+    !title.is_empty() && title.chars().count() <= max && !title.chars().any(char::is_control)
+}
+
 /// A typed user name as it is stored: trimmed and lowercased.
 pub(crate) fn normalize_user(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
