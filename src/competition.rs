@@ -991,13 +991,13 @@ async fn community_dashboard(
     if !valid_year(year) || !(1..=12).contains(&month) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let mut store = app.store.lock().unwrap();
     if let Some(base) = &app.config.sync_base {
-        import(&app, &mut store, base).map_err(|error| {
+        import(&app, base).map_err(|error| {
             log_error!("community sync import incomplete: {error}");
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
+    let mut store = app.store.lock().unwrap();
     let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now).map_err(store_error)?;
     let language = i18n::selected(&headers, &store, "").map_err(store_error)?;
@@ -1008,13 +1008,13 @@ async fn community_dashboard(
 }
 
 async fn winners(State(app): State<Arc<App>>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut store = app.store.lock().unwrap();
     if let Some(base) = &app.config.sync_base {
-        import(&app, &mut store, base).map_err(|error| {
+        import(&app, base).map_err(|error| {
             log_error!("winner history sync import incomplete: {error}");
             StatusCode::SERVICE_UNAVAILABLE
         })?;
     }
+    let mut store = app.store.lock().unwrap();
     let participants = app.legacy_participants();
     refresh_community(&app, &mut store, &participants, now_ms()).map_err(store_error)?;
     winner_history(&store, &participants)
@@ -2013,13 +2013,10 @@ mod tests {
             )
             .unwrap();
         }
-        {
-            let mut store = app.store.lock().unwrap();
-            let error = import(&app, &mut store, &base).unwrap_err().to_string();
-            assert!(error.contains("hill"));
-            assert!(error.contains("friend"));
-            assert_eq!(store.reviews("cerro").unwrap().len(), 2);
-        }
+        let error = import(&app, &base).unwrap_err().to_string();
+        assert!(error.contains("hill"));
+        assert!(error.contains("friend"));
+        assert_eq!(app.store.lock().unwrap().reviews("cerro").unwrap().len(), 2);
         assert_eq!(
             community_dashboard(State(app.clone()), community_query(day), HeaderMap::new())
                 .await
