@@ -30,6 +30,23 @@ ART = [
     ("aki_freeze", "static/aki/freeze.png", 240),
     ("ankilope_welcome", "static/ankilope/welcome.png", 240),
     ("aki_winner", "static/aki/winner.png", 168),
+    # Moment art from #88: app icon moods, streak widget, celebrations.
+    ("aki_icon_happy", "static/aki/icon_happy.png", 432),
+    ("aki_icon_worried", "static/aki/icon_worried.png", 432),
+    ("aki_icon_frozen", "static/aki/icon_frozen.png", 432),
+    ("aki_icon_sleepy", "static/aki/icon_sleepy.png", 432),
+    ("aki_streak_hot", "static/aki/streak_hot.png", 336),
+    ("aki_streak_blazing", "static/aki/streak_blazing.png", 336),
+    ("aki_streak_legend", "static/aki/streak_legend.png", 336),
+    ("aki_streak_milestone", "static/aki/streak_milestone.png", 336),
+    ("aki_freeze_used", "static/aki/freeze_used.png", 336),
+    ("aki_comeback", "static/aki/comeback.png", 336),
+    ("aki_minimum", "static/aki/minimum.png", 336),
+    ("aki_goal", "static/aki/goal.png", 336),
+    ("aki_achievement", "static/aki/achievement.png", 336),
+    ("aki_deck_conquered", "static/aki/deck_conquered.png", 336),
+    ("aki_sleeping", "static/aki/sleeping.png", 336),
+    ("duo_friends", "static/duo/friends.png", 336),
 ]
 
 
