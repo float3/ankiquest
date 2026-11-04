@@ -1,31 +1,20 @@
 """Desktop deck list line, notifications and web window; run with python -m unittest discover -s tests."""
 
-import importlib.util
 import json
 import re
 import shutil
 import subprocess
-import sys
 import unittest
 from pathlib import Path
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
+from addon_loader import load_module
 
-
-def load_module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-board = load_module("ankiquest_board", ADDON / "board.py")
-notify = load_module("ankiquest_notify", ADDON / "notify.py")
-tree = load_module("ankiquest_decks", ADDON / "decks.py")
-web = load_module("ankiquest_web", ADDON / "web.py")
-client = load_module("ankiquest_client_shared", ADDON / "client.py")
-progress = load_module("ankiquest_progress_shared", ADDON / "deck_completion.py")
+board = load_module("ankiquest_board", "board.py")
+notify = load_module("ankiquest_notify", "notify.py")
+tree = load_module("ankiquest_decks", "decks.py")
+web = load_module("ankiquest_web", "web.py")
+client = load_module("ankiquest_client_shared", "client.py")
+progress = load_module("ankiquest_progress_shared", "deck_completion.py")
 
 
 FIXTURES = json.loads((Path(__file__).resolve().parent / "fixtures" / "clients.json").read_text("utf-8"))
@@ -140,11 +129,6 @@ class NotifyTests(unittest.TestCase):
         )
         told = {"feedback": {"headlines": ["<b>Level 5!</b>"], "status": "<i>+10 XP</i>"}}
         self.assertEqual(("&lt;b&gt;Level 5!&lt;/b&gt;<br>&lt;i&gt;+10 XP&lt;/i&gt;", True), notify.feedback(told, False))
-
-    def test_a_message_can_be_answered_until_it_has_been(self):
-        self.assertTrue(notify.answerable({"sender": "cerro"}))
-        self.assertFalse(notify.answerable({"sender": "cerro", "replied": True}))
-        self.assertFalse(notify.answerable({"sender": ""}))
 
 
 class WebTests(unittest.TestCase):

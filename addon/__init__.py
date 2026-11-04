@@ -13,7 +13,7 @@ from aqt.utils import openLink, tooltip
 
 from . import board, home, notify, ui, updates, web
 from . import inbox_ui, share, share_ui, sharing
-from .inbox import shareable
+from .inbox import answerable, shareable
 from .language import tr
 from .client import (
     MAX_PENDING,
@@ -243,7 +243,7 @@ def announce(rank, profile, inbox, quiet):
         tooltip(warning[0], period=5000)
     for entry in fresh:
         text = notify.notice(entry)
-        if notify.answerable(entry):
+        if answerable(entry):
             text += "<br><i>%s</i>" % html.escape(tr("Tools → ankiquest inbox… to reply"))
         tooltip(text, period=6000)
     celebrate_latest(previous, rank, fresh, settings)
@@ -266,7 +266,7 @@ def on_deck_browser(deck_browser, content):
         return
     if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
-    waiting = sum(1 for entry in state["inbox"] if notify.answerable(entry))
+    waiting = sum(1 for entry in state["inbox"] if answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
     content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))

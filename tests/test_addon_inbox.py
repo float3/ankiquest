@@ -1,30 +1,18 @@
 """The desktop inbox, replies and sharing a win; run with python -m unittest discover -s tests."""
 
 import ast
-import importlib.util
-import sys
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from addon_loader import ADDON, load_module
 import test_deck_completion as base
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-
-
-def load(name):
-    spec = importlib.util.spec_from_file_location("aq_inbox_" + name, ADDON / (name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-inbox = load("inbox")
-share = load("share")
-language = load("language")
+inbox = load_module("aq_inbox_inbox", "inbox.py")
+share = load_module("aq_inbox_share", "share.py")
+language = load_module("aq_inbox_language", "language.py")
 
 
 class Refused(Exception):
@@ -86,6 +74,13 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(["cheer", "open", "read"], inbox.actions(dict(entry, replied=True)))
         self.assertEqual(["reply", "cheer", "open"], inbox.actions(dict(entry, read_at=1790000000)))
 
+    def test_a_message_can_be_answered_until_it_has_been(self):
+        self.assertTrue(inbox.answerable({"sender": "cerro"}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "replied": True}))
+        self.assertFalse(inbox.answerable({"sender": ""}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "challenge_id": 8}))
+        self.assertFalse(inbox.answerable({"sender": "cerro", "route": "/community#challenge-8"}))
+
     def test_challenge_rows_are_answered_on_the_website(self):
         invite = {"id": 5, "sender": "alice", "kind": "challenge_invite", "challenge_id": 8, "route": "/community#challenge-8"}
         self.assertEqual(["open", "read"], inbox.actions(invite))
@@ -101,10 +96,9 @@ class ActionTests(unittest.TestCase):
         self.assertFalse(inbox.shareable({"id": 9, "kind": "completion"}))
         self.assertFalse(inbox.shareable({"kind": "celebration"}))
 
-    def test_legacy_rows_have_no_read_state(self):
-        self.assertEqual(["open"], inbox.actions({"id": 1, "kind": "message"}, legacy=True))
-        self.assertFalse(inbox.unread({"id": 1}, legacy=True))
+    def test_rows_without_a_read_time_are_unread(self):
         self.assertTrue(inbox.unread({"id": 1, "read_at": None}))
+        self.assertFalse(inbox.unread({"id": 1, "read_at": 1790000000}))
 
     def test_times_are_local_and_missing_ones_are_blank(self):
         self.assertRegex(inbox.when(1790000000), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
@@ -113,11 +107,10 @@ class ActionTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
-    def test_the_inbox_comes_from_activity_and_falls_back_to_the_legacy_list(self):
+    def test_the_inbox_comes_from_activity(self):
         api = FakeApi({"/api/activity/hill": {"items": [{"id": 3}, {"id": 2}], "unread_count": 1}})
-        self.assertEqual(([{"id": 3}, {"id": 2}], False), inbox.load(api))
-        old = FakeApi({"/api/activity/hill": Refused(404), "/api/notifications/hill": [{"id": 1}, {"id": 2}]})
-        self.assertEqual(([{"id": 2}, {"id": 1}], True), inbox.load(old))
+        self.assertEqual([{"id": 3}, {"id": 2}], inbox.load(api))
+        self.assertEqual([], inbox.load(FakeApi({"/api/activity/hill": {}})))
         broken = FakeApi({"/api/activity/hill": Refused(500)})
         with self.assertRaises(Refused):
             inbox.load(broken)
@@ -270,11 +263,11 @@ class ShareTests(unittest.TestCase):
         self.assertEqual("Level 5!: Well done\nI study with AnkiQuest.", share.invitation(win, ""))
 
     def test_the_window_shows_the_chosen_companion(self):
-        self.assertEqual("aki_face.png", share.art_file("aki"))
-        self.assertEqual("ankilope_face.png", share.art_file("ankilope"))
-        self.assertIsNone(share.art_file("none"))
+        self.assertEqual("aki_face.png", Path(share.face_path("aki")).name)
+        self.assertEqual("ankilope_face.png", Path(share.face_path("ankilope")).name)
+        self.assertIsNone(share.face_path("none"))
         for companion in ("aki", "ankilope"):
-            self.assertTrue((ADDON / share.art_file(companion)).is_file())
+            self.assertTrue(Path(share.face_path(companion)).is_file())
 
 
 def translated_literals(path):

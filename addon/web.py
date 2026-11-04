@@ -67,16 +67,11 @@ def session_script(base, user, token, language="en"):
 
 
 def session_cookie(base, token):
-    """Trades the token for the site's HttpOnly session; None on servers without one."""
-    from .client import ServerError, open_url
+    """Trades the token for the site's HttpOnly session."""
+    from .client import open_url
 
-    try:
-        with open_url(base.rstrip("/") + "/auth/session", b"", {"Authorization": "Bearer " + token}, "POST") as response:
-            headers = response.headers.get_all("Set-Cookie") or []
-    except ServerError as error:
-        if error.status == 404:
-            return None
-        raise
+    with open_url(base.rstrip("/") + "/auth/session", b"", {"Authorization": "Bearer " + token}, "POST") as response:
+        headers = response.headers.get_all("Set-Cookie") or []
     for header in headers:
         jar = SimpleCookie()
         jar.load(header)

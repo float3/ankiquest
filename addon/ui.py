@@ -1,7 +1,6 @@
 """The dialogs behind the Tools menu: settings and deck sharing."""
 
 import html
-from pathlib import Path
 
 from aqt.qt import (
     QCheckBox,
@@ -26,12 +25,8 @@ from aqt.qt import Qt
 from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
+from .share import face_path
 from .today_ui import settings_section
-
-
-def _enum(owner, group, name):
-    """Qt 5 keeps these constants on the class, Qt 6 inside a nested enum."""
-    return getattr(getattr(owner, group, owner), name)
 
 
 def _scroller(widgets):
@@ -74,13 +69,13 @@ def _brand(dialog, layout, companion="aki"):
     """Local art works even before a server is configured or while offline."""
     if companion == "none":
         return
-    asset = str(Path(__file__).with_name("ankilope_face.png" if companion == "ankilope" else "aki_face.png"))
+    asset = face_path(companion)
     dialog.setWindowIcon(QIcon(asset))
     image = QLabel()
     image.setPixmap(QPixmap(asset).scaled(
         48, 48,
-        _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-        _enum(Qt, "TransformationMode", "SmoothTransformation"),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     ))
     layout.addWidget(_row(image, QLabel(tr("Your study companion."))))
 
@@ -96,7 +91,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     server = QLineEdit(url or DEFAULT_SERVER)
     user = QLineEdit()
     password = QLineEdit()
-    password.setEchoMode(_enum(QLineEdit, "EchoMode", "Password"))
+    password.setEchoMode(QLineEdit.EchoMode.Password)
     display = QLineEdit()
     display_label = QLabel(tr("Display name (optional)"))
     for title, field in ((tr("Server"), server), (tr("Username"), user), (tr("Password"), password)):
@@ -110,7 +105,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     hint.setWordWrap(True)
     layout.addWidget(hint)
     status = QLabel()
-    status.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    status.setTextFormat(Qt.TextFormat.PlainText)
     status.setWordWrap(True)
     layout.addWidget(status)
 
@@ -175,7 +170,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     url.setPlaceholderText(DEFAULT_SERVER)
     user = QLineEdit(config.get("user", ""))
     token = QLineEdit(config.get("token", ""))
-    token.setEchoMode(_enum(QLineEdit, "EchoMode", "Password"))
+    token.setEchoMode(QLineEdit.EchoMode.Password)
     for title, field in ((tr("Server"), url), (tr("Player"), user), (tr("Token"), token)):
         layout.addWidget(QLabel(title))
         layout.addWidget(field)
@@ -253,7 +248,7 @@ def deck_dialog(parent, settings, companion="aki"):
     items = []
     for index, deck in enumerate(decks):
         item = QTreeWidgetItem([label(deck)])
-        item.setCheckState(0, _enum(Qt, "CheckState", "Checked" if deck.get("enabled") else "Unchecked"))
+        item.setCheckState(0, Qt.CheckState.Checked if deck.get("enabled") else Qt.CheckState.Unchecked)
         item.setToolTip(0, "<p>%s</p>" % html.escape(deck["name"]))
         items.append(item)
         parts = deck["name"].split("::")
@@ -313,17 +308,17 @@ def deck_dialog(parent, settings, companion="aki"):
     every = QPushButton(tr("All / none"))
 
     def toggle_all():
-        checked = _enum(Qt, "CheckState", "Checked")
+        checked = Qt.CheckState.Checked
         select = any(item.checkState(0) != checked for item in items)
         for item in items:
-            item.setCheckState(0, _enum(Qt, "CheckState", "Checked" if select else "Unchecked"))
+            item.setCheckState(0, Qt.CheckState.Checked if select else Qt.CheckState.Unchecked)
 
     every.clicked.connect(toggle_all)
     layout.addLayout(_buttons(dialog, tr("Save"), (every,)))
 
     if not dialog.exec():
         return None
-    checked = _enum(Qt, "CheckState", "Checked")
+    checked = Qt.CheckState.Checked
     shared = [deck["id"] for deck, item in zip(decks, items) if item.checkState(0) == checked]
     unshared = [deck["id"] for deck, item in zip(decks, items) if item.checkState(0) != checked]
     picked = [user for user, box in recipients.items() if box.isChecked()]
@@ -353,7 +348,7 @@ def companion_dialog(parent, selected):
     choice.setCurrentIndex(next((i for i, (_, value) in enumerate(options) if value == selected), 0))
     layout.addWidget(choice)
     preview = QLabel()
-    preview.setAlignment(_enum(Qt, "AlignmentFlag", "AlignCenter"))
+    preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
     layout.addWidget(preview)
 
     def update_preview():
@@ -361,10 +356,9 @@ def companion_dialog(parent, selected):
         if value == "none":
             preview.clear()
         else:
-            asset = str(Path(__file__).with_name("ankilope_face.png" if value == "ankilope" else "aki_face.png"))
-            preview.setPixmap(QPixmap(asset).scaled(
-                96, 96, _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-                _enum(Qt, "TransformationMode", "SmoothTransformation"),
+            preview.setPixmap(QPixmap(face_path(value)).scaled(
+                96, 96, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             ))
 
     choice.currentIndexChanged.connect(update_preview)

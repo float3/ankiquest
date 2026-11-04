@@ -178,13 +178,11 @@ def period(value):
 
 def _xp(entry, chosen):
     periods = entry.get("periods")
-    if isinstance(periods, dict) and chosen in periods:
-        return int(periods.get(chosen) or 0)
-    return int(entry.get("week_xp") or 0)
+    return int(periods.get(chosen) or 0) if isinstance(periods, dict) else 0
 
 
 def ranked(board, chosen):
-    """Orders a /api/leaderboard answer by the XP of `chosen`, falling back to the week for older servers."""
+    """Orders a /api/leaderboard answer by the XP of `chosen`."""
     entries = [entry for entry in board or [] if isinstance(entry, dict)]
     ordered = sorted(entries, key=lambda entry: (-_xp(entry, chosen), -int(entry.get("xp_total") or 0), entry.get("user") or ""))
     return [dict(entry, xp=_xp(entry, chosen)) for entry in ordered]

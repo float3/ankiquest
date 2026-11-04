@@ -79,11 +79,11 @@ def headline(entry):
     return title, body
 
 
-def unread(entry, legacy=False):
-    return not legacy and not entry.get("read_at")
+def unread(entry):
+    return not entry.get("read_at")
 
 
-def actions(entry, legacy=False):
+def actions(entry):
     """The buttons a row gets, in order."""
     found = []
     if answerable(entry):
@@ -93,7 +93,7 @@ def actions(entry, legacy=False):
     if cheerable(entry):
         found.append("cheer")
     found.append("open")
-    if unread(entry, legacy):
+    if unread(entry):
         found.append("read")
     return found
 
@@ -122,17 +122,10 @@ def reply_body(notification, message):
 
 
 def load(api):
-    """Recent rows newest first, and whether they came from an older server's legacy list,
-    whose rows have no read state."""
-    try:
-        page = api._request("/api/activity/" + api.user)
-    except Exception as error:
-        if getattr(error, "status", None) != 404:
-            raise
-        rows = api._request("/api/notifications/" + api.user)
-        return list(reversed(rows if isinstance(rows, list) else [])), True
+    """Recent rows newest first."""
+    page = api._request("/api/activity/" + api.user)
     items = page.get("items") if isinstance(page, dict) else None
-    return list(items if isinstance(items, list) else []), False
+    return list(items if isinstance(items, list) else [])
 
 
 def _post_empty(api, path, body):

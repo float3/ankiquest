@@ -1,7 +1,6 @@
 """Translate authored desktop labels before formatting names or messages."""
 
 SPANISH = {
-    "Aki, your study companion.": "Aki, tu compañero de estudio.",
     "Your study companion.": "Tu compañero de estudio.",
     "Study companion": "Compañero de estudio",
     "Choose who cheers you on. This choice follows your account across devices.": "Elige quién te anima. Esta elección se sincroniza con tu cuenta en todos tus dispositivos.",
@@ -124,7 +123,6 @@ SPANISH.update({
 })
 
 GERMAN = {
-    "Aki, your study companion.": "Aki, dein Lernbegleiter.",
     "Your study companion.": "Dein Lernbegleiter.",
     "Study companion": "Lernbegleiter",
     "Choose who cheers you on. This choice follows your account across devices.": "Wähle, wer dich anfeuert. Diese Auswahl gilt für dein Konto auf allen Geräten.",
@@ -214,7 +212,6 @@ GERMAN = {
 }
 
 FRENCH = {
-    "Aki, your study companion.": "Aki, ton compagnon d’étude.",
     "Your study companion.": "Ton compagnon d’étude.",
     "Study companion": "Compagnon d’étude",
     "Choose who cheers you on. This choice follows your account across devices.": "Choisis qui t’encourage. Ce choix suit ton compte sur tous tes appareils.",
@@ -304,7 +301,6 @@ FRENCH = {
 }
 
 PORTUGUESE = {
-    "Aki, your study companion.": "Aki, o teu companheiro de estudo.",
     "Your study companion.": "O teu companheiro de estudo.",
     "Study companion": "Companheiro de estudo",
     "Choose who cheers you on. This choice follows your account across devices.": "Escolhe quem te incentiva. Esta escolha acompanha a tua conta em todos os dispositivos.",

@@ -1,31 +1,17 @@
 """Desktop deck progress checks; run with python -m unittest discover -s tests."""
 
-import importlib.util
 import sqlite3
 import sys
 import time
 import unittest
 from concurrent.futures import Future
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
+from addon_loader import load_module
 
-ADDON = Path(__file__).resolve().parents[1] / "addon"
-
-
-def load_module(name, path, package=False):
-    spec = importlib.util.spec_from_file_location(
-        name, path, submodule_search_locations=[str(ADDON)] if package else None
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-progress = load_module("ankiquest_progress", ADDON / "deck_completion.py")
-client = load_module("ankiquest_client", ADDON / "client.py")
+progress = load_module("ankiquest_progress", "deck_completion.py")
+client = load_module("ankiquest_client", "client.py")
 
 
 def node(deck_id, new=0, review=0, learn=0, intraday=0, children=()):
@@ -236,7 +222,7 @@ class RefreshTests(unittest.TestCase):
         modules = patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt, "anki": anki, "anki.lang": language})
         modules.start()
         self.addCleanup(modules.stop)
-        self.addon = load_module("ankiquest_test_addon", ADDON / "__init__.py", package=True)
+        self.addon = load_module("ankiquest_test_addon", "__init__.py", package=True)
         self.addon.ui = SimpleNamespace(settings_dialog=Mock(return_value=None), deck_dialog=Mock())
         self.addon.web = SimpleNamespace(open_page=Mock())
         self.addon.client = lambda: self.api
@@ -255,7 +241,7 @@ class RefreshTests(unittest.TestCase):
 
     def with_board(self):
         self.standings = [
-            {"user": "cerro", "display": "Cerro", "level": 3, "streak": 2, "week_xp": 90},
+            {"user": "cerro", "display": "Cerro", "level": 3, "streak": 2, "periods": {"week": 90}},
         ]
         self.inbox = [
             {"id": 4, "title": "Deck complete", "body": "Hill finished Spanish.",
@@ -358,6 +344,20 @@ class RefreshTests(unittest.TestCase):
                            "created_at": int(time.time()), "sender": "hill", "replied": False})
         self.addon.poll()
         self.assertIn("Good job!", self.addon.tooltip.call_args.args[0])
+        self.assertIn("to reply", self.addon.tooltip.call_args.args[0])
+
+    def test_challenge_rows_are_not_counted_or_offered_as_replies(self):
+        self.with_board()
+        self.addon.poll(quiet=True)
+        self.inbox.append({"id": 5, "title": "⚔️ Hill", "body": "Hill challenged you.",
+                           "created_at": int(time.time()), "sender": "hill", "replied": False,
+                           "route": "/community#challenge-3"})
+        self.addon.poll()
+        self.assertIn("Hill challenged you.", self.addon.tooltip.call_args.args[0])
+        self.assertNotIn("to reply", self.addon.tooltip.call_args.args[0])
+        content = SimpleNamespace(stats="")
+        self.addon.on_deck_browser(None, content)
+        self.assertIn("📬 1 new", content.stats)
 
     def test_deck_list_links_open_the_website_inside_anki(self):
         self.assertEqual((True, None), self.addon.on_js_message(False, "ankiquest:web:inbox", None))

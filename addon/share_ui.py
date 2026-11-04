@@ -19,14 +19,8 @@ from aqt.qt import (
 from . import share
 from .inbox import error_text
 from .language import tr
-from .ui import _enum
 
 state = {"popup": None}
-
-
-def art_path(companion):
-    name = share.art_file(companion)
-    return str(Path(__file__).with_name(name)) if name else None
 
 
 def _font(pixels, bold):
@@ -84,7 +78,7 @@ def same_account(api, current):
 
 def _plain(text, bold=False):
     label = QLabel(text)
-    label.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(True)
     if bold:
         label.setFont(_font(15, True))
@@ -93,13 +87,13 @@ def _plain(text, bold=False):
 
 def _head(win, companion):
     head = QHBoxLayout()
-    asset = art_path(companion)
+    asset = share.face_path(companion)
     if asset:
         image = QLabel()
         image.setPixmap(QPixmap(asset).scaled(
             56, 56,
-            _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-            _enum(Qt, "TransformationMode", "SmoothTransformation"),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
         ))
         head.addWidget(image)
     words = QVBoxLayout()
@@ -216,7 +210,7 @@ def win_dialog(parent, api, win, companion, current_client, run):
     `current_client()` is the signed-in account now; `run` is mw.taskman.run_in_background."""
     dialog = QDialog(parent)
     dialog.setWindowTitle(tr("Share this win"))
-    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_DeleteOnClose"))
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     layout = QVBoxLayout(dialog)
     layout.addLayout(_head(win, companion))
     status = _plain("")
@@ -253,7 +247,7 @@ def offer(parent, api, win, companion, current_client, run):
         except RuntimeError:
             pass
     dialog = win_dialog(parent, api, win, companion, current_client, run)
-    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_ShowWithoutActivating"))
+    dialog.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
     dialog.finished.connect(lambda *_: state.update(popup=None) if state["popup"] is dialog else None)
     state["popup"] = dialog
     _corner(dialog, parent)

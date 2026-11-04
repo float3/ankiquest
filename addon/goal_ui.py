@@ -18,11 +18,6 @@ from .language import tr
 CUSTOM = 0
 
 
-def _enum(owner, group, name):
-    """Qt 5 keeps these constants on the class, Qt 6 inside a nested enum."""
-    return getattr(getattr(owner, group, owner), name)
-
-
 def _modes():
     return (
         (goals.BACKLOG, tr("Clear my backlog in a number of days")),
@@ -113,7 +108,7 @@ class Fields:
 def _summary_label():
     label = QLabel("")
     label.setWordWrap(True)
-    label.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setStyleSheet("padding:8px;border-radius:6px;background:rgba(28,176,246,0.12)")
     return label
 
