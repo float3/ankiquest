@@ -234,6 +234,20 @@ class ShareTests(unittest.TestCase):
                 share.download_image(url, opener=opener)
         self.assertEqual(2, len(asked))
 
+    def test_copying_or_saving_fetches_the_owners_card_and_publishes_nothing(self):
+        asked = []
+
+        def opener(request, timeout):
+            asked.append((request.full_url, request.headers))
+            return Response(PNG)
+
+        api = FakeApi({})
+        self.assertEqual({"png": PNG}, share.card(api, {"win": 17}, opener=opener))
+        url, headers = asked[0]
+        self.assertEqual("https://quest.example/api/wins/hill/17/card.png", url)
+        self.assertEqual("Bearer token", headers["Authorization"])
+        self.assertEqual([], api.sent, "no share request, so no public link")
+
     def test_what_the_player_is_told(self):
         self.assertTrue(share.sent_text(0).startswith("Nobody new got it"))
         self.assertEqual("Shared with 1 friend", share.sent_text(1))

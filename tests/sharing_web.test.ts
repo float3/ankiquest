@@ -251,8 +251,9 @@ test('wins share with friends, make and remove links, download and paginate', as
   const second = page.locator('[data-win-id="29"]');
   await second.getByRole('button', {name: 'Share with friends'}).click();
   await second.locator('[data-win-status]', {hasText: 'Nobody to tell yet'}).waitFor();
-  await second.getByRole('button', {name: 'Get link'}).click();
-  await second.locator('[data-win-status]', {hasText: 'Link copied.'}).waitFor();
+  await second.getByRole('button', {name: 'Create public link'}).click();
+  await second.locator('[data-win-status]', {hasText: 'Link copied. Anyone with the link can see this card.'}).waitFor();
+  await second.getByRole('button', {name: 'Copy link'}).waitFor();
   assert.equal(await second.locator('[data-win-url]').inputValue(), `${origin}/w/tok29`);
   assert.equal(await page.evaluate(() => (window as unknown as {copied: string}).copied), `${origin}/w/tok29`);
   await second.locator('.chip', {hasText: 'Link active'}).waitFor();
@@ -265,6 +266,7 @@ test('wins share with friends, make and remove links, download and paginate', as
   const download = page.waitForEvent('download');
   await first.getByRole('button', {name: 'Download image'}).click();
   assert.equal((await download).suggestedFilename(), 'ankiquest-win-30.png');
+  assert(!calls.some(call => call.path === '/api/share/alice' && (call.body as {win?: number; to?: string})?.win === 30 && (call.body as {to?: string}).to === 'link'), 'downloading publishes nothing');
   await page.locator('[data-wins-more]').click();
   await page.locator('[data-win-id="4"]').waitFor();
   assert.equal(calls.findLast(call => call.path === '/api/wins/alice')!.query, '?limit=10&before=21');
@@ -278,7 +280,7 @@ test('wins show the server explanation when sharing fails', async t => {
   await page.route(`${origin}/api/share/alice`, route => route.fulfill({status: 409, json: {error: 'This win cannot be shared yet.'}}));
   await page.goto(`${origin}/today`);
   const first = page.locator('[data-win-id="30"]');
-  await first.getByRole('button', {name: 'Get link'}).click();
+  await first.getByRole('button', {name: 'Create public link'}).click();
   await first.locator('[data-win-status].error', {hasText: 'This win cannot be shared yet.'}).waitFor();
 });
 
@@ -286,7 +288,7 @@ test('Today and settings fit phone and desktop widths in both themes', async t =
   for (const width of [320, 1440]) for (const theme of ['light', 'dark'] as const) {
     const {page} = await personal(t, {width, theme});
     await page.goto(`${origin}/today`);
-        await page.locator('[data-win-id="29"]').getByRole('button', {name: 'Get link'}).click();
+        await page.locator('[data-win-id="29"]').getByRole('button', {name: 'Create public link'}).click();
     await page.locator('[data-win-id="29"] [data-win-url]').waitFor();
     await noOverflow(page, `today ${width} ${theme}`);
     await page.goto(`${origin}/settings`);

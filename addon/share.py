@@ -59,7 +59,8 @@ def absolute(base, url):
 
 
 def link(api, win):
-    """The win's public link, its card picture and the server's invitation text."""
+    """Publishes the win: its public link, card picture and the server's invitation text.
+    Only for when the player chooses to share a link; the picture alone needs none."""
     answer = api._request("/api/share/" + api.user, {"win": win["win"], "to": "link"}) or {}
     return {
         "url": absolute(api.base, answer.get("url")),
@@ -72,11 +73,15 @@ def _web_url(url):
     return urllib.parse.urlsplit(url or "").scheme in ("http", "https")
 
 
-def download_image(url, limit=MAX_IMAGE, timeout=IMAGE_TIMEOUT, opener=urllib.request.urlopen):
-    """A card picture's PNG bytes. Card pictures are public, so no token travels with the request."""
+def download_image(url, limit=MAX_IMAGE, timeout=IMAGE_TIMEOUT, opener=urllib.request.urlopen, token=None):
+    """A card picture's PNG bytes. Public card pictures need no token; the owner's own card
+    is fetched with `token`, which callers only pass for their own server's address."""
     if not _web_url(url):
         raise ValueError("not a web address")
-    with opener(urllib.request.Request(url, headers={"Accept": "image/png"}), timeout=timeout) as response:
+    headers = {"Accept": "image/png"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    with opener(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
         data = response.read(limit + 1)
     if len(data) > limit:
         raise ValueError("the picture is too large")
@@ -85,10 +90,15 @@ def download_image(url, limit=MAX_IMAGE, timeout=IMAGE_TIMEOUT, opener=urllib.re
     return data
 
 
-def card(api, win):
-    """The link with the picture's bytes; call off the main thread."""
-    found = link(api, win)
-    return dict(found, png=download_image(found["image"]))
+def card_url(api, win):
+    """The owner-only picture of a win, which exists before any link and publishes nothing."""
+    return "%s/api/wins/%s/%d/card.png" % (api.base, api.user, win_id(win))
+
+
+def card(api, win, opener=urllib.request.urlopen):
+    """The win's card picture for copying or saving, without making a public link; call off
+    the main thread."""
+    return {"png": download_image(card_url(api, win), opener=opener, token=api.token)}
 
 
 def climbed_to(previous, order, me):
