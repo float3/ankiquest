@@ -293,13 +293,18 @@ async fn records(
 
 #[derive(Serialize)]
 struct WeekInfo {
+    /// When the current competition week began (ms), so a client can say a fresh week has
+    /// just started for a player whose local Monday has not come yet.
+    starts_at: i64,
     ends_at: i64,
     timezone: String,
 }
 
 async fn week_info(State(app): State<Arc<App>>) -> Json<WeekInfo> {
+    let now = now_ms();
     Json(WeekInfo {
-        ends_at: app.week.end_after(now_ms()),
+        starts_at: app.week.start_of(now),
+        ends_at: app.week.end_after(now),
         timezone: app.config.week_timezone.clone(),
     })
 }

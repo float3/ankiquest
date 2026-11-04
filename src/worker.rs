@@ -339,7 +339,11 @@ fn place_win(
     recap: &competition::WeeklyRecap,
     now: i64,
 ) -> Result<Option<(i64, String, i64)>, Error> {
-    let Some(rank) = recap.rank.filter(|rank| (1..=3).contains(rank)) else {
+    // A place is a win only once late syncs can no longer change it.
+    let Some(rank) = recap
+        .rank
+        .filter(|rank| recap.final_result && (1..=3).contains(rank))
+    else {
         return Ok(None);
     };
     if recap.week_end > now || now >= recap.valid_until {

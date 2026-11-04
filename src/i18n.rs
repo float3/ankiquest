@@ -220,6 +220,14 @@ pub fn notification(
                 .map(|title| text(title, language))
                 .collect::<Vec<_>>()
                 .join(", ")
+        } else if notice.kind == "reminder_weekly_recap" && notice.body.contains('\n') {
+            // A recap is written a sentence a line, each its own catalog entry.
+            notice
+                .body
+                .lines()
+                .map(|line| system_text(line, language))
+                .collect::<Vec<_>>()
+                .join("\n")
         } else {
             system_text(&notice.body, language)
         };

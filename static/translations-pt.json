@@ -1296,5 +1296,19 @@
   "Mute {0}? You won't hear from them. They are not told.": "Silenciar {0}? Não vais receber nada desta pessoa. Ela não é avisada.",
   "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Nenhum convite para desafios, incentivo, cartão conquistado, novidade de baralhos, partilha ou aplauso destas pessoas. Elas não são avisadas.",
   "You muted as many people as you can. Unmute someone first.": "Já silenciaste o máximo de pessoas possível. Deixa primeiro de silenciar alguém.",
-  "Last used {0}": "Última utilização a {0}"
+  "Last used {0}": "Última utilização a {0}",
+  "No reviews last week.": "Nenhuma revisão na semana passada.",
+  "{0} reviews in {1} minutes over {2} study days, {3} XP.": "{0} revisões em {1} minutos ao longo de {2} dias de estudo, {3} XP.",
+  "Place #{0} of {1} on the weekly board.": "{0}.º lugar de {1} na classificação semanal.",
+  "Not ranked on the weekly board.": "Sem lugar na classificação semanal.",
+  "Among your friends: #{0} of {1}.": "Entre os teus amigos: {0}.º de {1}.",
+  "{0} more XP than the previous week.": "Mais {0} XP do que na semana anterior.",
+  "{0} fewer XP than the previous week.": "Menos {0} XP do que na semana anterior.",
+  "The same XP as the previous week.": "A mesma XP que na semana anterior.",
+  "Best day: {0} with {1} XP.": "Melhor dia: {0} com {1} XP.",
+  "Daily wins: {0}.": "Vitórias diárias: {0}.",
+  "Current streak: 1 day.": "Sequência atual: 1 dia.",
+  "Current streak: {0} days.": "Sequência atual: {0} dias.",
+  "The weekly competition closes for you in 1 hour, at {0}. You have {1} XP this week.": "A competição semanal fecha para ti dentro de 1 hora, às {0}. Tens {1} XP esta semana.",
+  "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.": "A competição semanal fecha para ti dentro de {0} horas, às {1}. Tens {2} XP esta semana."
 }

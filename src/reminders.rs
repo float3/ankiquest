@@ -330,7 +330,8 @@ pub fn delivery_guard(
             .iter()
             .any(|day| day.frozen && clock.day(day.at) == notice.day),
         "reminder_weekly_closing" => {
-            week.end_after(created) == week.end_after(now) && profile.week_xp > 0
+            own_week_end(clock, week, created) == own_week_end(clock, week, now)
+                && own_week_xp(profile, clock, week, now) > 0
         }
         "reminder_weekly_recap" => week.end_after(created) == week.end_after(now),
         _ => false,
@@ -352,7 +353,7 @@ pub fn delivery_guard(
         return Ok(DeliveryGuard::Cancel);
     }
     if notice.kind == "reminder_weekly_closing"
-        && !deadline_window(&prefs, clock, now, week.end_after(now))
+        && !deadline_window(&prefs, clock, now, own_week_end(clock, week, now))
     {
         return Ok(DeliveryGuard::Cancel);
     }
@@ -370,7 +371,7 @@ pub fn current_body(
 ) -> String {
     match notice.kind.as_str() {
         "reminder_urgent" => urgent_body(profile, clock, now),
-        "reminder_weekly_closing" => closing_body(profile, week, now),
+        "reminder_weekly_closing" => closing_body(profile, clock, week, now),
         _ => notice.body.clone(),
     }
 }
@@ -397,15 +398,117 @@ fn urgent_body(profile: &Profile, clock: &Clock, now: i64) -> String {
     )
 }
 
-fn closing_body(profile: &Profile, week: &Week, now: i64) -> String {
-    let hours = (week.end_after(now) - now + HOUR_MS - 1) / HOUR_MS;
-    format!(
-        "The shared leaderboard week closes in {hours} {} ({}, {:02}:00). You have {} XP this week.",
-        if hours == 1 { "hour" } else { "hours" },
-        week.tz,
-        week.rollover_hour,
-        profile.week_xp
-    )
+/// When the shared week closes for this player. An Anki day counts toward the week its
+/// start falls in, so a day that began before the shared reset (Sunday evening in
+/// California for a reset at Monday 04:00 UTC) still counts toward the closing week
+/// until that day ends at the player's own rollover.
+fn own_week_end(clock: &Clock, week: &Week, now: i64) -> i64 {
+    let shared = week.end_after(clock.day_start_ms(clock.day(now)));
+    clock.day_start_ms(clock.day(shared - 1) + 1)
+}
+
+/// XP from the days that count toward the week [`own_week_end`] closes. After the shared
+/// reset this is still the closing week for a player whose day began before it, while the
+/// profile's `week_xp` has moved on to the new one.
+fn own_week_xp(profile: &Profile, clock: &Clock, week: &Week, now: i64) -> u64 {
+    let shared = week.end_after(clock.day_start_ms(clock.day(now)));
+    profile
+        .history
+        .iter()
+        .filter(|day| week.end_after(day.at) == shared)
+        .map(|day| day.xp)
+        .sum()
+}
+
+/// The close in the player's own time, so a reset that falls on a Sunday evening in
+/// California or a Monday morning in Berlin reads as what it is for them.
+fn closing_body(profile: &Profile, clock: &Clock, week: &Week, now: i64) -> String {
+    let end = own_week_end(clock, week, now);
+    let hours = ((end - now + HOUR_MS - 1) / HOUR_MS).to_string();
+    let minute = (end - local_midnight(clock, end)) / 60_000;
+    let at = format!("{:02}:{:02}", minute / 60, minute % 60);
+    let xp = own_week_xp(profile, clock, week, now).to_string();
+    if hours == "1" {
+        crate::i18n::english(
+            "The weekly competition closes for you in 1 hour, at {0}. You have {1} XP this week.",
+            &[&at, &xp],
+        )
+    } else {
+        crate::i18n::english(
+            "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.",
+            &[&hours, &at, &xp],
+        )
+    }
+}
+
+/// The player's own morning once their last day of the closed week is over: usually
+/// Monday, since a day counts toward the week its start falls in (see [`own_week_end`]).
+/// Morning is the end of their quiet hours, or 09:00 without any; a last day that ends
+/// later than that, with a rollover at noon say, is recapped as soon as it ends.
+fn recap_due(prefs: &Settings, clock: &Clock, week_end: i64) -> i64 {
+    let last_day_over = clock.day_start_ms(clock.day(week_end - 1) + 1);
+    let morning = if prefs.quiet_start == prefs.quiet_end {
+        9
+    } else {
+        i64::from(prefs.quiet_end)
+    };
+    last_day_over.max(local_midnight(clock, last_day_over) + morning * HOUR_MS)
+}
+
+/// One sentence a line, so each translates on its own; see [`crate::i18n::notification`].
+fn recap_body(recap: &Recap, profile: &Profile) -> String {
+    use crate::i18n::english;
+    let (reviews, minutes, days, xp) = (
+        recap.reviews.to_string(),
+        recap.minutes.to_string(),
+        recap.days_studied.to_string(),
+        recap.xp.to_string(),
+    );
+    let mut lines = vec![if recap.reviews == 0 {
+        english("No reviews last week.", &[])
+    } else {
+        english(
+            "{0} reviews in {1} minutes over {2} study days, {3} XP.",
+            &[&reviews, &minutes, &days, &xp],
+        )
+    }];
+    lines.push(match recap.rank {
+        Some(rank) => english(
+            "Place #{0} of {1} on the weekly board.",
+            &[&rank.to_string(), &recap.ranked.to_string()],
+        ),
+        None => english("Not ranked on the weekly board.", &[]),
+    });
+    if let Some((place, of)) = recap.circle_place {
+        lines.push(english(
+            "Among your friends: #{0} of {1}.",
+            &[&place.to_string(), &of.to_string()],
+        ));
+    }
+    let change = recap.improvement_xp.unsigned_abs().to_string();
+    lines.push(match recap.improvement_xp.cmp(&0) {
+        std::cmp::Ordering::Greater => english("{0} more XP than the previous week.", &[&change]),
+        std::cmp::Ordering::Less => english("{0} fewer XP than the previous week.", &[&change]),
+        std::cmp::Ordering::Equal => english("The same XP as the previous week.", &[]),
+    });
+    if let Some((date, best)) = &recap.best_day {
+        lines.push(english(
+            "Best day: {0} with {1} XP.",
+            &[date, &best.to_string()],
+        ));
+    }
+    if recap.daily_wins > 0 {
+        lines.push(english(
+            "Daily wins: {0}.",
+            &[&recap.daily_wins.to_string()],
+        ));
+    }
+    match profile.streak {
+        0 => {}
+        1 => lines.push(english("Current streak: 1 day.", &[])),
+        streak => lines.push(english("Current streak: {0} days.", &[&streak.to_string()])),
+    }
+    lines.join("\n")
 }
 
 pub fn cancel(store: &mut Store, id: i64) -> Result<(), Error> {
@@ -499,16 +602,16 @@ pub fn tick(
             topic: None,
         });
     }
-    let week_end = week.end_after(now_ms);
+    let week_end = own_week_end(clock, week, now_ms);
     if prefs.weekly_closing
-        && profile.week_xp > 0
+        && own_week_xp(profile, clock, week, now_ms) > 0
         && deadline_window(&prefs, clock, now_ms, week_end)
     {
         candidates.push(Candidate {
             kind: "reminder_weekly_closing",
             key: format!("reminder:weekly_closing:{week_end}"),
             title: "The weekly competition closes soon",
-            body: closing_body(profile, week, now_ms),
+            body: closing_body(profile, clock, week, now_ms),
             day,
             topic: None,
         });
@@ -572,31 +675,16 @@ pub fn tick(
     }
     if prefs.weekly_recap
         && let Some(recap) = previous_week.filter(|recap| {
-            recap.week_end > recap_since && recap.week_end <= now_ms && now_ms < recap.valid_until
+            recap.week_end > recap_since
+                && now_ms >= recap_due(&prefs, clock, recap.week_end)
+                && now_ms < recap.valid_until
         })
     {
-        let placing = recap.rank.map_or_else(
-            || "No ranked result".into(),
-            |rank| format!("Place #{rank}"),
-        );
-        let improvement = match recap.improvement_xp.cmp(&0) {
-            std::cmp::Ordering::Greater => {
-                format!("{} more XP than the previous week", recap.improvement_xp)
-            }
-            std::cmp::Ordering::Less => format!(
-                "{} fewer XP than the previous week",
-                recap.improvement_xp.unsigned_abs()
-            ),
-            std::cmp::Ordering::Equal => "the same XP as the previous week".into(),
-        };
         candidates.push(Candidate {
             kind: "reminder_weekly_recap",
             key: format!("reminder:weekly_recap:{}", recap.week_start),
             title: "Your weekly study recap",
-            body: format!(
-                "{} study days, {} XP, {} daily wins. {placing}; {improvement}.",
-                recap.days_studied, recap.xp, recap.daily_wins
-            ),
+            body: recap_body(&recap, profile),
             day,
             topic: recap.rank.map(|rank| format!("place:{rank}")),
         });
@@ -1058,6 +1146,7 @@ mod tests {
             daily_wins: 2,
             rank: Some(2),
             improvement_xp: 100,
+            ..Recap::default()
         };
         tick(&mut store, "hill", &p, &clock, &week, now, Some(recap)).unwrap();
         assert_eq!(
@@ -1099,6 +1188,7 @@ mod tests {
             daily_wins: 2,
             rank: Some(2),
             improvement_xp: 100,
+            ..Recap::default()
         };
         for _ in 0..2 {
             tick(
@@ -1375,6 +1465,7 @@ mod tests {
             daily_wins: 2,
             rank: Some(1),
             improvement_xp: 50,
+            ..Recap::default()
         };
         tick(
             &mut store,
@@ -1390,7 +1481,9 @@ mod tests {
             store.notifications("hill", at(20)).unwrap().is_empty(),
             "no old recap when enabled"
         );
-        p.week_xp = 0;
+        for day in &mut p.history {
+            day.xp = 0;
+        }
         run(&mut store, &p, &clock, end - HOUR_MS);
         assert!(
             store
@@ -1398,11 +1491,21 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        p.week_xp = 500;
+        p.history.last_mut().unwrap().xp = 500;
         run(&mut store, &p, &clock, end - HOUR_MS);
+        let closing = &store.notifications("hill", end - HOUR_MS).unwrap()[0];
+        assert_eq!(closing.kind, "reminder_weekly_closing");
         assert_eq!(
-            store.notifications("hill", end - HOUR_MS).unwrap()[0].kind,
-            "reminder_weekly_closing"
+            closing.body,
+            "The weekly competition closes for you in 1 hour, at 04:00. You have 500 XP this week."
+        );
+        let pacific = Clock {
+            offset_west_min: 420,
+            rollover_hour: 4,
+        };
+        assert!(
+            closing_body(&p, &pacific, &week, end - 3 * HOUR_MS)
+                .starts_with("The weekly competition closes for you in 10 hours, at 04:00.")
         );
         let recap = Recap {
             week_start: end - 7 * DAY_MS,
@@ -1413,6 +1516,12 @@ mod tests {
             daily_wins: 2,
             rank: Some(2),
             improvement_xp: 100,
+            reviews: 340,
+            minutes: 95,
+            ranked: 4,
+            best_day: Some(("2024-10-02".into(), 180)),
+            circle_place: Some((1, 3)),
+            ..Recap::default()
         };
         let now = end + 5 * HOUR_MS;
         p.day = clock.day(now);
@@ -1439,9 +1548,101 @@ mod tests {
             .iter()
             .find(|notice| notice.kind == "reminder_weekly_recap")
             .unwrap();
-        assert!(recap.body.contains("5 study days, 500 XP, 2 daily wins"));
+        assert_eq!(
+            recap.body,
+            [
+                "340 reviews in 95 minutes over 5 study days, 500 XP.",
+                "Place #2 of 4 on the weekly board.",
+                "Among your friends: #1 of 3.",
+                "100 more XP than the previous week.",
+                "Best day: 2024-10-02 with 180 XP.",
+                "Daily wins: 2.",
+                "Current streak: 1 day.",
+            ]
+            .join("\n")
+        );
         assert_eq!(recap.topic.as_deref(), Some("place:2"));
-        assert!(recap.body.contains("100 more XP"));
+        let mut german = store
+            .notifications("hill", now)
+            .unwrap()
+            .into_iter()
+            .find(|notice| notice.kind == "reminder_weekly_recap")
+            .unwrap();
+        crate::i18n::notification(&mut german, "de", "");
+        assert_eq!(
+            german.body.lines().nth(1),
+            Some("Platz 2 von 4 in der Wochenrangliste.")
+        );
+        assert_eq!(german.body.lines().count(), 7);
+        cleanup(store, path);
+    }
+
+    #[test]
+    fn the_recap_waits_for_each_players_monday_morning() {
+        // The shared week closes on Monday 2024-10-07 at 04:00 UTC.
+        let week = Week::default();
+        let end = week.end_after(at(20));
+        let prefs = Settings::default();
+        let clock = |offset_west_min, rollover_hour| Clock {
+            offset_west_min,
+            rollover_hour,
+        };
+        // California's Sunday (21:00 at the close) and Buenos Aires's (01:00 on Monday) still
+        // count toward the closed week until their 04:00 rollover; then quiet hours end at 09:00.
+        assert_eq!(recap_due(&prefs, &clock(420, 4), end), end + 12 * HOUR_MS);
+        assert_eq!(recap_due(&prefs, &clock(180, 4), end), end + 8 * HOUR_MS);
+        // East of the week's time zone a Monday begins before the close, so it is that week's
+        // last day and the recap comes on Tuesday morning.
+        assert_eq!(recap_due(&prefs, &clock(-120, 4), end), end + 27 * HOUR_MS);
+        // Without quiet hours morning is 09:00, and a day that ends later is recapped at once.
+        let open = Settings {
+            quiet_start: 0,
+            quiet_end: 0,
+            ..Settings::default()
+        };
+        assert_eq!(recap_due(&open, &clock(0, 4), end), end + 5 * HOUR_MS);
+        assert_eq!(recap_due(&open, &clock(0, 12), end), end + 8 * HOUR_MS);
+
+        let (mut store, path) = store();
+        let pacific = clock(420, 4);
+        save_settings(
+            &mut store,
+            "hill",
+            &Settings {
+                weekly_recap: true,
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        let recap = Recap {
+            week_start: end - 7 * DAY_MS,
+            week_end: end,
+            valid_until: end + 7 * DAY_MS,
+            reviews: 10,
+            ..Recap::default()
+        };
+        for (now, sent) in [
+            (end + HOUR_MS, 0),
+            (end + 11 * HOUR_MS, 0),
+            (end + 12 * HOUR_MS, 1),
+        ] {
+            let p = profile(&pacific, now);
+            tick(
+                &mut store,
+                "hill",
+                &p,
+                &pacific,
+                &week,
+                now,
+                Some(recap.clone()),
+            )
+            .unwrap();
+            assert_eq!(
+                store.notifications("hill", now).unwrap().len(),
+                sent,
+                "at {now}"
+            );
+        }
         cleanup(store, path);
     }
 
