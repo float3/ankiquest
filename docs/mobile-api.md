@@ -22,6 +22,8 @@ these additions preserve bearer authentication and the existing notification arr
 | `share_cards` | server-drawn cards and public pages under `/w/` |
 | `wins` | wins, sharing policies and `{ "win", "to" }` shares (see [sharing.md](sharing.md)) |
 
+An account without a password (signed up with a provider) has to sign in with that provider again before it can be deleted or set its first password: those requests answer `403` with `"reauth": true` until it has, and a device token never counts. Apps send the player to Settings in their web view, which offers **Sign in again** (`/auth/oauth/{provider}?reauth=1`); it counts for ten minutes in that web view's session. See `docs/server.md`.
+
 A name is never removed or renamed. New names are added as their features land. A server without this endpoint (`404`) has none of them. Clients ignore names they don't know. `version` changes only if the shape of this answer changes.
 
 Real responses for the endpoints the Android app uses are in [api/examples](api/examples/README.md).
@@ -77,6 +79,8 @@ all cookie-authenticated mutations require `X-Ankiquest-CSRF: 1`. when origin is
 both timestamp fields are Unix **seconds**; challenge `start_at` and `end_at` retain their existing Unix **milliseconds** convention. Non-challenge rows have null `challenge_id` and `route`. existing rows acquire null `read_at` and are unread. activity preserves historical reminder text, including reminders that are no longer timely; it is not a source for replaying old system notifications.
 
 `topic` is present only when the server knows what a row is about, so clients can pick matching art. Celebrations and game events carry the first part of their event key: `achievement`, `level`, `streak`, `record`, `conquered`, `secured` or `goal`; a grouped "N new unlocks" row has one only when all of its events share it. A weekly recap carries `place:N` when the player was ranked. Both personal inbox endpoints include it.
+
+`quiet: true` marks a row the server keeps in the inbox without pushing it. Clients list it like any other row but raise no system notification, tooltip, sound or share prompt for it. Today this is "Streak secured!" on an ordinary study day; it is absent (false) on every other row, so older clients that ignore it just announce the row as before.
 
 counts cover all items within the selected window, independently of pagination, push state, and any Android delivery cursor. `unread_count` counts rows with no read timestamp. `action_count` counts still-pending challenge invitations whose challenge is neither cancelled nor past its deadline. reading an invitation does not accept it. a 30-day view counts its own 30-day window; use the default 90-day view for the full retained inbox. follow `next_before` until null to load more.
 

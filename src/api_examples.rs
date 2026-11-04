@@ -129,6 +129,7 @@ impl Fixture {
                 Clock::default().day(NOW_MS),
                 NOW_MS,
                 false,
+                true,
                 &json!({"streak": 1, "level": 2, "reviews_today": 5, "minutes_today": 1}),
             )
             .unwrap()[0]
@@ -151,6 +152,8 @@ impl Fixture {
         let store = self.app.store.lock().unwrap();
         let mut stmt = store
             .conn
+            // Number links in the order they were made; the unique index would
+            // otherwise return them sorted by their random tokens.
             .prepare("select link_token from wins where link_token is not null order by id")
             .unwrap();
         let tokens: Vec<String> = stmt

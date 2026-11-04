@@ -16,7 +16,7 @@ use chrono::Datelike;
 use resvg::{tiny_skia, usvg};
 use sha2::{Digest, Sha256};
 use skrifa::MetadataProvider;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Write;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -949,25 +949,65 @@ fn cache_key(card: &Card, shape: Shape) -> [u8; 32] {
     hash.finalize().into()
 }
 
-/// [`render`], through a small cache of recent cards. The key covers every input,
-/// so a changed avatar, name or language never serves an old picture.
-pub(crate) fn png(card: &Card, shape: Shape) -> Option<Bytes> {
-    static RENDERS: Mutex<VecDeque<([u8; 32], Bytes)>> = Mutex::new(VecDeque::new());
-    let key = cache_key(card, shape);
-    {
-        let mut renders = RENDERS.lock().unwrap();
-        if let Some(index) = renders.iter().position(|(k, _)| *k == key) {
-            let entry = renders.remove(index)?;
-            let bytes = entry.1.clone();
-            renders.push_front(entry);
-            return Some(bytes);
-        }
-    }
-    let bytes = Bytes::from(render(card, shape)?);
+/// Recently rendered PNGs, newest first.
+static RENDERS: Mutex<VecDeque<([u8; 32], Bytes)>> = Mutex::new(VecDeque::new());
+/// Cards being drawn right now, so requests for the same card wait for one render.
+type InFlight = BTreeMap<[u8; 32], Arc<tokio::sync::OnceCell<Option<Bytes>>>>;
+static IN_FLIGHT: Mutex<InFlight> = Mutex::new(BTreeMap::new());
+/// How many cards are drawn at once. A link posted where many link previews fetch it
+/// queues here instead of rasterising side by side on a small server.
+const RENDERING_AT_ONCE: usize = 2;
+static RENDER_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(RENDERING_AT_ONCE);
+
+fn cached(key: &[u8; 32]) -> Option<Bytes> {
     let mut renders = RENDERS.lock().unwrap();
-    renders.push_front((key, bytes.clone()));
-    renders.truncate(CACHED);
+    let index = renders.iter().position(|(k, _)| k == key)?;
+    let entry = renders.remove(index)?;
+    let bytes = entry.1.clone();
+    renders.push_front(entry);
     Some(bytes)
+}
+
+fn remember(key: [u8; 32], bytes: Bytes) {
+    let mut renders = RENDERS.lock().unwrap();
+    renders.push_front((key, bytes));
+    renders.truncate(CACHED);
+}
+
+/// [`render`] on a blocking thread, through a small cache of recent cards. The key covers
+/// every input, so a changed avatar, name or language never serves an old picture.
+/// Requests for a card already being drawn wait for that render, and at most
+/// [`RENDERING_AT_ONCE`] cards are drawn at a time.
+pub(crate) async fn png(card: Card, shape: Shape) -> Option<Bytes> {
+    let key = cache_key(&card, shape);
+    if let Some(bytes) = cached(&key) {
+        return Some(bytes);
+    }
+    let flight = IN_FLIGHT.lock().unwrap().entry(key).or_default().clone();
+    let bytes = flight
+        .get_or_init(|| async move {
+            let _slot = RENDER_SLOTS.acquire().await.ok()?;
+            if let Some(bytes) = cached(&key) {
+                return Some(bytes);
+            }
+            let bytes = Bytes::from(
+                tokio::task::spawn_blocking(move || render(&card, shape))
+                    .await
+                    .ok()??,
+            );
+            remember(key, bytes.clone());
+            Some(bytes)
+        })
+        .await
+        .clone();
+    let mut in_flight = IN_FLIGHT.lock().unwrap();
+    if in_flight
+        .get(&key)
+        .is_some_and(|current| Arc::ptr_eq(current, &flight))
+    {
+        in_flight.remove(&key);
+    }
+    bytes
 }
 
 /// The site's absolute base URL and the host shown on cards.
@@ -1056,8 +1096,8 @@ fn valid_token(token: &str) -> bool {
 }
 
 async fn image(card: Card, shape: Shape, cache: &'static str) -> Response {
-    match tokio::task::spawn_blocking(move || png(&card, shape)).await {
-        Ok(Some(bytes)) => (
+    match png(card, shape).await {
+        Some(bytes) => (
             [
                 (header::CONTENT_TYPE, "image/png"),
                 (header::CACHE_CONTROL, cache),
@@ -1427,14 +1467,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn cached_renders_are_reused_only_for_identical_cards() {
-        let card = sample(art("aki", "celebrate"), None, "level");
-        let first = png(&card, Shape::Wide).unwrap();
-        assert_eq!(first.as_ptr(), png(&card, Shape::Wide).unwrap().as_ptr());
-        let mut renamed = sample(art("aki", "celebrate"), None, "level");
+    #[tokio::test]
+    async fn cached_renders_are_reused_only_for_identical_cards() {
+        let card = || sample(art("aki", "celebrate"), None, "level");
+        let first = png(card(), Shape::Wide).await.unwrap();
+        let again = png(card(), Shape::Wide).await.unwrap();
+        assert_eq!(first, again);
+        assert_eq!(first.as_ptr(), again.as_ptr(), "served from the cache");
+        let mut renamed = card();
         renamed.display = "Hill".into();
-        assert_ne!(first.as_ptr(), png(&renamed, Shape::Wide).unwrap().as_ptr());
+        assert_ne!(
+            first.as_ptr(),
+            png(renamed, Shape::Wide).await.unwrap().as_ptr()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn requests_for_the_same_card_at_once_share_one_render() {
+        let card = || {
+            let mut card = sample(None, None, "streak");
+            card.title = "Drawn once for everyone".into();
+            card
+        };
+        let requests: Vec<_> = (0..8)
+            .map(|_| tokio::spawn(png(card(), Shape::Square)))
+            .collect();
+        let mut renders = Vec::new();
+        for request in requests {
+            renders.push(request.await.unwrap().unwrap());
+        }
+        assert!(
+            renders
+                .iter()
+                .all(|bytes| bytes.as_ptr() == renders[0].as_ptr()),
+            "one render answered every request"
+        );
+        assert!(
+            !IN_FLIGHT
+                .lock()
+                .unwrap()
+                .contains_key(&cache_key(&card(), Shape::Square)),
+            "a finished render is no longer in flight"
+        );
     }
 
     #[test]

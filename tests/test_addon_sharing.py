@@ -92,7 +92,9 @@ class ShareWindowTests(unittest.TestCase):
     def window(self, win):
         share_ui = sys.modules["ankiquest_test_addon.share_ui"]
         share_ui.share = SimpleNamespace(**vars(sys.modules["ankiquest_test_addon.share"]))
-        share_ui.share.card = Mock(return_value={"url": "u", "image": "i", "text": "Level 5! Join me", "png": b"png"})
+        share_ui.share.card = Mock(return_value={"png": b"png"})
+        share_ui.share.link = Mock(return_value={"url": "https://quest.example/w/t", "image": "i", "text": "Level 5! Join me"})
+        share_ui.copy_link = Mock(return_value="linked")
         share_ui.share.send = Mock(return_value=2)
         status = Mock()
         current = SimpleNamespace(base=self.api.base, user=self.api.user, token=self.api.token)
@@ -106,8 +108,18 @@ class ShareWindowTests(unittest.TestCase):
         sharing_window.to_clipboard()
         sharing_window.to_file()
         share_ui.share.card.assert_called_once()
+        share_ui.share.link.assert_not_called()
         self.assertEqual(b"png", saved[0][1])
         self.assertEqual("saved", status.setText.call_args.args[0])
+
+    def test_a_public_link_is_made_only_when_asked_for(self):
+        share_ui, sharing_window, status = self.window({"title": "Level 5!", "body": "", "win": 17})
+        button = Mock()
+        sharing_window.to_link(button)
+        share_ui.share.link.assert_called_once_with(self.api, sharing_window.win)
+        share_ui.copy_link.assert_called_once_with(share_ui.share.link.return_value)
+        self.assertEqual("linked", status.setText.call_args.args[0])
+        button.setEnabled.assert_called_with(True)
 
     def test_a_win_for_another_account_is_not_fetched(self):
         share_ui, sharing_window, status = self.window({"title": "Level 5!", "body": "", "win": 17})

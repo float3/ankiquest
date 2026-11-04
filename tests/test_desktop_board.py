@@ -122,6 +122,16 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(3, cursor)
         self.assertEqual(([], 3), notify.fresh_messages(inbox, cursor, now))
 
+    def test_quiet_rows_are_consumed_without_being_announced(self):
+        now = 1_700_000_000
+        inbox = [
+            {"id": 4, "created_at": now - 30, "title": "Streak secured!", "quiet": True},
+            {"id": 5, "created_at": now - 20, "title": "Level 3!"},
+        ]
+        fresh, cursor = notify.fresh_messages(inbox, 0, now)
+        self.assertEqual(["Level 3!"], [entry["title"] for entry in fresh])
+        self.assertEqual(5, cursor)
+
     def test_server_words_cannot_inject_markup_into_tooltips(self):
         entry = {"title": "<a href='https://evil.example'>win</a>", "body": "line one\n<img src=x>"}
         self.assertEqual(
