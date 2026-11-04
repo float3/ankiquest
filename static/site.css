@@ -413,10 +413,8 @@ html[data-companion="none"] .aki-companion { display: none !important; }
 .empty>.aki-art{width:88px;height:88px;margin:0 auto 12px}
 .loading-copy>.aki-art{width:64px;height:64px;margin:0 0 10px}
 .login-card>.aki-art{width:132px;height:132px;margin:0 auto 16px}
-.freeze-settings>.aki-art{width:80px;height:80px;margin:0 auto 10px}
 .card-head>.aki-art{width:56px;height:56px}
 .win-heading>.aki-art{width:56px;height:56px}
-.aki-dialog-art{float:right;margin:0 0 10px 12px!important}
 @media(max-width:600px){.page-hero{flex-wrap:wrap}.page-hero>.aki-art{width:72px;height:72px;order:-1}.aki-companion{padding:14px;gap:12px}.aki-companion .aki-art{width:76px;height:76px}.aki-companion p{font-size:14px}}
 @media(prefers-reduced-motion:reduce){.aki-art{animation:none!important;transition:none!important}}
 .share-card{display:block;width:fit-content;margin-top:12px;overflow:hidden;border:1px solid var(--line);border-radius:12px;line-height:0;background:var(--soft)}

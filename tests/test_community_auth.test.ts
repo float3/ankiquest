@@ -12,9 +12,11 @@ interface Session { user: string; token?: string }
 interface ActivityItem { id: number; sender: string; kind: string; title: string; body: string; created_at: number; read_at: number | null; challenge_id?: number; action_required?: boolean }
 interface Options { locale?: string; cookieUser?: string; activityItems?: ActivityItem[]; activityBefore?: number }
 interface Recorded { url: string; auth: string | undefined; csrf?: string | undefined; method: string; body: Record<string, unknown> | null }
-interface Control { reject: boolean; hold: Promise<void> | null; cookieUser: string | null; replies: {auth: string | undefined; body: unknown}[]; receiving: boolean; automatic: boolean; muted: Record<string, boolean>; nudged: boolean; activityItems: ActivityItem[] }
-interface TestWindow { storageWrites: [string, string][] }
+interface Hold { arrive: () => void; released: Promise<void> }
+interface Control { reject: boolean; hold: Promise<void> | null; holdSession: Hold | null; cookieUser: string | null; replies: {auth: string | undefined; body: unknown}[]; receiving: boolean; automatic: boolean; muted: Record<string, boolean>; nudged: boolean; activityItems: ActivityItem[] }
+interface TestWindow { storageWrites: [string, string][]; connection: Promise<unknown>; connectionActive: boolean; queuedActive: boolean; queuedConnection: Promise<unknown>; disconnectFinished: boolean; disconnectDone: Promise<void> }
 const saved: Session = { user: 'cerro', token: 'saved-token' };
+const tokenOwners: Record<string, string> = { 'Bearer saved-token': 'cerro', 'Bearer hill-token': 'hill' };
 let browser: Browser | undefined;
 before(async () => {
   browser = await chromium.launch({ headless: true,
@@ -23,14 +25,14 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function fixture(t: TestContext, session: Session | null = saved, options: Options = {}): Promise<{page: Page; requests: Recorded[]; control: Control; deliver(value?: Session | null): Promise<void>}> {
+async function fixture(t: TestContext, session: Session | null = saved, options: Options = {}): Promise<{page: Page; requests: Recorded[]; control: Control; deliver(value?: Session | null): Promise<void>; holdSession(): {arrived: Promise<void>; release: () => void}}> {
   const context = await browser!.newContext({ viewport: { width: 390, height: 844 }, locale: options.locale || 'en-US' });
   t.after(() => context.close());
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
   page.setDefaultNavigationTimeout(15000);
   const errors: string[] = [], requests: Recorded[] = [];
-  const control: Control = { reject: false, hold: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false,
+  const control: Control = { reject: false, hold: null, holdSession: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false,
     activityItems:(options.activityItems || [{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}]).map(item=>({...item})) };
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(session => {
@@ -49,7 +51,15 @@ async function fixture(t: TestContext, session: Session | null = saved, options:
     if (await fulfillAsset(route, url.pathname)) return;
     if(url.pathname === '/api/avatars')return route.fulfill({contentType:'application/json',body:'{}'});
     if (url.pathname === '/auth/status') return route.fulfill({contentType: 'application/json', body: JSON.stringify({private_site:false, authenticated:true, member:control.cookieUser ? {user:control.cookieUser} : null})});
-    if (url.pathname === '/auth/session' || url.pathname === '/auth/logout') return route.fulfill({status:404, body:''});
+    if (url.pathname === '/auth/session') {
+      const held = control.holdSession;
+      if (held) { control.holdSession = null; held.arrive(); await held.released; }
+      const owner = tokenOwners[request.headers().authorization ?? ''];
+      if (!owner) return route.fulfill({status:401, body:''});
+      control.cookieUser = owner;
+      return route.fulfill({status:204});
+    }
+    if (url.pathname === '/auth/logout') { control.cookieUser = null; return route.fulfill({status:204}); }
     let data: unknown;
     if (url.pathname === '/api/community') data = { meta: {}, players: [{ user: 'cerro', display: 'Cerro' }, { user: 'hill', display: 'Hill' }] };
     else if (url.pathname.startsWith('/api/friend-nudges/')) {
@@ -101,6 +111,13 @@ async function fixture(t: TestContext, session: Session | null = saved, options:
   await page.waitForFunction(() => document.querySelector('#community-app')!.getAttribute('aria-busy') === 'false');
   t.after(() => assert.deepEqual(errors, []));
   return { page, requests, control,
+    holdSession() {
+      let arrive!: () => void, release!: () => void;
+      const arrived = new Promise<void>(resolve => { arrive = resolve; }), released = new Promise<void>(resolve => { release = resolve; });
+      control.holdSession = {arrive, released};
+      t.after(release);
+      return {arrived, release};
+    },
     async deliver(value: Session | null = saved) {
       await page.evaluate(value => { window.ankiquestSession = value; window.dispatchEvent(new CustomEvent('ankiquest-auth')); }, value);
     },
@@ -240,13 +257,14 @@ test('late native credentials connect, while explicit disconnect survives repeat
 });
 
 test('standalone visitors can connect a different player with their own token', async t => {
-  const { page, requests } = await fixture(t, null);
+  const { page, requests, control } = await fixture(t, null);
   await page.locator('#connect-button').click();
   await page.locator('#auth-user').selectOption('hill');
   await page.locator('#auth-token').fill('hill-token');
   await page.locator('#auth-submit').click();
   await page.locator('#reminder-form').waitFor();
-  assert.ok(requests.every(request => request.url.endsWith('/hill') && request.auth === 'Bearer hill-token'));
+  assert.ok(requests.every(request => request.url.endsWith('/hill') && (request.auth === 'Bearer hill-token' || !request.auth)));
+  assert.equal(control.cookieUser, 'hill', 'the token is exchanged for an owner session');
 });
 
 test('an account change ignores the old response and never mixes account credentials', async t => {
@@ -442,4 +460,65 @@ test('a native member without a token connects through the cookie when it arrive
   await deliver({user:'cerro'});
   await page.locator('#reminder-form').waitFor();
   assert(requests.length>0&&requests.every(request=>!request.auth&&request.url.endsWith('/cerro')));
+});
+
+// AnkiQuestSite.connectMember and disconnectMember share one cookie, so each waits for the
+// other and an abandoned sign-in never leaves its account installed.
+async function startConnection(page: Page, user: string, token: string) {
+  await page.evaluate(({user, token}) => {
+    const w = window as unknown as TestWindow;
+    w.connectionActive = true;
+    w.connection = AnkiQuestSite.connectMember(user, token, () => w.connectionActive).catch((error: Error) => error.name);
+  }, {user, token});
+}
+
+for (const replacement of [{user:'hill', token:'hill-token'}, null]) {
+  test('a pending manual sign-in yields to native ' + (replacement ? 'account replacement' : 'account removal'), async t => {
+    const {page, control, deliver, holdSession} = await fixture(t, null);
+    const held = holdSession();
+    await startConnection(page, 'cerro', 'saved-token');
+    await held.arrived;
+    // Supplying and then removing a native account models account removal during the pending manual sign-in.
+    if (!replacement) await deliver(saved);
+    await deliver(replacement);
+    // The caller gives up on the sign-in it started once the app's account changes.
+    await page.evaluate(() => { (window as unknown as TestWindow).connectionActive = false; });
+    const corrected = page.waitForResponse(response => new URL(response.url()).pathname === (replacement ? '/auth/session' : '/auth/logout') && (!replacement || response.request().headers().authorization === 'Bearer hill-token'), {timeout:3000});
+    held.release();
+    await corrected;
+    await page.evaluate(() => AnkiQuestSite.status(true));
+    assert.equal(control.cookieUser, replacement?.user ?? null);
+  });
+}
+
+test('disconnect waits out a pending sign-in and prevents stale cookie reconnection', async t => {
+  const {page, control, holdSession} = await fixture(t, null);
+  const held = holdSession();
+  await startConnection(page, 'cerro', 'saved-token');
+  await held.arrived;
+  await page.evaluate(() => { const w = window as unknown as TestWindow; w.disconnectFinished = false; w.disconnectDone = AnkiQuestSite.disconnectMember().then(() => { w.disconnectFinished = true; }); });
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  assert.equal(await page.evaluate(() => (window as unknown as TestWindow).disconnectFinished), false, 'logout must wait for the earlier cookie mutation');
+  held.release();
+  await page.evaluate(() => (window as unknown as TestWindow).disconnectDone);
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  assert.equal(control.cookieUser, null);
+  assert.equal(await page.locator('#reminder-form').count(), 0);
+});
+
+test('canceling a queued replacement cannot leave the superseded sign-in cookie installed', async t => {
+  const {page, control, holdSession} = await fixture(t, null);
+  const held = holdSession();
+  await startConnection(page, 'cerro', 'saved-token');
+  await held.arrived;
+  await page.evaluate(() => { (window as unknown as TestWindow).connectionActive = false; });
+  const verified = page.waitForResponse(response => new URL(response.url()).pathname === '/api/community/reminders/hill');
+  await page.evaluate(() => { const w = window as unknown as TestWindow; w.queuedActive = true; w.queuedConnection = AnkiQuestSite.connectMember('hill', 'hill-token', () => w.queuedActive).catch((error: Error) => error.name); });
+  await verified;
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 50)));
+  await page.evaluate(() => { (window as unknown as TestWindow).queuedActive = false; });
+  held.release();
+  assert.equal(await page.evaluate(() => (window as unknown as TestWindow).queuedConnection), 'AbortError');
+  assert.equal(await page.evaluate(() => (window as unknown as TestWindow).connection), 'AbortError');
+  assert.equal(control.cookieUser, null);
 });

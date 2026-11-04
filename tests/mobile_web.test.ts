@@ -82,7 +82,7 @@ async function main() {
   const context=await browser.newContext({locale:"en-US",viewport:{width:390,height:844}});
   if(sourceAssets)await context.route('**/*',async route=>{
     const url=new URL(route.request().url());
-    const name=url.pathname==='/community'?'community':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index':url.pathname==='/login'?'login':null;
+    const name=url.pathname==='/community'?'community':url.pathname==='/settings'?'personal':['/','/week','/records','/day','/month','/all'].includes(url.pathname)?'index':url.pathname==='/login'?'login':null;
     if(name)await route.fulfill({status:200,contentType:'text/html',body:built(name)});else if(!await fulfillAsset(route,url.pathname))await route.continue();
   });
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
@@ -146,12 +146,18 @@ async function main() {
   checks.push('sent replies show when they were read; mark all as read empties the inbox count');
   await page.goto(base+'/#alice');await page.locator('#manage-freezes').waitFor();
   await page.locator('[data-aki-companion] .aki-art').waitFor();
-  await page.locator('#manage-freezes').click();await page.locator('#freeze-preferences').waitFor();
-  await page.locator('#streak-freezes .aki-dialog-art').waitFor();
-  assert.equal(await page.locator('#streak-freezes .aki-art').count(),1);
-  assert.equal(await page.locator('#freeze-token:visible').count(),0);await page.locator('#freeze-enabled').check();await page.locator('#freeze-preferences button[type=submit]').click();await page.locator('#freeze-status').filter({hasText:'is on'}).waitFor();await page.locator('#freeze-close').click();
-  await page.locator('#manage-decks').click();await page.locator('#deck-settings').waitFor();assert.equal(await page.locator('#deck-token:visible').count(),0);await page.locator('#deck-close').click();
-  checks.push('freeze/deck preferences reuse owner session without repeated token');
+  assert.equal(await page.locator('#manage-decks').getAttribute('href'),'/settings#deck-sharing');
+  assert.equal(await page.locator('#manage-received-notifications').getAttribute('href'),'/settings#deck-alerts');
+  // The Android app hands the page its member after installing that member's session cookie.
+  const android=await context.newPage();android.on('pageerror',error=>errors.push(error.message));
+  await android.addInitScript(()=>{window.ankiquestSession={user:'alice'};});
+  await android.goto(base+'/#alice');await android.locator('#manage-freezes').click();
+  await android.waitForURL('**/settings#streak-protection');await android.locator('#freeze-toggle').waitFor();
+  assert(await android.locator('#personal-gate').isHidden(),'the Android session needs no token on /settings');
+  await android.locator('#freeze-toggle').setChecked(!await android.locator('#freeze-toggle').isChecked());
+  await android.locator('#freeze-status').filter({hasText:'Saved'}).waitFor();
+  await android.close();
+  checks.push('profile settings links open /settings with the Android session and no token');
   for(const width of [320,390,1440])for(const theme of ['light','dark'] as const) {
     await page.setViewportSize({width,height:width<400?844:1000});await page.emulateMedia({colorScheme:theme});
     for(const [route,name] of [['/community#challenges','friends'],['/community#activity','activity'],['/community#challenge-'+invitation.id,'goal'],['/community#reminders','reminders'],['/community#overview','history'],['/?embed=1#alice','profile']]) {
@@ -159,6 +165,7 @@ async function main() {
       const readySelector=({profile:'#manage-freezes',history:'#view-overview .kpi',friends:'#view-challenges .challenge',activity:'#view-activity .activity-item',goal:'#view-challenges [data-goal]',reminders:'#reminder-form'} as Record<string,string>)[name]!;
       await page.locator(readySelector).first().waitFor();
       await overflow(page,name+' '+width+' '+theme);
+      if(name==='profile')assert.equal(await page.locator('#manage-decks').getAttribute('href'),'/settings?embed=1#deck-sharing','settings links stay embedded');
       if(name==='profile'&&width===320) {
         await page.waitForFunction(()=>(document.querySelector<HTMLImageElement>('[data-aki-companion] .aki-art')?.naturalWidth ?? 0)>0);
         await page.screenshot({path:path.join(out,'aki-profile-320-'+theme+'-live.png'),fullPage:false});

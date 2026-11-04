@@ -122,6 +122,15 @@ async function noOverflow(page: Page,label: string){const size=await page.evalua
     await f.page.waitForFunction(()=>document.querySelector('#decks-form .status')?.textContent.includes('Saved'));
     assert.deepEqual(f.data.writes.at(-1)!.body.decks,[{id:'1',enabled:true,recipients:['bob']}]);
     assert.deepEqual(f.errors,[]);checks++;await f.context.close();
+    // The leaderboard links to cards on /settings; they render after loading, so the page scrolls itself.
+    for(const card of ['deck-sharing','deck-alerts','streak-protection']) {
+      const linked=await fixture(browser);
+      await linked.page.goto('http://ankiquest.test/settings#'+card);
+      await linked.page.locator('#'+card+' form, #'+card+' #freeze-toggle').first().waitFor();
+      await linked.page.waitForFunction(id=>{const top=document.getElementById(id)!.getBoundingClientRect().top;return scrollY>0&&top>=-1&&top<innerHeight/2;},card);
+      if(card==='deck-sharing')assert(await linked.page.locator('#deck-sharing details').evaluate((details: HTMLDetailsElement)=>details.open),'a linked deck card opens its deck list');
+      assert.deepEqual(linked.errors,[]);checks++;await linked.context.close();
+    }
     const gate=await fixture(browser,{member:false});
     await gate.page.goto('http://ankiquest.test/today');
     await gate.page.locator('#personal-gate:visible').waitFor();

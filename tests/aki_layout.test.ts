@@ -56,24 +56,18 @@ async function main() {
       if(evidence&&locale==='en-US'&&width!==390) await page.screenshot({path:path.join(evidence,`aki-profile-${width}-${colorScheme}.png`),fullPage:true});
       assert.deepEqual(errors,[]);await page.close();
     }
-    // The live observer handles asynchronously rendered content and reopened dialogs.
+    // The live observer handles asynchronously rendered content.
     const page=await browser.newPage({viewport:{width:320,height:740}});
     await page.route('**/*',assets);
-    await page.setContent(`<html><head><base href="https://ankiquest.test/"><style>${styles}</style></head><body><dialog id="streak-freezes" class="freeze-settings"></dialog><main id="dynamic"></main></body></html>`);
+    await page.setContent(`<html><head><base href="https://ankiquest.test/"><style>${styles}</style></head><body><main id="dynamic"></main></body></html>`);
     await page.addScriptTag({content:'window.AnkiQuestI18n={t:s=>s};\n'+script('aki')});
     await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));
-    for(let n=0;n<3;n++) {
-      await page.evaluate(()=>{const dialog=document.querySelector<HTMLDialogElement>('#streak-freezes')!;dialog.innerHTML='<h3 id="freeze-title">Streak protection</h3><p>Your preference stays in control.</p>';dialog.showModal();});
-      await page.locator('#streak-freezes .aki-dialog-art').waitFor();
-      assert.equal(await page.locator('#streak-freezes .aki-art').count(),1,'exactly one freeze pose per opening');
-      await page.evaluate(()=>document.querySelector<HTMLDialogElement>('#streak-freezes')!.close());
-    }
     await page.evaluate(()=>document.querySelector('#dynamic')!.innerHTML='<div class="empty">No activity yet</div><section id="view-trophies"><div class="card-head"><h2>Your trophies</h2></div></section>');
     await page.locator('.empty .aki-art').waitFor();
     assert.equal(await page.locator('#view-trophies .aki-art').getAttribute('src'),'/aki/winner.png');
     if(evidence)await page.screenshot({path:path.join(evidence,'aki-empty-state.png'),fullPage:true});
     await page.close();
-    console.log('PASS: Aki images, EN/ES, 320/390/1440px light/dark, 200% encouragement text, decorative accessibility, dynamic states and reopened dialogs.');
+    console.log('PASS: Aki images, EN/ES, 320/390/1440px light/dark, 200% encouragement text, decorative accessibility, and dynamic states.');
   } finally {await browser.close();}
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

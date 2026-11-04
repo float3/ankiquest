@@ -50,11 +50,6 @@ import {escape} from "./common";
       element.dataset.aki = pose;
       element.insertAdjacentHTML("afterbegin", image(pose));
     }
-    // Dialog contents are recreated after close. Mark only the content, not the persistent dialog.
-    for (const title of select("#streak-freezes h3:not([data-aki])")) {
-      title.dataset.aki = "freeze";
-      title.insertAdjacentHTML("beforebegin", image("freeze", "aki-dialog-art"));
-    }
   }
   async function loadChoice(user: string | null | undefined) {
     if (identity !== user) setChoice("aki");
