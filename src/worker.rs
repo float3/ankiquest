@@ -202,27 +202,6 @@ pub(crate) fn import(app: &App, base: &Path) -> Result<(), Error> {
     }
 }
 
-fn streak_warning_body(profile: &Profile) -> String {
-    let minutes = match profile.today.streak_minutes {
-        0 => String::new(),
-        needed => format!(
-            " with {} of {needed} minutes done",
-            profile.today.minutes.min(needed)
-        ),
-    };
-    format!(
-        "Your {} day streak ends tonight{minutes}. {}",
-        profile.streak,
-        if !profile.freezes_enabled {
-            "Streak freezes are turned off."
-        } else if profile.freezes > 0 {
-            "A freeze would cover you, but why spend it?"
-        } else {
-            "No freezes left."
-        }
-    )
-}
-
 pub(crate) fn tick(app: &App) -> Result<(), Error> {
     let now = now_ms();
     {
@@ -476,24 +455,11 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
                 reminders::DeliveryGuard::Deliver => {}
             }
         }
-        let current_warning = if delivery.notification.kind == "risk" {
-            match app.profile(&delivery.user) {
-                Some(profile) if profile.day == delivery.notification.day && profile.at_risk => {
-                    Some(streak_warning_body(&profile))
-                }
-                _ => {
-                    app.store.lock().unwrap().cancel_streak_warning(id)?;
-                    continue;
-                }
-            }
-        } else {
-            reminder_body
-        };
         if !app.store.lock().unwrap().begin_push(id, now_ms())? {
             continue;
         }
         let language = app.store.lock().unwrap().language(&delivery.user)?;
-        if let Some(body) = current_warning {
+        if let Some(body) = reminder_body {
             delivery.notification.body = body;
         }
         let sender_display = app.display(&delivery.notification.sender);
@@ -520,7 +486,7 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
             &push_body,
             match delivery.notification.kind.as_str() {
                 "event" => "tada",
-                "risk" | "reminder_urgent" => "fire",
+                "reminder_urgent" => "fire",
                 _ => "white_check_mark",
             },
             if delivery.notification.kind.starts_with("reminder_")
@@ -578,7 +544,6 @@ mod tests {
     use crate::accounts;
     use crate::app::load_player;
     use crate::decks::set_decks;
-    use crate::freezes::{FreezeUpdate, set_freezes};
     use crate::test_support::*;
 
     fn queued_message(app: &App, user: &str) -> i64 {
@@ -863,195 +828,6 @@ mod tests {
         );
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
-    }
-
-    #[test]
-    fn stale_streak_warnings_are_cancelled_after_rollover_or_studying() {
-        for studied in [false, true] {
-            let (app, path) = fixture();
-            let now = now_ms();
-            let day = Clock::default().day(now);
-            let review = Review {
-                id: if studied { now } else { now - 86_400_000 },
-                cid: 1,
-                last_ivl: 30,
-                ivl: None,
-                time_ms: 5000,
-                kind: 1,
-            };
-            {
-                let mut store = app.store.lock().unwrap();
-                store
-                    .upsert("hill", &[review], &[], Clock::default())
-                    .unwrap();
-                app.players
-                    .write()
-                    .unwrap()
-                    .insert("hill".into(), load_player(&store, "hill").unwrap());
-                store
-                    .send_once(
-                        &notifications::Outgoing {
-                            to: "hill",
-                            from: "",
-                            title: "Streak at risk",
-                            body: "Your streak ends tonight",
-                            kind: "risk",
-                        },
-                        "risk:test",
-                        if studied { day } else { day - 1 },
-                        now,
-                        true,
-                    )
-                    .unwrap();
-            }
-            deliver_notifications(&app, PUSH_BUDGET).unwrap();
-            assert_eq!(
-                app.store
-                    .lock()
-                    .unwrap()
-                    .conn
-                    .query_row(
-                        "select count(*) from notifications where kind = 'risk'",
-                        [],
-                        |row| row.get::<_, i64>(0)
-                    )
-                    .unwrap(),
-                0,
-                "an obsolete warning must not be sent on a later retry"
-            );
-            assert!(
-                !app.store
-                    .lock()
-                    .unwrap()
-                    .mark_seen("hill", "risk:test")
-                    .unwrap(),
-                "cancelling a stale warning must not generate it again"
-            );
-            drop(app);
-            std::fs::remove_dir_all(path).unwrap();
-        }
-    }
-
-    #[tokio::test]
-    async fn queued_streak_warnings_follow_freeze_setting_changes_before_retry() {
-        for enabled in [false, true] {
-            let (mut app, path) = fixture();
-            let (base, failed) = local_push(503);
-            let config = &mut Arc::get_mut(&mut app).unwrap().config;
-            config.ntfy = Some(base);
-            config.users.get_mut("hill").unwrap().ntfy_topic = Some("hill-topic".into());
-            let clock = Clock::default();
-            let day = clock.day(now_ms());
-            let start = (day - 1) * 86_400_000;
-            let reviews: Vec<_> = (0..60)
-                .map(|i| Review {
-                    id: start + 6 * 3_600_000 + i * 10_000 + if i >= 30 { 600_000 } else { 0 },
-                    cid: i,
-                    last_ivl: 30,
-                    ivl: None,
-                    time_ms: 10_000,
-                    kind: 0,
-                })
-                .collect();
-            {
-                let mut store = app.store.lock().unwrap();
-                store.upsert("hill", &reviews, &[], clock).unwrap();
-                store.set_freezes_enabled("hill", true, start).unwrap();
-                app.players
-                    .write()
-                    .unwrap()
-                    .insert("hill".into(), load_player(&store, "hill").unwrap());
-            }
-            // Both directions retain one earned freeze: only its availability changes.
-            let settings = set_freezes(
-                State(app.clone()),
-                UrlPath("hill".into()),
-                headers("hill"),
-                Json(FreezeUpdate { enabled: !enabled }),
-            )
-            .await
-            .unwrap()
-            .0;
-            assert_eq!(settings.enabled, !enabled);
-            let before = app.profile("hill").unwrap();
-            assert_eq!(before.stored_freezes, 1);
-            assert_eq!(before.freezes_enabled, !enabled);
-            assert!(before.at_risk);
-            let old_tail = if enabled {
-                "Streak freezes are turned off."
-            } else {
-                "A freeze would cover you, but why spend it?"
-            };
-            let old_body = format!("Your {} day streak ends tonight. {old_tail}", before.streak);
-            let id = {
-                let mut store = app.store.lock().unwrap();
-                store
-                    .send_once(
-                        &notifications::Outgoing {
-                            to: "hill",
-                            from: "",
-                            title: "Streak at risk",
-                            body: &old_body,
-                            kind: "risk",
-                        },
-                        &format!("risk:{day}"),
-                        day,
-                        now_ms(),
-                        true,
-                    )
-                    .unwrap();
-                store.conn.last_insert_rowid()
-            };
-            deliver_notifications(&app, PUSH_BUDGET).unwrap();
-            assert!(failed.join().unwrap().ends_with(&old_body));
-            assert!(!was_pushed(&app, id));
-
-            let settings = set_freezes(
-                State(app.clone()),
-                UrlPath("hill".into()),
-                headers("hill"),
-                Json(FreezeUpdate { enabled }),
-            )
-            .await
-            .unwrap()
-            .0;
-            assert_eq!(settings.enabled, enabled);
-            assert_eq!(settings.freezes, 1);
-            let current = app.profile("hill").unwrap();
-            assert_eq!(current.stored_freezes, 1);
-            assert_eq!(current.freezes, u32::from(enabled));
-            let (base, success) = local_push(200);
-            Arc::get_mut(&mut app).unwrap().config.ntfy = Some(base);
-            app.store
-                .lock()
-                .unwrap()
-                .conn
-                .execute("update notifications set retry_at = 0 where id = ?1", [id])
-                .unwrap();
-            deliver_notifications(&app, PUSH_BUDGET).unwrap();
-            let request = success.join().unwrap();
-            let expected_tail = if enabled {
-                "A freeze would cover you, but why spend it?"
-            } else {
-                "Streak freezes are turned off."
-            };
-            assert!(
-                request.ends_with(expected_tail),
-                "retried warning must describe the current setting (enabled={enabled})"
-            );
-            assert!(!request.ends_with(old_tail));
-            assert!(was_pushed(&app, id));
-            assert!(
-                app.store
-                    .lock()
-                    .unwrap()
-                    .notifications("hill", now_ms())
-                    .unwrap()
-                    .is_empty()
-            );
-            drop(app);
-            std::fs::remove_dir_all(path).unwrap();
-        }
     }
 
     #[tokio::test]

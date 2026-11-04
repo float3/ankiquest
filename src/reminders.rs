@@ -133,9 +133,6 @@ fn save_settings_at(
     }
     let previous = settings(store, user)?;
     if previous == *value {
-        store.conn.execute(
-            "update notifications set pushed = 1, push_only = 1 where recipient = ?1 and kind = 'risk'", [user],
-        )?;
         return Ok(());
     }
     let tx = store.conn.transaction()?;
@@ -170,7 +167,6 @@ fn save_settings_at(
     // change. Delivery rechecks their timing and relevance. Canceled rows remain
     // budget receipts, so toggling preferences cannot reset the daily limit.
     for kind in [
-        "risk",
         "reminder_daily",
         "reminder_urgent",
         "reminder_freeze_used",
@@ -793,34 +789,6 @@ mod tests {
         assert!(store.take_deck_deliveries(at(20)).unwrap().is_empty());
         assert!(store.is_seen("hill", "risk:legacy").unwrap());
         assert!(store.notifications("hill", at(20)).unwrap().is_empty());
-        cleanup(store, path);
-    }
-
-    #[test]
-    fn saving_even_unchanged_opt_out_retires_only_that_players_legacy_warnings() {
-        let (mut store, path) = store();
-        for user in ["hill", "friend"] {
-            store
-                .send_once(
-                    &Outgoing {
-                        to: user,
-                        from: "",
-                        title: "Streak at risk",
-                        body: "Old global warning",
-                        kind: "risk",
-                    },
-                    "risk:legacy",
-                    DATE,
-                    at(20),
-                    true,
-                )
-                .unwrap();
-        }
-        save_settings(&mut store, "hill", &Settings::default()).unwrap();
-        let pending = store.take_deck_deliveries(at(20)).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].user, "friend");
-        assert!(store.is_seen("hill", "risk:legacy").unwrap());
         cleanup(store, path);
     }
 

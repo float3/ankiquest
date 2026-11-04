@@ -760,16 +760,6 @@ impl Store {
         Ok(())
     }
 
-    pub fn cancel_streak_warning(&mut self, id: i64) -> Result<(), Error> {
-        // These were always ntfy-only. Keep the seen key, and never delete a
-        // message from the player's inbox when discarding stale warnings.
-        self.conn.execute(
-            "delete from notifications where id = ?1 and push_only = 1 and kind = 'risk'",
-            [id],
-        )?;
-        Ok(())
-    }
-
     pub fn finish_push(&mut self, id: i64, succeeded: bool, now_ms: i64) -> Result<(), Error> {
         let attempts: u32 = self.conn.query_row(
             "select push_attempts from notifications where id = ?1",
