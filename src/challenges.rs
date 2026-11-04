@@ -500,19 +500,42 @@ pub fn cancel_stale_invites(conn: &Connection, now: i64) -> rusqlite::Result<()>
 /// Progress is derived from reviews, so completion events are reconciled after
 /// review uploads/polls and before personal challenge or Activity reads.
 pub fn refresh(store: &mut Store, players: &[Participant], now: i64) -> Result<(), crate::Error> {
+    reconcile(store, players, now, None)
+}
+
+/// [`refresh`] for the challenges `member` belongs to: the only ones their upload can
+/// complete. The worker's tick still reconciles every challenge.
+pub fn refresh_member(
+    store: &mut Store,
+    players: &[Participant],
+    now: i64,
+    member: &str,
+) -> Result<(), crate::Error> {
+    reconcile(store, players, now, Some(member))
+}
+
+fn reconcile(
+    store: &mut Store,
+    players: &[Participant],
+    now: i64,
+    member: Option<&str>,
+) -> Result<(), crate::Error> {
     cancel_stale_invites(&store.conn, now)?;
-    let creators = store
-        .conn
-        .prepare(
-            "select distinct creator from community_challenges
-        where cancelled=0 and end_at>=?1",
-        )?
-        .query_map([now - 90 * DAY_MS], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let viewers = match member {
+        Some(member) => vec![member.to_string()],
+        None => store
+            .conn
+            .prepare(
+                "select distinct creator from community_challenges
+            where cancelled=0 and end_at>=?1",
+            )?
+            .query_map([now - 90 * DAY_MS], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     let mut complete = Vec::new();
-    for creator in creators {
+    for viewer in viewers {
         complete.extend(
-            list(store, &creator, players, now)
+            list(store, &viewer, players, now)
                 .map_err(|error| format!("challenge progress: {error:?}"))?
                 .into_iter()
                 .filter(|challenge| {
@@ -994,6 +1017,23 @@ mod tests {
             .conn
             .execute_batch("drop trigger fail_complete")
             .unwrap();
+        let completed = |store: &Store| {
+            store
+                .notifications("owner", 180)
+                .unwrap()
+                .iter()
+                .any(|n| n.kind == "challenge_complete")
+        };
+        refresh_member(&mut store, &players, 180, "outsider").unwrap();
+        assert!(
+            !completed(&store),
+            "only the uploader's challenges are checked"
+        );
+        refresh_member(&mut store, &players, 180, "friend").unwrap();
+        assert!(
+            completed(&store),
+            "a member's upload completes the challenge for everyone in it"
+        );
         refresh(&mut store, &players, 180).unwrap();
         refresh(&mut store, &players, 190).unwrap();
         drop(store);
