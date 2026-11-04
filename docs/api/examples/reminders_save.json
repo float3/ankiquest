@@ -1,0 +1,13 @@
+{
+  "daily_limit": 2,
+  "freeze_refill": false,
+  "freeze_used": false,
+  "gentle_daily": true,
+  "milestone": true,
+  "quiet_end": 8,
+  "quiet_start": 22,
+  "reminder_hour": 19,
+  "urgent_streak": true,
+  "weekly_closing": false,
+  "weekly_recap": true
+}
