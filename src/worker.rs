@@ -796,8 +796,11 @@ mod tests {
         (status, serde_json::from_slice(&body).unwrap())
     }
 
-    #[tokio::test]
+    // The clock is pinned on this thread, which the current-thread runtime polls `health` on,
+    // so the ages it reports don't drift with however long the steps take.
+    #[tokio::test(flavor = "current_thread")]
     async fn health_needs_a_recent_tick_and_a_usable_store() {
+        crate::app::fix_now_ms(Some(1_750_000_000_000));
         let (app, path) = fixture();
         app.heartbeat.beat(now_ms() - 30_000);
         assert_eq!(
@@ -822,6 +825,7 @@ mod tests {
         let (status, body) = health_of(&app).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body, serde_json::json!({"ok": false, "worker_age_s": 0}));
+        crate::app::fix_now_ms(None);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -1309,38 +1313,44 @@ mod tests {
     #[test]
     fn network_budget_leaves_unattempted_messages_ready_for_the_next_tick() {
         let (mut app, path) = fixture();
-        let (base, server) =
-            local_push_with_check(200, || std::thread::sleep(Duration::from_millis(500)));
+        // A listener nobody accepts on: the system finishes the connection and takes the
+        // request, but no answer ever comes, so the push only ends when its timeout does.
+        let stalled = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let config = &mut Arc::get_mut(&mut app).unwrap().config;
-        config.ntfy = Some(base);
+        config.ntfy = Some(format!("http://{}", stalled.local_addr().unwrap()));
         for user in ["hill", "friend"] {
             config.users.get_mut(user).unwrap().ntfy_topic = Some(user.into());
         }
         let first = queued_message(&app, "hill");
         let second = queued_message(&app, "friend");
-        deliver_notifications(&app, Duration::ZERO).unwrap();
-        let start = std::time::Instant::now();
-        deliver_notifications(&app, Duration::from_millis(100)).unwrap();
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "the request timeout respects the remaining budget"
-        );
-        server.join().unwrap();
-        assert!(!was_pushed(&app, first));
-        let store = app.store.lock().unwrap();
-        assert_eq!(
-            store
+        let attempts = |id: i64| {
+            app.store
+                .lock()
+                .unwrap()
                 .conn
                 .query_row(
                     "select push_attempts + retry_at from notifications where id = ?1",
-                    [second],
-                    |row| row.get::<_, i64>(0)
+                    [id],
+                    |row| row.get::<_, i64>(0),
                 )
-                .unwrap(),
+                .unwrap()
+        };
+        deliver_notifications(&app, Duration::ZERO).unwrap();
+        assert_eq!(attempts(first), 0, "no budget means no attempt");
+        let start = std::time::Instant::now();
+        deliver_notifications(&app, Duration::from_secs(1)).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the request timeout respects the remaining budget, not the 10 second cap"
+        );
+        assert!(attempts(first) > 0, "the first message is attempted");
+        assert!(!was_pushed(&app, first));
+        assert_eq!(
+            attempts(second),
             0,
             "skipped messages must not be leased or marked delivered"
         );
-        drop(store);
+        drop(stalled);
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }
