@@ -7,7 +7,7 @@ use crate::web_util::failed_for;
 use crate::worker::push_destination;
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -773,8 +773,101 @@ pub(crate) async fn set_decks(
         .map_err(store_error)
 }
 
+/// A deck the player just finished, to tell the friends they pick, once per deck and day.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Finished {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) recipients: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct Told {
+    /// Recipients who got it now; those told already today, unsubscribed or pausing alerts are left out.
+    pub(crate) recipients: usize,
+}
+
+/// Tells the chosen friends that the player finished a deck today, when the client asked them
+/// right after it happened. Unlike announcements set up per deck, the name comes from this
+/// request only and is not kept with the player's decks; only the recipients' rows carry it.
+pub(crate) fn share_finished(
+    app: &App,
+    store: &mut Store,
+    user: &str,
+    finished: &Finished,
+    now_ms: i64,
+) -> Result<Option<Told>, Error> {
+    let allowed: HashSet<String> = deck_settings(app, store, user)?
+        .recipients
+        .into_iter()
+        .map(|recipient| recipient.user)
+        .collect();
+    let unique: HashSet<&String> = finished.recipients.iter().collect();
+    if !valid_text(&finished.id, 128)
+        || !valid_text(&finished.name, 512)
+        || finished.recipients.is_empty()
+        || finished.recipients.len() > MAX_RECIPIENTS
+        || unique.len() != finished.recipients.len()
+        || !finished.recipients.iter().all(|r| allowed.contains(r))
+    {
+        return Ok(None);
+    }
+    let day = store.clock(user)?.day(now_ms);
+    let body = format!(
+        "{} has finished their {} studies for today.",
+        app.display(user),
+        finished.name
+    );
+    let mut told = 0;
+    for recipient in &finished.recipients {
+        let listening: bool = store.conn.query_row(
+            &format!("select {}", completion_allowed_sql("?1", "?2")),
+            params![recipient, user],
+            |r| r.get(0),
+        )?;
+        let key = format!("deck-share:{user}:{}:{day}", finished.id);
+        if !listening || store.is_seen(recipient, &key)? {
+            continue;
+        }
+        store.send_once(
+            &Outgoing {
+                to: recipient,
+                from: user,
+                title: "Deck complete",
+                body: &body,
+                kind: "completion",
+            },
+            &key,
+            day,
+            now_ms,
+            false,
+        )?;
+        told += 1;
+    }
+    Ok(Some(Told { recipients: told }))
+}
+
+pub(crate) async fn share_deck(
+    State(app): State<Arc<App>>,
+    UrlPath(user): UrlPath<String>,
+    headers: HeaderMap,
+    Json(finished): Json<Finished>,
+) -> Result<Json<Told>, StatusCode> {
+    if !authorized(&app, &user, &headers) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let mut store = app.store.lock().unwrap();
+    share_finished(&app, &mut store, &user, &finished, crate::app::now_ms())
+        .map_err(failed_for("sharing a finished deck for", &user))?
+        .map(Json)
+        .ok_or(StatusCode::BAD_REQUEST)
+}
+
 pub(crate) fn routes() -> Router<Arc<App>> {
-    Router::new().route("/api/decks/{user}", get(get_decks).post(set_decks))
+    Router::new()
+        .route("/api/decks/{user}", get(get_decks).post(set_decks))
+        .route("/api/decks/{user}/share", post(share_deck))
 }
 
 #[cfg(test)]

@@ -850,6 +850,67 @@ mod tests {
         std::fs::remove_dir_all(path).unwrap();
     }
 
+    #[tokio::test]
+    async fn a_finished_deck_reaches_only_the_friends_picked_and_once_a_day() {
+        let (app, path) = fixture();
+        let share = |user: &str, recipients: &[&str]| {
+            decks::share_deck(
+                State(app.clone()),
+                UrlPath("cerro".into()),
+                headers(user),
+                Json(decks::Finished {
+                    id: "7".into(),
+                    name: "Japanese::Kanji".into(),
+                    recipients: recipients.iter().map(|r| r.to_string()).collect(),
+                }),
+            )
+        };
+        assert_eq!(
+            share("hill", &["hill"]).await.err(),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        for refused in [&[][..], &["stranger"], &["hill", "hill"], &["cerro"]] {
+            assert_eq!(
+                share("cerro", refused).await.err(),
+                Some(StatusCode::BAD_REQUEST),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(share("cerro", &["hill"]).await.unwrap().0.recipients, 1);
+        assert_eq!(
+            share("cerro", &["hill", "friend"])
+                .await
+                .unwrap()
+                .0
+                .recipients,
+            1,
+            "hill was told already today"
+        );
+        let inbox = |user: &str| {
+            app.store
+                .lock()
+                .unwrap()
+                .notifications(user, now_ms())
+                .unwrap()
+        };
+        let told = inbox("hill");
+        assert_eq!(told.len(), 1, "{told:?}");
+        assert_eq!(
+            (told[0].kind.as_str(), told[0].body.as_str()),
+            (
+                "completion",
+                "Cerro has finished their Japanese::Kanji studies for today."
+            )
+        );
+        assert_eq!(inbox("friend").len(), 1);
+        assert!(
+            app.store.lock().unwrap().decks("cerro").unwrap().is_empty(),
+            "the deck name is not kept with cerro's decks"
+        );
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn clients_share_the_study_day_and_review_format() {
         let fixtures: serde_json::Value =
