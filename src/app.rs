@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::game::{self, Clock, ClockHistory, Profile, Review, Week};
 use crate::store::{Error, Store};
 use crate::{access, accounts, competition, decks, worker};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -61,6 +61,39 @@ impl App {
             .unwrap()
             .insert(user.to_string(), player);
         Ok(())
+    }
+
+    /// Brings the cached player up to date after [`Store::upsert`] recorded an upload, by
+    /// merging the upload the way the database did instead of rereading every review.
+    /// Returns whether the player's reviews or clock changed.
+    pub(crate) fn apply_upload(
+        &self,
+        store: &Store,
+        user: &str,
+        reviews: &[Review],
+        deleted: &[i64],
+    ) -> Result<bool, Error> {
+        let clock = store.clock(user)?;
+        let clock_history = store.clock_history(user)?;
+        let freeze_policy = store.freeze_policy(user)?;
+        let mut players = self.players.write().unwrap();
+        let Some(player) = players.get_mut(user) else {
+            drop(players);
+            self.reload_player(store, user)?;
+            return Ok(true);
+        };
+        let merged = merge_upload(&player.reviews, reviews, deleted);
+        let changed = merged.is_some() || clock_history != player.clock_history;
+        if let Some(merged) = merged {
+            player.reviews = Arc::new(merged);
+        }
+        player.clock = clock;
+        player.clock_history = clock_history;
+        player.freeze_policy = freeze_policy;
+        if changed {
+            player.revision = next_revision();
+        }
+        Ok(changed)
     }
 
     pub(crate) fn recipient(&self, user: String) -> decks::Recipient {
@@ -261,6 +294,19 @@ pub(crate) fn fix_now_ms(ms: Option<i64>) {
     FIXED_NOW_MS.set(ms);
 }
 
+/// [`tokio::task::spawn_blocking`], keeping a test's pinned [`now_ms`] on the blocking thread.
+pub(crate) fn spawn_blocking<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+) -> tokio::task::JoinHandle<R> {
+    #[cfg(test)]
+    let fixed = FIXED_NOW_MS.get();
+    tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        FIXED_NOW_MS.set(fixed);
+        work()
+    })
+}
+
 pub(crate) fn now_ms() -> i64 {
     #[cfg(test)]
     if let Some(ms) = FIXED_NOW_MS.get() {
@@ -282,6 +328,48 @@ pub(crate) fn mark_events_seen(store: &Store, user: &str, profile: &Profile) -> 
     Ok(())
 }
 
+/// `old` (sorted by id) with an upload applied as [`Store::upsert`] applies it: new reviews
+/// are added, a resent review only fills in a missing interval, and deleted ids go.
+/// `None` when nothing changes.
+fn merge_upload(old: &[Review], new: &[Review], deleted: &[i64]) -> Option<Vec<Review>> {
+    if new.is_empty() && deleted.is_empty() {
+        return None;
+    }
+    let mut incoming = new.to_vec();
+    incoming.sort_by_key(|r| r.id);
+    incoming.dedup_by(|later, first| {
+        let same = later.id == first.id;
+        if same {
+            first.ivl = first.ivl.or(later.ivl);
+        }
+        same
+    });
+    let deleted: HashSet<i64> = deleted.iter().copied().collect();
+    let mut merged = Vec::with_capacity(old.len() + incoming.len());
+    let (mut kept, mut added) = (old.iter().peekable(), incoming.into_iter().peekable());
+    loop {
+        let next = match (kept.peek(), added.peek()) {
+            (Some(a), Some(b)) if a.id == b.id => {
+                let review = Review {
+                    ivl: a.ivl.or(b.ivl),
+                    ..**a
+                };
+                kept.next();
+                added.next();
+                review
+            }
+            (Some(a), Some(b)) if a.id < b.id => *kept.next().unwrap(),
+            (Some(_), None) => *kept.next().unwrap(),
+            (_, Some(_)) => added.next().unwrap(),
+            (None, None) => break,
+        };
+        if !deleted.contains(&next.id) {
+            merged.push(next);
+        }
+    }
+    (merged != old).then_some(merged)
+}
+
 pub(crate) fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
     Ok(Player {
         reviews: Arc::new(store.reviews(user)?),
@@ -296,6 +384,49 @@ pub(crate) fn load_player(store: &Store, user: &str) -> Result<Player, Error> {
 mod tests {
     use super::*;
     use crate::test_support::*;
+    #[test]
+    fn an_upload_changes_the_cached_player_as_it_changes_the_database() {
+        let (app, path) = fixture();
+        let review = |id, ivl| Review {
+            id,
+            cid: id,
+            last_ivl: 1,
+            ivl,
+            time_ms: 4000,
+            kind: 1,
+        };
+        let upload = |reviews: &[Review], deleted: &[i64]| {
+            let mut store = app.store.lock().unwrap();
+            store
+                .upsert("cerro", reviews, deleted, Clock::default())
+                .unwrap();
+            let changed = app.apply_upload(&store, "cerro", reviews, deleted).unwrap();
+            let cached = app.players.read().unwrap()["cerro"].reviews.clone();
+            assert_eq!(*cached, store.reviews("cerro").unwrap());
+            changed
+        };
+        assert!(upload(&[review(3, None), review(1, Some(2))], &[]));
+        let revision = app.players.read().unwrap()["cerro"].revision;
+        assert!(
+            !upload(&[review(1, None), review(3, None)], &[]),
+            "a resend of what is already there changes nothing"
+        );
+        assert_eq!(app.players.read().unwrap()["cerro"].revision, revision);
+        assert!(upload(
+            &[
+                review(3, Some(5)),
+                review(2, None),
+                review(2, Some(7)),
+                review(4, None)
+            ],
+            &[1, 4]
+        ));
+        assert!(upload(&[], &[3]));
+        assert!(!upload(&[], &[9]));
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn standings_are_cached_until_the_player_changes_and_stay_small() {
         let (app, path) = fixture();

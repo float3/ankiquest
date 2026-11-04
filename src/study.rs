@@ -267,47 +267,80 @@ pub(crate) async fn upload(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // Recording an upload locks the store and works out the player's profile, so it runs
+    // on a blocking thread rather than on one of the runtime's workers.
+    crate::app::spawn_blocking(move || record_upload(&app, &user, &headers, upload))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+}
+
+fn record_upload(
+    app: &App,
+    user: &str,
+    headers: &HeaderMap,
+    upload: Upload,
+) -> Result<UploadResponse, StatusCode> {
     let reviews: Vec<Review> = upload.reviews.into_iter().filter(|r| r.kind < 4).collect();
-    let store_error = failed_for("upload for", &user);
-    let mut store = app.store.lock().unwrap();
-    let silent = upload.silent || !store.is_known(&user).map_err(store_error)?;
-    let before = if silent { None } else { app.profile(&user) };
-    store
-        .upsert(&user, &reviews, &upload.deleted, upload.clock)
+    let store_error = failed_for("upload for", user);
+    let known = app
+        .store
+        .lock()
+        .unwrap()
+        .is_known(user)
         .map_err(store_error)?;
-    let mut announced = Vec::new();
-    if let Some(decks) = &upload.decks {
-        announced = store
-            .record_decks(
-                &user,
-                &app.display(&user),
-                decks,
-                upload.clock,
-                silent,
-                now_ms(),
-            )
+    let silent = upload.silent || !known;
+    // Profiles need only the cached players, so they are worked out without the store lock.
+    let before = if silent { None } else { app.profile(user) };
+    let (announced, changed) = {
+        let mut store = app.store.lock().unwrap();
+        store
+            .upsert(user, &reviews, &upload.deleted, upload.clock)
             .map_err(store_error)?;
-        if upload.catalog {
-            store.prune_decks(&user, decks).map_err(store_error)?;
+        let mut announced = Vec::new();
+        if let Some(decks) = &upload.decks {
+            announced = store
+                .record_decks(
+                    user,
+                    &app.display(user),
+                    decks,
+                    upload.clock,
+                    silent,
+                    now_ms(),
+                )
+                .map_err(store_error)?;
+            if upload.catalog {
+                store.prune_decks(user, decks).map_err(store_error)?;
+            }
         }
-    }
-    app.reload_player(&store, &user).map_err(store_error)?;
-    challenges::refresh(&mut store, &app.participants(), now_ms()).map_err(store_error)?;
-    let mut profile = app.profile(&user).ok_or(StatusCode::NOT_FOUND)?;
+        let changed = app
+            .apply_upload(&store, user, &reviews, &upload.deleted)
+            .map_err(store_error)?;
+        challenges::refresh_member(&mut store, &app.participants(), now_ms(), user)
+            .map_err(store_error)?;
+        (announced, changed)
+    };
+    // An upload that added nothing leaves the profile as it was, so it is worked out once.
+    let mut profile = match &before {
+        Some(before) if !changed => before.clone(),
+        _ => app.profile(user).ok_or(StatusCode::NOT_FOUND)?,
+    };
+    let store = app.store.lock().unwrap();
     if silent {
-        mark_events_seen(&store, &user, &profile).map_err(store_error)?;
+        mark_events_seen(&store, user, &profile).map_err(store_error)?;
     }
     profile.goal =
-        Some(goals::view(&store.conn, &user, &profile).map_err(|e| store_error(e.into()))?);
+        Some(goals::view(&store.conn, user, &profile).map_err(|e| store_error(e.into()))?);
     let mut feedback = feedback::feedback(before.as_ref(), &profile, &announced);
-    let language = i18n::owned(&headers, &store, &user).map_err(store_error)?;
+    let language = i18n::owned(headers, &store, user).map_err(store_error)?;
+    drop(store);
     i18n::profile(&mut profile, &language);
     i18n::feedback(&mut feedback, &language);
-    Ok(Json(UploadResponse {
+    Ok(UploadResponse {
         profile,
         announced,
         feedback,
-    }))
+    })
 }
 pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
@@ -534,7 +567,7 @@ mod tests {
         let first = upload_as(&app, "hill", plain_upload(reviews_at(start, 2))).await;
         assert_eq!(first.feedback, feedback::Feedback::default());
         let more = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
-        let status = more.feedback.status.unwrap();
+        let status = more.feedback.status.unwrap().to_string();
         assert!(status.starts_with('+'), "{status}");
         assert!(status.contains("Lv "), "{status}");
         let again = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
@@ -586,7 +619,12 @@ mod tests {
             }
         };
         assert_eq!(ask(None).await.feedback.status, None);
-        let status = ask(Some(pending[1].id)).await.feedback.status.unwrap();
+        let status = ask(Some(pending[1].id))
+            .await
+            .feedback
+            .status
+            .unwrap()
+            .to_string();
         assert!(status.starts_with('+'), "{status}");
         assert_eq!(ask(Some(pending[2].id)).await.feedback.status, None);
         drop(app);

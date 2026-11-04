@@ -1,18 +1,17 @@
 use crate::game::{Clock, ClockChange, ClockHistory, Review};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-type Signature = Vec<Option<(SystemTime, u64)>>;
+/// The modification time (in nanoseconds) and size of a collection and its WAL file.
+pub(crate) type Signature = Vec<Option<(i64, u64)>>;
 
 pub struct Store {
     pub(crate) conn: Connection,
     scratch: PathBuf,
-    signatures: HashMap<String, Signature>,
 }
 
 fn signature(collection: &Path) -> Result<Signature, Error> {
@@ -20,11 +19,67 @@ fn signature(collection: &Path) -> Result<Signature, Error> {
         .iter()
         .enumerate()
         .map(|(index, path)| match fs::metadata(path) {
-            Ok(metadata) => Ok(Some((metadata.modified()?, metadata.len()))),
+            Ok(metadata) => Ok(Some((
+                metadata.modified()?.duration_since(UNIX_EPOCH)?.as_nanos() as i64,
+                metadata.len(),
+            ))),
             Err(error) if index == 1 && error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         })
         .collect()
+}
+
+/// A sync server collection read into memory, ready for [`Store::record_sync`].
+pub(crate) struct Synced {
+    signature: Signature,
+    reviews: Vec<Review>,
+    clock: Clock,
+    updated_at: i64,
+}
+
+/// Reads `user`'s collection from the sync server unless its files still match `last`.
+/// It needs nothing from the store, so the worker copies and reads collections without
+/// holding the store lock. Imports into the same `scratch` must not run at the same time.
+pub(crate) fn read_sync(
+    scratch: &Path,
+    sync_base: &Path,
+    user: &str,
+    last: Option<&Signature>,
+) -> Result<Option<Synced>, Error> {
+    let source = sync_base.join(user).join("collection.anki2");
+    let before = signature(&source)?;
+    if last == Some(&before) {
+        return Ok(None);
+    }
+
+    let copy = scratch.join(format!("{user}.anki2"));
+    let _ = fs::remove_file(wal_of(&copy));
+    let _ = fs::remove_file(shm_of(&copy));
+    fs::copy(&source, &copy)?;
+    if before[1].is_some() {
+        fs::copy(wal_of(&source), wal_of(&copy))?;
+    }
+    if signature(&source)? != before {
+        return Err(format!("collection changed while importing {user}; retry required").into());
+    }
+
+    let (reviews, clock) = read_collection(&copy)?;
+    let _ = fs::remove_file(wal_of(&copy));
+    let _ = fs::remove_file(shm_of(&copy));
+    let _ = fs::remove_file(&copy);
+
+    let updated_at = before
+        .iter()
+        .flatten()
+        .map(|(modified, _)| modified / 1_000_000)
+        .max()
+        .unwrap_or_default();
+    Ok(Some(Synced {
+        signature: before,
+        reviews,
+        clock,
+        updated_at,
+    }))
 }
 
 fn wal_of(path: &Path) -> PathBuf {
@@ -44,15 +99,6 @@ fn config_number(conn: &Connection, key: &str) -> Option<i64> {
         .query_row("select val from config where key = ?1", [key], |r| r.get(0))
         .ok()?;
     serde_json::from_slice::<f64>(&raw).ok().map(|n| n as i64)
-}
-
-/// Whether `table` already has `column`, for migrations that add one.
-pub(crate) fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
-    conn.query_row(
-        "select exists (select 1 from pragma_table_info(?1) where name = ?2)",
-        [table, column],
-        |r| r.get(0),
-    )
 }
 
 /// The player's current clock, or the default for someone who never uploaded.
@@ -114,18 +160,6 @@ impl Store {
                  received_at integer not null
              ) without rowid;",
         )?;
-        if !has_column(&conn, "reviews", "ivl")? {
-            conn.execute_batch("alter table reviews add column ivl integer")?;
-        }
-        // Players recorded before clocks had a history keep the only clock we
-        // know about, reaching back over all of their reviews. A move they made
-        // before this point has to be declared; it is not in the review data.
-        conn.execute(
-            "insert into clock_history (user, effective_from_ms, offset_west_min, rollover_hour)
-             select user, 0, offset_west_min, rollover_hour from clocks
-             where not exists (select 1 from clock_history where clock_history.user = clocks.user)",
-            [],
-        )?;
         crate::accounts::initialize(&conn)?;
         crate::oauth::initialize(&conn)?;
         crate::social::initialize(&conn)?;
@@ -145,11 +179,9 @@ impl Store {
         crate::dev::initialize(&conn)?;
         crate::goals::initialize(&conn)?;
         crate::wins::initialize(&conn)?;
-        Ok(Self {
-            conn,
-            scratch,
-            signatures: HashMap::new(),
-        })
+        initialize_sync_signatures(&conn)?;
+        crate::migrations::run(&conn)?;
+        Ok(Self { conn, scratch })
     }
 
     pub fn users(&self) -> Result<Vec<String>, Error> {
@@ -242,46 +274,47 @@ impl Store {
         )?)
     }
 
+    pub(crate) fn scratch(&self) -> &Path {
+        &self.scratch
+    }
+
+    /// The collection files the last import of `user` saw. They are kept in the database,
+    /// so a restart does not import every collection again.
+    pub(crate) fn sync_signature(&self, user: &str) -> Result<Option<Signature>, Error> {
+        let files: Option<String> = self
+            .conn
+            .query_row(
+                "select files from sync_signatures where user = ?1",
+                [user],
+                |r| r.get(0),
+            )
+            .optional()?;
+        // An unreadable signature only costs one more import.
+        Ok(files.and_then(|files| serde_json::from_str(&files).ok()))
+    }
+
+    /// Stores what [`read_sync`] read, dated from when the collection last changed.
+    pub(crate) fn record_sync(&mut self, user: &str, synced: &Synced) -> Result<(), Error> {
+        self.upsert_at(user, &synced.reviews, &[], synced.clock, synced.updated_at)?;
+        self.conn.execute(
+            "insert into sync_signatures (user, files) values (?1, ?2)
+             on conflict (user) do update set files = excluded.files",
+            params![user, serde_json::to_string(&synced.signature)?],
+        )?;
+        Ok(())
+    }
+
+    /// [`read_sync`] and [`Store::record_sync`] in one step, holding the store throughout.
+    #[cfg(test)]
     pub fn ingest(&mut self, sync_base: &Path, user: &str) -> Result<bool, Error> {
-        let source = sync_base.join(user).join("collection.anki2");
-        let before = signature(&source)?;
-        if self.signatures.get(user) == Some(&before) {
-            return Ok(false);
+        let last = self.sync_signature(user)?;
+        match read_sync(&self.scratch, sync_base, user, last.as_ref())? {
+            Some(synced) => {
+                self.record_sync(user, &synced)?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
-
-        let copy = self.scratch.join(format!("{user}.anki2"));
-        let _ = fs::remove_file(wal_of(&copy));
-        let _ = fs::remove_file(shm_of(&copy));
-        fs::copy(&source, &copy)?;
-        if before[1].is_some() {
-            fs::copy(wal_of(&source), wal_of(&copy))?;
-        }
-        if signature(&source)? != before {
-            return Err(
-                format!("collection changed while importing {user}; retry required").into(),
-            );
-        }
-
-        let (reviews, clock) = read_collection(&copy)?;
-        let _ = fs::remove_file(wal_of(&copy));
-        let _ = fs::remove_file(shm_of(&copy));
-        let _ = fs::remove_file(&copy);
-
-        let source_updated_at = before
-            .iter()
-            .flatten()
-            .map(|(modified, _)| {
-                modified
-                    .duration_since(UNIX_EPOCH)
-                    .map(|age| age.as_millis() as i64)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .unwrap_or_default();
-        self.upsert_at(user, &reviews, &[], clock, source_updated_at)?;
-        self.signatures.insert(user.into(), before);
-        Ok(true)
     }
 
     pub fn upsert(
@@ -377,6 +410,15 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+}
+
+fn initialize_sync_signatures(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "create table if not exists sync_signatures (
+             user text primary key,
+             files text not null
+         ) without rowid;",
+    )
 }
 
 fn read_collection(path: &Path) -> Result<(Vec<Review>, Clock), Error> {
@@ -513,7 +555,10 @@ mod tests {
                     params!["hill", berlin.offset_west_min, berlin.rollover_hour],
                 )
                 .unwrap();
-            store.conn.execute("delete from clock_history", []).unwrap();
+            store
+                .conn
+                .execute_batch("delete from clock_history; pragma user_version = 0;")
+                .unwrap();
         }
         let store = Store::open(&dir).unwrap();
         let history = store.clock_history("hill").unwrap();
@@ -537,7 +582,10 @@ mod tests {
         let first_import_at = store.last_review_sync("hill").unwrap();
         drop(store);
         let mut store = Store::open(&dir.join("state")).unwrap();
-        assert!(store.ingest(&base, "hill").unwrap());
+        assert!(
+            !store.ingest(&base, "hill").unwrap(),
+            "an unchanged collection is not imported again after a restart"
+        );
         assert_eq!(store.last_review_sync("hill").unwrap(), first_import_at);
         let reviews = store.reviews("hill").unwrap();
         assert_eq!(reviews.len(), 2);

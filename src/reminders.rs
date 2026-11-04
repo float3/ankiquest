@@ -98,12 +98,6 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              primary key (user, kind)
          ) without rowid;",
     )?;
-    // An old global warning may be waiting on a failed push when the upgraded
-    // server starts. It must not bypass the new opt-ins or quiet hours.
-    conn.execute(
-        "update notifications set pushed = 1, push_only = 1 where kind = 'risk' and pushed = 0",
-        [],
-    )?;
     Ok(())
 }
 
@@ -792,6 +786,8 @@ mod tests {
             .send_once(&notice, "risk:legacy", DATE, at(20), true)
             .unwrap();
         assert_eq!(store.take_deck_deliveries(at(20)).unwrap().len(), 1);
+        // As left by a server from before versioning.
+        store.conn.execute_batch("pragma user_version = 0").unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
         assert!(store.take_deck_deliveries(at(20)).unwrap().is_empty());

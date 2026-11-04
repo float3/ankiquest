@@ -562,7 +562,10 @@ impl Store {
                     &Outgoing {
                         to: user,
                         from: "",
-                        title: &format!("{} new unlocks", events.len()),
+                        title: &crate::i18n::english(
+                            "{0} new unlocks",
+                            &[&events.len().to_string()],
+                        ),
                         body: &titles.join(", "),
                         kind,
                     },
@@ -1679,7 +1682,8 @@ mod tests {
         drop(store);
         let conn = Connection::open(path.join("ankiquest.db")).unwrap();
         conn.execute_batch(
-            "drop table notifications;
+            "pragma user_version = 0;
+             drop table notifications;
              create table notifications (
                  id integer primary key autoincrement,
                  recipient text not null,
