@@ -62,6 +62,10 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              created_at integer not null
          ) without rowid;
          create index if not exists account_tokens_user on account_tokens (user);
+         create table if not exists account_token_uses (
+             token_hash text primary key,
+             last_used_at integer not null
+         ) without rowid;
          create table if not exists account_removals (
              user text primary key,
              requested_at integer not null
@@ -81,6 +85,14 @@ pub struct Directory {
     accounts: RwLock<HashMap<String, Account>>,
     tokens: RwLock<HashMap<String, String>>,
     signups: Mutex<HashMap<IpAddr, Vec<i64>>>,
+    /// When each token was last used, to the hour, and which of those are not saved yet.
+    uses: Mutex<Uses>,
+}
+
+#[derive(Default)]
+struct Uses {
+    last: HashMap<String, i64>,
+    unsaved: HashMap<String, i64>,
 }
 
 impl Directory {
@@ -95,10 +107,18 @@ impl Directory {
             .prepare("select token_hash, user from account_tokens")?
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<HashMap<_, _>, _>>()?;
+        let last = conn
+            .prepare("select token_hash, last_used_at from account_token_uses")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+            .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self {
             accounts: RwLock::new(accounts),
             tokens: RwLock::new(tokens),
             signups: Mutex::default(),
+            uses: Mutex::new(Uses {
+                last,
+                unsaved: HashMap::new(),
+            }),
         })
     }
 
@@ -144,7 +164,54 @@ impl Directory {
         if token.is_empty() {
             return None;
         }
-        self.tokens.read().unwrap().get(&token_hash(token)).cloned()
+        let hash = token_hash(token);
+        let owner = self.tokens.read().unwrap().get(&hash).cloned()?;
+        self.used(hash, now_ms());
+        Some(owner)
+    }
+
+    /// Notes that the token with this hash was used, at most once an hour, for [`Self::save_uses`].
+    fn used(&self, hash: String, now: i64) {
+        let mut uses = self.uses.lock().unwrap();
+        if uses.last.get(&hash).is_none_or(|at| now - at >= HOUR_MS) {
+            uses.last.insert(hash.clone(), now);
+            uses.unsaved.insert(hash, now);
+        }
+    }
+
+    /// When the token with this hash was last used, to within an hour.
+    fn last_used(&self, hash: &str) -> Option<i64> {
+        self.uses.lock().unwrap().last.get(hash).copied()
+    }
+
+    /// Writes the use times noted since the last call, and forgets those of signed-out tokens.
+    pub(crate) fn save_uses(&self, conn: &Connection) -> Result<(), Error> {
+        let unsaved = std::mem::take(&mut self.uses.lock().unwrap().unsaved);
+        if unsaved.is_empty() {
+            return Ok(());
+        }
+        let transaction = conn.unchecked_transaction()?;
+        for (hash, at) in &unsaved {
+            transaction.execute(
+                "insert into account_token_uses (token_hash, last_used_at)
+                 select ?1, ?2 where exists (select 1 from account_tokens where token_hash = ?1)
+                 on conflict (token_hash) do update set last_used_at = excluded.last_used_at",
+                params![hash, at],
+            )?;
+        }
+        transaction.execute(
+            "delete from account_token_uses
+             where token_hash not in (select token_hash from account_tokens)",
+            [],
+        )?;
+        transaction.commit()?;
+        let tokens = self.tokens.read().unwrap();
+        self.uses
+            .lock()
+            .unwrap()
+            .last
+            .retain(|hash, _| tokens.contains_key(hash));
+        Ok(())
     }
 
     pub(crate) fn signup_allowed(&self, client: IpAddr, now: i64) -> bool {
@@ -475,6 +542,9 @@ struct Device {
     kind: &'static str,
     name: Option<String>,
     created_at: i64,
+    /// When a device token was last used, to within an hour; null for browsers and for
+    /// tokens not used since this was recorded.
+    last_used_at: Option<i64>,
     current: bool,
 }
 
@@ -497,6 +567,7 @@ fn devices(app: &App, user: &str, credential: &Credential) -> Result<Vec<Device>
                 kind: "app",
                 name: Some(r.get(1)?),
                 created_at: r.get(2)?,
+                last_used_at: app.accounts.last_used(&hash),
                 current: credential.token.as_deref() == Some(hash.as_str()),
             })
         })?
@@ -510,6 +581,7 @@ fn devices(app: &App, user: &str, credential: &Credential) -> Result<Vec<Device>
                 kind: "web",
                 name: None,
                 created_at: session.created,
+                last_used_at: None,
                 current: credential.session.as_deref() == Some(session.key.as_str()),
             }),
     );
@@ -1307,6 +1379,74 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "only that address waits");
+        drop(app);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn devices_show_when_their_token_was_last_used_saved_at_most_hourly() {
+        let (app, path) = fixture(true);
+        let phone = sign_up(&app, "ana", "Phone").await;
+        let laptop = app.issue_token("ana", "Laptop").unwrap();
+        let (phone_hash, laptop_hash) = (token_hash(&phone), token_hash(&laptop));
+        let saved = |hash: &str| -> Option<i64> {
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row(
+                    "select last_used_at from account_token_uses where token_hash = ?1",
+                    [hash],
+                    |r| r.get(0),
+                )
+                .optional()
+                .unwrap()
+        };
+        let save = || {
+            app.accounts
+                .save_uses(&app.store.lock().unwrap().conn)
+                .unwrap()
+        };
+        save();
+        assert_eq!(saved(&laptop_hash), None, "never used");
+        let listed = list(&app, "ana", &with_token(&phone)).await;
+        let used = listed["devices"][0]["last_used_at"].as_i64().unwrap();
+        assert!(used > now_ms() - 60_000, "{listed}");
+        assert_eq!(
+            listed["devices"][1]["last_used_at"],
+            serde_json::Value::Null
+        );
+        save();
+        assert_eq!(saved(&phone_hash), Some(used));
+        app.accounts.used(phone_hash.clone(), used + HOUR_MS - 1);
+        save();
+        assert_eq!(saved(&phone_hash), Some(used), "not again within the hour");
+        app.accounts.used(phone_hash.clone(), used + HOUR_MS);
+        save();
+        assert_eq!(saved(&phone_hash), Some(used + HOUR_MS));
+
+        let reloaded = Directory::load(&app.store.lock().unwrap().conn).unwrap();
+        assert_eq!(
+            reloaded.last_used(&phone_hash),
+            Some(used + HOUR_MS),
+            "it survives a restart"
+        );
+        let (status, _) = post(
+            &app,
+            "/api/devices/ana",
+            &with_token(&laptop),
+            serde_json::json!({"action": "sign_out_others"}),
+            "192.0.2.1",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        save();
+        assert_eq!(
+            saved(&phone_hash),
+            None,
+            "a signed-out token's time goes with it"
+        );
+        assert!(saved(&laptop_hash).is_some());
         drop(app);
         std::fs::remove_dir_all(path).unwrap();
     }

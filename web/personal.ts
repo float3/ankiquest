@@ -34,7 +34,7 @@ import {failure, refused, request as call, send} from "./http";
   }
   interface Account { created_at: number; password?: boolean; confirmed_until?: number | null }
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
-  interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; current: boolean }
+  interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; last_used_at?: number | null; current: boolean }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
   interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean; muted?: Person[] }
   interface Invite { name: string; members: number }
@@ -624,7 +624,7 @@ import {failure, refused, request as call, send} from "./http";
   function devicesCard() {
     const devices = state.devices;
     if (!devices?.length) return "";
-    const rows = devices.map(device => html`<div class="device-row"><span><strong>${esc(device.name || tr("Web browser"))}</strong><small>${esc(tr`Signed in ${when(device.created_at)}`)}</small></span>${device.current
+    const rows = devices.map(device => html`<div class="device-row"><span><strong>${esc(device.name || tr("Web browser"))}</strong><small>${esc(tr`Signed in ${when(device.created_at)}`)}</small>${device.last_used_at ? html`<small>${esc(tr`Last used ${when(device.last_used_at)}`)}</small>` : ""}</span>${device.current
       ? html`<span class="settings-hint">${tr("This device")}</span>`
       : html`<button type="button" data-sign-out="${esc(device.id)}">${tr("Sign out")}</button>`}</div>`).join("");
     const others = devices.some(device => !device.current) ? html`<div class="setting-actions"><button type="button" id="sign-out-others">${tr("Sign out all other devices")}</button></div>` : "";

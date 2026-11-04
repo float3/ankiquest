@@ -28,7 +28,8 @@ pub struct Notice {
 /// What a download contains: (section, query taking the player as ?1).
 const EXPORT: &[(&str, &str)] = &[
     ("account", "select user, display, created_at from accounts where user = ?1"),
-    ("devices", "select device, created_at from account_tokens where user = ?1"),
+    ("devices", "select t.device, t.created_at, u.last_used_at from account_tokens t
+         left join account_token_uses u on u.token_hash = t.token_hash where t.user = ?1"),
     ("sign_in_links", "select provider, subject, created_at from sign_in_links where user = ?1"),
     ("visibility", "select public from visibility where user = ?1"),
     ("reviews", "select id, cid, last_ivl, ivl, time_ms, kind from reviews where user = ?1 order by id"),
@@ -101,6 +102,10 @@ const NOT_EXPORTED: &[(&str, &str)] = &[
 
 /// Rows that belong to the player alone: (table, condition on ?1).
 const OWNED: &[(&str, &str)] = &[
+    (
+        "account_token_uses",
+        "token_hash in (select token_hash from account_tokens where user = ?1)",
+    ),
     ("account_tokens", "user = ?1"),
     ("visibility", "user = ?1"),
     ("reviews", "user = ?1"),

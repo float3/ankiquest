@@ -1375,5 +1375,6 @@
   "Muted": "Masqués",
   "Mute {0}? You won't hear from them. They are not told.": "Masquer {0} ? Tu ne recevras plus rien de cette personne. Elle n’est pas prévenue.",
   "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Aucune invitation à un défi, aucun encouragement, aucune carte conquise, aucune nouvelle de paquet, aucun partage ni bravo de ces personnes. Elles ne sont pas prévenues.",
-  "You muted as many people as you can. Unmute someone first.": "Tu as masqué le nombre maximal de personnes. Arrête d’abord d’en masquer une."
+  "You muted as many people as you can. Unmute someone first.": "Tu as masqué le nombre maximal de personnes. Arrête d’abord d’en masquer une.",
+  "Last used {0}": "Dernière utilisation le {0}"
 }

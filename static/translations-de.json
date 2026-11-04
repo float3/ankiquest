@@ -1375,5 +1375,6 @@
   "Muted": "Stummgeschaltet",
   "Mute {0}? You won't hear from them. They are not told.": "{0} stummschalten? Du bekommst nichts mehr von dieser Person. Sie erfährt es nicht.",
   "No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.": "Keine Herausforderungs-Einladungen, Anstupser, eroberten Karten, Stapel-Neuigkeiten, Geteiltes oder Jubel von diesen Personen. Sie erfahren es nicht.",
-  "You muted as many people as you can. Unmute someone first.": "Du hast so viele Personen stummgeschaltet wie möglich. Hebe zuerst eine Stummschaltung auf."
+  "You muted as many people as you can. Unmute someone first.": "Du hast so viele Personen stummgeschaltet wie möglich. Hebe zuerst eine Stummschaltung auf.",
+  "Last used {0}": "Zuletzt verwendet am {0}"
 }

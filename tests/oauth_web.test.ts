@@ -129,7 +129,7 @@ async function passwordAndDevices(browser: Browser) {
   const posted: unknown[] = [];
   let devices = [
     {id: 'aaaaaaaaaaaaaaaa', kind: 'web', name: null, created_at: 1790000000000, current: true},
-    {id: 'bbbbbbbbbbbbbbbb', kind: 'app', name: 'AnkiDroid (Pixel)', created_at: 1780000000000, current: false},
+    {id: 'bbbbbbbbbbbbbbbb', kind: 'app', name: 'AnkiDroid (Pixel)', created_at: 1780000000000, last_used_at: 1790000000000, current: false},
     {id: 'cccccccccccccccc', kind: 'app', name: 'Anki desktop (Linux)', created_at: 1770000000000, current: false},
   ];
   await context.route('**/*', async route => {
@@ -190,7 +190,8 @@ test('settings change the password and sign devices out', async () => {
     const page = await passwordAndDevices(browser);
     assert.equal(page.rows.length, 3);
     assert.match(page.rows[0]!, /^Web browser Signed in .+ This device$/);
-    assert.match(page.rows[1]!, /^AnkiDroid \(Pixel\) Signed in .+ Sign out$/);
+    assert.match(page.rows[1]!, /^AnkiDroid \(Pixel\) Signed in .+ Last used .+ Sign out$/);
+    assert.doesNotMatch(page.rows[2]!, /Last used/, 'a token not used since this was recorded shows only when it signed in');
     assert.equal(page.wide, false);
     assert.equal(page.refused, 'That password is not right.');
     assert.equal(page.armed, 'Tap again to confirm');
