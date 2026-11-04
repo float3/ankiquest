@@ -17,6 +17,7 @@ XP never depends on which answer button was pressed, so there is no incentive to
 - `logs [--since 30m|12h|7d|all] [--level info|error] [--user <player>] [--limit <n>]` prints the server log. errors and setting changes are kept in the state database for `log_retention_days` (default 90; 0 keeps them forever), and still go to stderr for the journal.
 - `sql "<query>"` runs a read-only query against the state database.
 - `remove-account <user>` deletes a self-service account and everything about it, as if they had deleted it themselves; the service carries it out within a minute. players from the configuration are removed there instead.
+- `set-password <user>` gives a self-service account a new random password (16 letters and digits, in groups of four) and prints it once, for someone who forgot theirs. it works straight away, also for an account that signs in with a provider; their devices stay signed in. pass it on privately and ask them to change it under Settings. the log records that it happened, not the password.
 
 ## dev console
 
@@ -103,7 +104,7 @@ under Settings a player changes their password and sees and signs out their devi
 | endpoint | does |
 | --- | --- |
 | `POST /api/sign-in/<user>` `{"action": "password", "current": "…", "password": "…", "sign_out_others": false}` | sets a new password of 10 to 256 characters and returns the sign-in methods. `current` is needed when the account has a password; one that signs in with a provider sets its first without. a wrong `current` is `403` and counts towards the same per-address limit as signing in (`429`). players from the configuration get `409`. devices stay signed in unless `sign_out_others` is true. |
-| `GET /api/devices/<user>` | `{"devices": [{"id", "kind", "name", "created_at", "current"}]}`, the requesting device first, then newest. `kind` is `app` for a device token (`name` is the device it signed in as) or `web` for a website session signed in with a password or a provider (`name` is null). a website session opened with a device token, such as AnkiDroid's, counts as that device. `id` is the start of a hash, never a secret. |
+| `GET /api/devices/<user>` | `{"devices": [{"id", "kind", "name", "created_at", "last_used_at", "current"}]}`, the requesting device first, then newest. `last_used_at` is when a device token last reached the server, saved at most once an hour per token, so it can be up to an hour old; it is null for browser sessions and for tokens not used since the server started recording it. `kind` is `app` for a device token (`name` is the device it signed in as) or `web` for a website session signed in with a password or a provider (`name` is null). a website session opened with a device token, such as AnkiDroid's, counts as that device. `id` is the start of a hash, never a secret. |
 | `POST /api/devices/<user>` `{"action": "sign_out", "id": "…"}` | signs that device out and returns the list; `404` when it is not one of the player's. |
 | `POST /api/devices/<user>` `{"action": "sign_out_others"}` | signs out every token and website session except the one making the request, and returns the list. |
 

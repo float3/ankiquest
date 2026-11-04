@@ -1334,5 +1334,6 @@
   "Sign out all other devices": "Terminar sessão em todos os outros dispositivos",
   "Signed out.": "Sessão terminada.",
   "Your other devices were signed out.": "A sessão foi terminada nos teus outros dispositivos.",
-  "That device is already signed out.": "Esse dispositivo já terminou a sessão."
+  "That device is already signed out.": "Esse dispositivo já terminou a sessão.",
+  "Last used {0}": "Última utilização a {0}"
 }

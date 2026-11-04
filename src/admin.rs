@@ -229,6 +229,8 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
                                   print the server log (default: last 7 days, 200 lines)
   sql <query>                     run a read-only SQL query against the state
   remove-account <user>           delete a self-service account and everything about it
+  set-password <user>             give a self-service account a new random password, for
+                                  someone who forgot theirs; prints it once
   grant-freeze <user> <date>...   protect a player's streak on these days (YYYY-MM-DD)
   revoke-freeze <user> <date>...  take that protection away again";
 
@@ -240,6 +242,7 @@ pub enum Command {
     Logs(LogFilter),
     Sql(String),
     RemoveAccount(String),
+    SetPassword(String),
     GrantFreeze(String, Vec<String>, bool),
 }
 
@@ -263,6 +266,7 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["reset", key] => Command::Reset(key_of(key)),
         ["sql", query] => Command::Sql(query.to_string()),
         ["remove-account", user] => Command::RemoveAccount(user.to_string()),
+        ["set-password", user] => Command::SetPassword(user.to_string()),
         [verb @ ("grant-freeze" | "revoke-freeze"), user, dates @ ..] if !dates.is_empty() => {
             let dates = dates
                 .iter()
@@ -397,6 +401,34 @@ pub fn run(
             admin_log(conn, now_ms, "admin asked to remove an account".into())?;
             format!("{user} and everything about them will be removed within a minute.\n")
         }
+        Command::SetPassword(user) => {
+            let password = temporary_password()?;
+            let hash = crate::accounts::hash_password(&password)?;
+            if conn.execute(
+                "update accounts set password_hash = ?2 where user = ?1",
+                params![user, hash],
+            )? == 0
+            {
+                return Err(format!(
+                    "{user} is not a self-service account; configured players sign in with the token in the configuration"
+                )
+                .into());
+            }
+            admin_log(
+                conn,
+                now_ms,
+                format!("admin set a temporary password for {user}"),
+            )?;
+            format!(
+                "{user} can now sign in with this password:
+
+    {password}
+
+it works straight away and is shown only now. tell them to change it under Settings.
+other devices stay signed in.
+"
+            )
+        }
         Command::GrantFreeze(user, dates, granted) => {
             let changed = crate::freezes::grant(conn, &user, &dates, granted, now_ms)?;
             let verb = if granted { "granted" } else { "revoked" };
@@ -415,6 +447,25 @@ pub fn run(
         }
         Command::Sql(_) => unreachable!(),
     })
+}
+
+/// Sixteen letters and digits in groups of four, without look-alikes such as 0/o and 1/l,
+/// so it can be read out or typed from a message.
+fn temporary_password() -> Result<String, Error> {
+    const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
+    let mut out = String::new();
+    while out.len() < 19 {
+        for byte in crate::web_util::random_bytes("password randomness unavailable")? {
+            // 248 is the largest multiple of 31 that fits, so every character is as likely.
+            if byte < 248 && out.len() < 19 {
+                if out.len() % 5 == 4 {
+                    out.push('-');
+                }
+                out.push(ALPHABET[usize::from(byte) % ALPHABET.len()] as char);
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn admin_log(conn: &Connection, now_ms: i64, message: String) -> Result<(), Error> {
@@ -533,6 +584,51 @@ mod tests {
             std::env::temp_dir().join(format!("ankiquest-admin-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn a_forgotten_password_is_replaced_by_a_random_one() {
+        let dir = state("set-password");
+        {
+            let store = Store::open(&dir).unwrap();
+            crate::accounts::create(&store.conn, "ana", "Ana", "", 0).unwrap();
+        }
+        assert_eq!(
+            parse(&words(&["set-password", "ana"])).unwrap(),
+            Command::SetPassword("ana".into())
+        );
+        let out = run(&dir, configured(), Command::SetPassword("ana".into()), 5).unwrap();
+        let password = out
+            .lines()
+            .map(str::trim)
+            .find(|line| line.len() == 19 && line.matches('-').count() == 3)
+            .unwrap()
+            .to_string();
+        assert!(
+            password
+                .chars()
+                .all(|c| c == '-' || "abcdefghjkmnpqrstuvwxyz23456789".contains(c))
+        );
+        let store = Store::open(&dir).unwrap();
+        let hash: String = store
+            .conn
+            .query_row(
+                "select password_hash from accounts where user = 'ana'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(crate::accounts::verify_password(&hash, &password));
+        let logged: String = store
+            .conn
+            .query_row("select message from server_log", [], |r| r.get(0))
+            .unwrap();
+        assert!(!logged.contains(&password), "the log never holds it");
+        drop(store);
+        let again = run(&dir, configured(), Command::SetPassword("ana".into()), 6).unwrap();
+        assert!(!again.contains(&password), "a new one each time");
+        assert!(run(&dir, configured(), Command::SetPassword("bo".into()), 7).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

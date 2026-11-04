@@ -1334,5 +1334,6 @@
   "Sign out all other devices": "Alle anderen Geräte abmelden",
   "Signed out.": "Abgemeldet.",
   "Your other devices were signed out.": "Deine anderen Geräte wurden abgemeldet.",
-  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet."
+  "That device is already signed out.": "Dieses Gerät ist bereits abgemeldet.",
+  "Last used {0}": "Zuletzt verwendet am {0}"
 }

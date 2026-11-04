@@ -207,6 +207,7 @@ pub(crate) fn tick(app: &App) -> Result<(), Error> {
                 now,
             )?);
             admin::flush(&store.conn, now, settings.log_retention_days)?;
+            app.accounts.save_uses(&store.conn)?;
             privacy::carry_out_removals(app, &store.conn)?;
             for user in freezes::grant_reloads(&store.conn)? {
                 if app.players.read().unwrap().contains_key(&user) {
