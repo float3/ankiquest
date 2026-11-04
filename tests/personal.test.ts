@@ -8,7 +8,7 @@ const now = Date.now();
 const token = 'test-owner-token';
 const initial = () => ({
   member:true,
-  profile:{user:'alice',display:'Alice <img src=x onerror=alert(1)>',today:{reviews:12,xp:150},streak:5,level:3,quests:[{title:'Review 10 cards',progress:10,target:10,reward:50,done:true},{title:'Review 20 cards',progress:12,target:20,reward:50,done:false}]},
+  profile:{user:'alice',display:'Alice <img src=x onerror=alert(1)>',today:{reviews:12,xp:150},streak:5,level:3,quests:[{title:'Review 10 cards',progress:10,target:10,reward:50,done:true},{title:'Review 20 cards',progress:12,target:20,reward:50,done:false}],closing_week:{xp:1234,ends_at:now+3600000}},
   study:{year:2026,years:[2026,2025],days:[{date:'2026-09-24',reviews:1,time_ms:30000,xp:12,new_cards:0,streak:1,frozen:false},{date:'2026-09-25',reviews:3,time_ms:120000,xp:41,new_cards:1,streak:2,frozen:false},{date:'2026-09-26',reviews:0,time_ms:0,xp:0,new_cards:0,streak:2,frozen:true}],last_review_at:now-60000,last_received_at:now,latest_session:{started_at:now-180000,ended_at:now-60000,reviews:2,time_ms:90000,new_cards:1}},
   challenges:{challenges:[{id:7,title:'Seven days together',status:'active',members:[{user:'alice',status:'invited'}]}]},
   activity:{items:[],unread_count:2},
@@ -72,6 +72,7 @@ async function noOverflow(page: Page,label: string){const size=await page.evalua
       assert.equal(await f.page.locator('.personal-quest').count(),2);
       assert.equal(await f.page.locator('.personal-summary strong').first().textContent(),'2');
       assert.match((await f.page.locator('.personal-stamp').textContent())!,/Study data updated/);
+      assert.match((await f.page.locator('#closing-week').textContent())!,/^Last week still counting: 1,234 XP · closes at \d\d:\d\d(\s?[AP]M)?$/);
       assert.match((await f.page.locator('a[href="/community#challenge-7"]').getAttribute('href'))!,/challenge-7/);
       assert.match((await f.page.locator('a[href="/community#activity"]').textContent())!,/2 new updates/);
       await noOverflow(f.page,`today ${width} ${theme}`);

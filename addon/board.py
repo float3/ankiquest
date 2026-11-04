@@ -1,5 +1,6 @@
 """The ankiquest block under the deck list: a one-line summary, or the Today panel."""
 
+import time
 from html import escape
 
 PAGES = {
@@ -121,10 +122,35 @@ def welcome(translate=lambda value: value):
     )
 
 
+def clock(ms):
+    return time.strftime("%H:%M", time.localtime(ms / 1000))
+
+
+def closing_week(profile, translate, now_ms=None, show_time=clock):
+    """The week that already reset on the board but still counts this player's current day.
+
+    The server sends `closing_week` only while that day lasts; a cached profile whose
+    `ends_at` has passed says nothing."""
+    closing = (profile or {}).get("closing_week")
+    if not isinstance(closing, dict):
+        return None
+    ends_at = closing.get("ends_at")
+    if not isinstance(ends_at, int) or isinstance(ends_at, bool):
+        return None
+    if ends_at <= (int(time.time() * 1000) if now_ms is None else now_ms):
+        return None
+    return translate("Last week still counting: %s XP · closes at %s") % (
+        "{:,}".format(max(0, int(closing.get("xp") or 0))), show_time(ends_at),
+    )
+
+
 def summary_parts(profile, place, translate):
     parts = []
     if place:
         parts.append(translate("#%d this week") % place)
+    closing = closing_week(profile, translate)
+    if closing:
+        parts.append(closing)
     if profile:
         parts.append(level_text(profile, translate))
         if profile.get("streak"):
@@ -324,13 +350,16 @@ def board_row(place, entry, mine):
     )
 
 
-def board_card(today, translate):
+def board_card(today, translate, profile=None):
     standing = today.get("board")
     if standing is None:
         return ""
     rows = "".join(board_row(*row) for row in standing["rows"])
     if not rows:
         rows = "<div class=aq-empty-note>%s</div>" % escape(translate("Nobody else plays yet."))
+    closing = closing_week(profile, translate)
+    if closing:
+        rows += "<div class='aq-note aq-closing-week'>%s</div>" % escape(closing)
     title = "<div class=aq-board-head><h3>%s</h3>%s</div>" % (escape(translate("Leaderboard")), period_picker(standing["period"], translate))
     return "<div class=aq-card>%s%s</div>" % (title, rows)
 
@@ -342,7 +371,7 @@ def session_line(today, translate):
 
 
 def panel(profile, place, unread, translate, today):
-    cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate)
+    cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate, profile)
     return (
         "%s<div id=ankiquest class=aq-today>%s<div class=aq-grid>%s</div>%s<div class=aq-links>%s</div></div>"
         % (STYLE, head(today, profile, place, translate), cards, session_line(today, translate), links(unread, translate))

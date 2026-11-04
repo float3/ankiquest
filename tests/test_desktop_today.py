@@ -4,6 +4,7 @@ import ast
 import re
 import sqlite3
 import sys
+import time
 import unittest
 from concurrent.futures import Future
 from types import ModuleType, SimpleNamespace
@@ -520,6 +521,28 @@ class PanelTests(unittest.TestCase):
         self.assertNotIn("<img", html)
         done = dict(self.view()["focus"], status="done", label="Done today")
         self.assertNotIn("ankiquest:study", board.html(None, today=self.view(focus=done)))
+
+    def test_a_closing_week_still_counting_shows_its_xp_and_close(self):
+        # Just after the shared reset a Californian's Sunday still counts toward last week.
+        closing = {"closing_week": {"xp": 1234, "ends_at": 10_000}}
+        at = lambda ms: "04:00" if ms == 10_000 else "?"
+        self.assertEqual(
+            "Last week still counting: 1,234 XP · closes at 04:00",
+            board.closing_week(closing, lambda value: value, 9_999, at),
+        )
+        self.assertIsNone(board.closing_week(closing, lambda value: value, 10_000, at))
+        self.assertIsNone(board.closing_week({}, lambda value: value, 0, at))
+        self.assertIsNone(board.closing_week({"closing_week": {"xp": 5, "ends_at": "soon"}}, lambda value: value, 0, at))
+        self.assertIsNone(board.closing_week(None, lambda value: value, 0, at))
+        spanish = board.closing_week(closing, lambda value: language.tr(value, "es"), 9_999, at)
+        self.assertEqual("La semana pasada aún cuenta: 1,234 XP · cierra a las 04:00", spanish)
+
+        live = dict(self.profile, closing_week={"xp": 50, "ends_at": int(time.time() * 1000) + 3_600_000})
+        self.assertIn("aq-closing-week'>Last week still counting: 50 XP", board.html(live, 2, 0, today=self.view()))
+        self.assertIn("Last week still counting: 50 XP", board.html(live, 2, 0))
+        ended = dict(self.profile, closing_week={"xp": 50, "ends_at": 1})
+        self.assertNotIn("Last week still counting", board.html(ended, 2, 0, today=self.view()))
+        self.assertNotIn("Last week still counting", board.html(self.profile, 2, 0, today=self.view()))
 
     def test_all_quests_done_shows_the_winner(self):
         profile = {"quests": [{"title": "Combo", "progress": 5, "target": 5, "done": True, "reward": 15}]}

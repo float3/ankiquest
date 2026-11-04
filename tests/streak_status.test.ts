@@ -30,6 +30,23 @@ const scaffold = html.match(/<body\b[^>]*>([\s\S]*?)<script>/)![1];
       assert(states[1]!.label.includes(locale==='es-ES'?'Aún no ha estudiado':'Not studied yet'));
       assert(states[2]!.label.includes(locale==='es-ES'?'Racha protegida':'Streak protected'));
       assert(states[2]!.label.includes(locale==='es-ES'?'Aún no ha estudiado':'Not studied yet'));
+      // Right after the weekly reset, a player whose day began before it still adds to last week.
+      await page.evaluate(() => {
+        const row = {user:'west',display:'West',xp:0,level:1,streak:0,today_reviews:3,streak_state:'pending',day_ends_at:Date.now()+3600000};
+        app.innerHTML = board([{...row,xp:5},{...row,user:'east',closing_xp:1234},{...row,user:'stale',closing_xp:9,day_ends_at:Date.now()-1000}],'me')
+          + closingWeek({xp:1234,ends_at:Date.now()+3600000}) + closingWeek({xp:5,ends_at:Date.now()-1000}) + closingWeek(undefined);
+      });
+      const closing = await page.locator('.board .closing-xp').allTextContents();
+      assert.equal(closing.length,1);
+      assert.match(closing[0]!,locale==='es-ES'?/1[., ]?234 XP aún cuentan para la semana pasada/:/1,234 XP still counting for last week/);
+      const notices = await page.locator('.closing-week').allTextContents();
+      assert.equal(notices.length,1);
+      assert.match(notices[0]!,locale==='es-ES'?/La semana pasada aún cuenta: 1[., ]?234 XP · cierra a las \d\d:\d\d/:/Last week still counting: 1,234 XP · closes at \d\d:\d\d/);
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.evaluate(() => {
+        const rows = ['studied','pending','protected'].map((streak_state,index) => ({user:streak_state,display:'Friend '+index,xp:100-index,level:1,streak:27,today_reviews:index===0?1:0,streak_state,day_ends_at:Date.now()+3600000}));
+        app.innerHTML = board(rows,'me');
+      });
       assert.equal(await page.locator('.streak[data-streak-state="pending"] .streak-clock').count(),1);
       assert.equal(await page.locator('.streak[data-streak-state="protected"] .streak-snowflake').count(),1);
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

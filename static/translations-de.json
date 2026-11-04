@@ -1373,5 +1373,7 @@
   "Current streak: 1 day.": "Aktuelle Lernserie: 1 Tag.",
   "Current streak: {0} days.": "Aktuelle Lernserie: {0} Tage.",
   "The weekly competition closes for you in 1 hour, at {0}. You have {1} XP this week.": "Der Wochenwettbewerb endet für dich in 1 Stunde, um {0} Uhr. Du hast diese Woche {1} XP.",
-  "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.": "Der Wochenwettbewerb endet für dich in {0} Stunden, um {1} Uhr. Du hast diese Woche {2} XP."
+  "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.": "Der Wochenwettbewerb endet für dich in {0} Stunden, um {1} Uhr. Du hast diese Woche {2} XP.",
+  "Last week still counting: {0} XP · closes at {1}": "Letzte Woche zählt noch: {0} XP · endet um {1}",
+  "{0} XP still counting for last week": "{0} XP zählen noch für letzte Woche"
 }
