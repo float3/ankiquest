@@ -37,6 +37,18 @@ def labels():
     return found
 
 
+def code_strings():
+    """Every string literal in the add-on outside the tables. A label can reach `tr` through
+    a variable, as moods.py and inbox.py do, so this is wider than labels()."""
+    found = set()
+    for path in ADDON.glob("*.py"):
+        if path.name != "language.py":
+            for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    found.add(node.value)
+    return found
+
+
 language = load()
 
 
@@ -55,6 +67,9 @@ class TranslationTables(unittest.TestCase):
         for code, table in language.TABLES.items():
             with self.subTest(code=code):
                 self.assertEqual(sorted(labels() - set(table)), [])
+
+    def test_every_translated_label_is_still_in_the_code(self):
+        self.assertEqual(sorted(set(language.SPANISH) - code_strings()), [])
 
     def test_placeholders_survive_translation(self):
         for code, table in language.TABLES.items():
