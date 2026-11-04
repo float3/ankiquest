@@ -42,6 +42,7 @@ pub(crate) async fn get_notifications(
             }
             notice.body = reminders::current_body(&notice, profile, clock, &app.week, now);
         }
+        shares::share_words(&store.conn, &user, &mut notice, &language).map_err(store_error)?;
         let sender_display = app.display(&notice.sender);
         i18n::notification(&mut notice, &language, &sender_display);
         shares::localize(&store.conn, &mut notice, &language).map_err(store_error)?;
@@ -97,6 +98,7 @@ async fn activity(
         .map_err(store_error)?;
     let base = base_url(&app, &headers);
     for notice in activity.items.iter_mut().chain(&mut activity.attention) {
+        shares::share_words(&store.conn, &user, notice, &language).map_err(store_error)?;
         i18n::notification(notice, &language, &app.display(&notice.sender));
         shares::localize(&store.conn, notice, &language).map_err(store_error)?;
         wins::decorate(notice, &base);
