@@ -1,7 +1,6 @@
 """The dialogs behind the Tools menu: settings and deck sharing."""
 
 import html
-from pathlib import Path
 
 from aqt.qt import (
     QCheckBox,
@@ -26,6 +25,7 @@ from aqt.qt import Qt
 from .client import DEFAULT_SERVER
 from .decks import label, ordered
 from .language import tr
+from .share import face_path
 from .today_ui import settings_section
 
 
@@ -69,7 +69,7 @@ def _brand(dialog, layout, companion="aki"):
     """Local art works even before a server is configured or while offline."""
     if companion == "none":
         return
-    asset = str(Path(__file__).with_name("ankilope_face.png" if companion == "ankilope" else "aki_face.png"))
+    asset = face_path(companion)
     dialog.setWindowIcon(QIcon(asset))
     image = QLabel()
     image.setPixmap(QPixmap(asset).scaled(
@@ -356,8 +356,7 @@ def companion_dialog(parent, selected):
         if value == "none":
             preview.clear()
         else:
-            asset = str(Path(__file__).with_name("ankilope_face.png" if value == "ankilope" else "aki_face.png"))
-            preview.setPixmap(QPixmap(asset).scaled(
+            preview.setPixmap(QPixmap(face_path(value)).scaled(
                 96, 96, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             ))

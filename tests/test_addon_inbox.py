@@ -275,11 +275,11 @@ class ShareTests(unittest.TestCase):
         self.assertEqual("Level 5!: Well done\nI study with AnkiQuest.", share.invitation(win, ""))
 
     def test_the_window_shows_the_chosen_companion(self):
-        self.assertEqual("aki_face.png", share.art_file("aki"))
-        self.assertEqual("ankilope_face.png", share.art_file("ankilope"))
-        self.assertIsNone(share.art_file("none"))
+        self.assertEqual("aki_face.png", Path(share.face_path("aki")).name)
+        self.assertEqual("ankilope_face.png", Path(share.face_path("ankilope")).name)
+        self.assertIsNone(share.face_path("none"))
         for companion in ("aki", "ankilope"):
-            self.assertTrue((ADDON / share.art_file(companion)).is_file())
+            self.assertTrue(Path(share.face_path(companion)).is_file())
 
 
 def translated_literals(path):

@@ -23,11 +23,6 @@ from .language import tr
 state = {"popup": None}
 
 
-def art_path(companion):
-    name = share.art_file(companion)
-    return str(Path(__file__).with_name(name)) if name else None
-
-
 def _font(pixels, bold):
     font = QFont()
     font.setPixelSize(pixels)
@@ -92,7 +87,7 @@ def _plain(text, bold=False):
 
 def _head(win, companion):
     head = QHBoxLayout()
-    asset = art_path(companion)
+    asset = share.face_path(companion)
     if asset:
         image = QLabel()
         image.setPixmap(QPixmap(asset).scaled(

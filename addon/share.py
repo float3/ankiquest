@@ -5,6 +5,7 @@ Plain Python, so the tests load it without Anki; share_ui.py shows it."""
 
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 MAX_IMAGE = 4 * 1024 * 1024
 IMAGE_TIMEOUT = 15
@@ -129,8 +130,8 @@ def invitation(win, server, translate=lambda value: value):
     return translate("%s: %s\nI study with AnkiQuest.") % (win["title"], win["body"])
 
 
-def art_file(companion):
+def face_path(companion):
     """The bundled face for the chosen companion; None means no art."""
     if companion == "none":
         return None
-    return "ankilope_face.png" if companion == "ankilope" else "aki_face.png"
+    return str(Path(__file__).with_name("ankilope_face.png" if companion == "ankilope" else "aki_face.png"))
