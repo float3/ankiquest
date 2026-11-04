@@ -401,6 +401,12 @@ impl Week {
         self.shifted(ms).date().year()
     }
 
+    /// When the week containing `ms` began, in milliseconds since the epoch.
+    pub fn start_of(&self, ms: i64) -> i64 {
+        let date = self.shifted(ms).date();
+        self.boundary_ms(date - Duration::days(i64::from(date.weekday().num_days_from_monday())))
+    }
+
     /// When the week containing `ms` ends, in milliseconds since the epoch.
     pub fn end_after(&self, ms: i64) -> i64 {
         let date = self.shifted(ms).date();
@@ -2274,6 +2280,9 @@ mod tests {
         assert_ne!(week.of(at_berlin(21, 5)), week.of(at_berlin(20, 12)));
         assert_eq!(week.end_after(at_berlin(21, 10)), at_berlin(28, 4));
         assert_eq!(week.end_after(at_berlin(21, 3)), at_berlin(21, 4));
+        assert_eq!(week.start_of(at_berlin(21, 10)), at_berlin(21, 4));
+        assert_eq!(week.start_of(at_berlin(27, 23)), at_berlin(21, 4));
+        assert_eq!(week.start_of(at_berlin(21, 3)), at_berlin(14, 4));
 
         let sunday = at_berlin(20, 20);
         let late_sunday = at_berlin(21, 8);

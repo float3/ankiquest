@@ -343,7 +343,7 @@ class RefreshTests(unittest.TestCase):
             "change": {"title": "\U0001f451 You took the crown", "body": "You passed Hill."},
         }
         self.addon.poll()
-        self.api.rank.assert_called_once_with(["hill", "cerro"])
+        self.api.rank.assert_called_once_with(["hill", "cerro"], None)
         self.assertEqual(
             "\U0001f451 You took the crown<br>You passed Hill.", self.addon.tooltip.call_args_list[0].args[0]
         )
