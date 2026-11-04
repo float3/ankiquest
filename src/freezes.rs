@@ -584,6 +584,7 @@ mod tests {
                     silent: true,
                     decks: None,
                     catalog: false,
+                    offsets: Vec::new(),
                 }),
             )
             .await
