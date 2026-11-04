@@ -151,7 +151,9 @@ impl Fixture {
         let store = self.app.store.lock().unwrap();
         let mut stmt = store
             .conn
-            .prepare("select link_token from wins where link_token is not null")
+            // Number links in the order they were made; the unique index would
+            // otherwise return them sorted by their random tokens.
+            .prepare("select link_token from wins where link_token is not null order by id")
             .unwrap();
         let tokens: Vec<String> = stmt
             .query_map([], |r| r.get(0))
