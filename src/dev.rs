@@ -540,6 +540,7 @@ pub fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::game::{Clock, ClockHistory, FreezePolicy};
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
@@ -699,8 +700,7 @@ mod tests {
         );
         let theirs = get(&app, "/auth/status", Some("cerro-token")).await.1;
         assert!(theirs.get("dev").is_none());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -719,8 +719,7 @@ mod tests {
                 .0
                 .is_success()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -756,8 +755,7 @@ mod tests {
         assert_eq!(names(Some(&[])), None);
         assert_eq!(names(Some(&[book, 999])), None);
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -816,8 +814,7 @@ mod tests {
         assert_eq!(listed[1]["sender"], "hill");
         let exported = crate::privacy::export(&app.store.lock().unwrap().conn, "hill").unwrap();
         assert_eq!(exported["announcements_sent"].as_array().unwrap().len(), 2);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -930,7 +927,6 @@ mod tests {
                 retained: 1
             }
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

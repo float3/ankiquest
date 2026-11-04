@@ -447,7 +447,6 @@ mod tests {
             .unwrap_err(),
             StatusCode::NOT_FOUND
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

@@ -737,6 +737,7 @@ pub(crate) async fn i18n_wasm() -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
 
     #[test]
     fn signing_in_again_counts_briefly_for_its_own_session_only() {
@@ -874,11 +875,6 @@ mod tests {
             .to_string()
     }
 
-    fn cleanup(app: Arc<App>, path: PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
     #[tokio::test]
     async fn health_is_public_on_a_private_site_and_names_no_one() {
         let (app, path) = fixture(true);
@@ -889,8 +885,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["ok"], true);
         assert_eq!(body.as_object().unwrap().len(), 2);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1858,7 +1853,6 @@ mod tests {
         assert!(Access::from_config(&config).is_err());
         std::fs::write(&password_file, "shared-master\n").unwrap();
         assert!(Access::from_config(&config).is_ok());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

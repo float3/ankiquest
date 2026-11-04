@@ -201,6 +201,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
 
@@ -252,8 +253,7 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), expected);
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -281,8 +281,7 @@ mod tests {
             app.store.lock().unwrap().nudges_enabled("hill").unwrap(),
             "automatic progress reminders remain on when friend nudges are disabled"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -316,8 +315,7 @@ mod tests {
                 .friend_nudge_muted("hill", "cerro")
                 .unwrap()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -369,8 +367,7 @@ mod tests {
             send(&mut store, "cerro", "Cerro", "hill", now + 86_400_000).unwrap(),
             StatusCode::OK
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -409,7 +406,6 @@ mod tests {
             send(&mut store, "cerro", "Cerro", "hill", now + 86_400_000).unwrap(),
             StatusCode::OK,
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

@@ -1243,6 +1243,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use axum::routing::post;
@@ -1338,11 +1339,6 @@ mod tests {
                 }
             }
         }))
-    }
-
-    fn cleanup(app: Arc<App>, path: std::path::PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     async fn send(

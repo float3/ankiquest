@@ -342,8 +342,7 @@ mod tests {
             shown(get("cerro", "cerro").await.unwrap().0),
             plain("backlog", 30, false)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -389,8 +388,7 @@ mod tests {
             .err(),
             Some(StatusCode::UNAUTHORIZED)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -440,8 +438,7 @@ mod tests {
             event(&store.conn, "hill", &profile).unwrap().is_none(),
             "a reported reach counts for its own day"
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -461,7 +458,6 @@ mod tests {
         };
         save(&store.conn, "hill", &restart, 20).unwrap();
         assert_eq!(since(20), 20);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

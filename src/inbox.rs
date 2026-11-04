@@ -408,7 +408,6 @@ mod tests {
                 StatusCode::BAD_REQUEST
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

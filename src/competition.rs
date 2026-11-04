@@ -1865,8 +1865,7 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert!(serde_json::from_value::<challenges::Create>(serde_json::json!({"title":"No injected creator","kind":"reviews","cooperative":true,"target":10,"duration_days":7,"recipients":["hill"],"creator":"hill"})).is_err());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     fn community_sync_fixture() -> (Arc<App>, PathBuf, PathBuf) {
@@ -1958,8 +1957,7 @@ mod tests {
         assert_eq!(archived["status"], "final");
         assert_eq!(archived["winners"], serde_json::json!(["hill"]));
         assert_eq!(archived["standings"][0]["reviews"], 100);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1996,8 +1994,7 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(board["winner_history"], history);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2060,8 +2057,7 @@ mod tests {
         assert_eq!(archived["winners"], serde_json::json!(["hill"]));
         assert_eq!(archived["standings"][0]["reviews"], 100);
         assert_eq!(archived["standings"].as_array().unwrap().len(), 3);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2095,7 +2091,6 @@ mod tests {
                 .unwrap(),
             0
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

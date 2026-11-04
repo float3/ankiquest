@@ -756,6 +756,7 @@ pub(crate) async fn change_password(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
@@ -831,8 +832,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -947,8 +947,7 @@ mod tests {
             "tokens survive a restart"
         );
         assert!(reloaded.token_owner(&token).is_none());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1021,8 +1020,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "and only to the account");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1064,8 +1062,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn sign_up(app: &Arc<App>, user: &str, device: &str) -> String {
@@ -1310,8 +1307,7 @@ mod tests {
         let reloaded = Directory::load(&app.store.lock().unwrap().conn).unwrap();
         assert!(reloaded.token_owner(&laptop).is_none());
         assert_eq!(reloaded.token_owner(&phone).as_deref(), Some("ana"));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1356,8 +1352,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "only that address waits");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1424,8 +1419,7 @@ mod tests {
             "a signed-out token's time goes with it"
         );
         assert!(saved(&laptop_hash).is_some());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1501,8 +1495,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1659,8 +1652,7 @@ mod tests {
             web_works(&app, "bea", &bo_web).await,
             "other players stay signed in"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1682,8 +1674,7 @@ mod tests {
         assert_eq!(status, StatusCode::NO_CONTENT);
         assert!(!web_works(&app, "ana", &phone_web).await);
         assert!(web_works(&app, "ana", &browser).await);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1716,7 +1707,6 @@ mod tests {
             StatusCode::OK,
             "the configured token keeps working"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

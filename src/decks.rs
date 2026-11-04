@@ -892,8 +892,7 @@ pub(crate) mod tests {
         let unchanged = store.incoming_settings("hill").unwrap();
         assert!(unchanged.enabled);
         assert_eq!(unchanged.muted_senders, ["cerro"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -940,8 +939,7 @@ pub(crate) mod tests {
         assert!(store.notifications("hill", NOW).unwrap().is_empty());
         let future = queue_kind(&mut store, "hill", "cerro", "completion", NOW + 1);
         assert_eq!(store.notifications("hill", NOW + 1).unwrap()[0].id, future);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -973,8 +971,7 @@ pub(crate) mod tests {
                 .is_empty()
         );
         assert_eq!(store.decks("cerro").unwrap()[0].recipients, ["hill"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1041,8 +1038,7 @@ pub(crate) mod tests {
             store.notifications("hill", NOW).unwrap().len(),
             unrelated.len() + 1
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1072,8 +1068,7 @@ pub(crate) mod tests {
         assert_eq!(activity.unread_count, 1);
         assert_eq!(activity.items.len(), 1);
         assert_eq!(activity.items[0].id, message);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1113,8 +1108,7 @@ pub(crate) mod tests {
             .set_incoming_settings("hill", &incoming(true, &[]))
             .unwrap();
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1185,8 +1179,7 @@ pub(crate) mod tests {
                 .len(),
             1
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1205,8 +1198,7 @@ pub(crate) mod tests {
             .set_incoming_settings("hill", &incoming(true, &[]))
             .unwrap();
         assert_eq!(store.notifications("hill", NOW).unwrap()[0].id, visible);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1231,8 +1223,7 @@ pub(crate) mod tests {
         assert!(!store.begin_push(muted, NOW).unwrap());
         assert!(!store.begin_push(global, NOW).unwrap());
         assert!(store.begin_push(visible, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1256,8 +1247,7 @@ pub(crate) mod tests {
         assert_eq!(settings.muted_senders, ["cerro"]);
         assert_eq!(store.notifications("hill", NOW).unwrap()[0].id, id);
         assert!(store.begin_push(id, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1310,8 +1300,7 @@ pub(crate) mod tests {
         assert_eq!(ready, ids[2..]);
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 4);
         assert_eq!(store.notifications("friend", NOW).unwrap().len(), 1);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1338,8 +1327,7 @@ pub(crate) mod tests {
         store.set_nudges("hill", false).unwrap();
         assert!(store.begin_push(another_friend, NOW).unwrap());
         assert!(!store.begin_push(another_automatic, NOW).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1361,8 +1349,7 @@ pub(crate) mod tests {
         let store = Store::open(&path).unwrap();
         assert!(store.nudges_enabled("hill").unwrap());
         assert!(!store.friend_nudges_receiving("hill").unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1400,8 +1387,7 @@ pub(crate) mod tests {
         store.set_nudges("hill", true).unwrap();
         assert_eq!(store.take_deck_deliveries(NOW).unwrap().len(), 1);
         assert_eq!(store.notifications("hill", NOW).unwrap().len(), 1);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     fn snapshot(id: &str, remaining: u64, reviewed_today: u64, day: i64) -> Snapshot {
@@ -1505,8 +1491,7 @@ pub(crate) mod tests {
         for recipient in ["hill", "friend"] {
             assert_completion_inbox(&store, recipient, &["Spanish::Verbs"]);
         }
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1535,8 +1520,7 @@ pub(crate) mod tests {
                 "upload order {order:?}"
             );
             assert_completion_inbox(&store, "hill", &[names[2]]);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1566,8 +1550,7 @@ pub(crate) mod tests {
         assert_completion_inbox(&store, "grandchild_only", &["Spanish::Verbs::Present"]);
         assert_completion_inbox(&store, "cerro", &[]);
         assert_completion_inbox(&store, "stranger", &[]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1587,8 +1570,7 @@ pub(crate) mod tests {
             [("Spanish".into(), 1), ("Spanish::Verbs".into(), 1)]
         );
         assert_completion_inbox(&store, "hill", &["Spanish", "Spanish::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1617,8 +1599,7 @@ pub(crate) mod tests {
                 "child enabled={enabled}, remaining={remaining}, reviewed={reviewed}, day={day}"
             );
             assert_completion_inbox(&store, "hill", &["Spanish"]);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1651,8 +1632,7 @@ pub(crate) mod tests {
                 vec!["Spanish", "Spanish::Verbs"]
             };
             assert_completion_inbox(&store, "hill", &expected);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1676,8 +1656,7 @@ pub(crate) mod tests {
             );
             assert_eq!(announcements.len(), 2, "deck names {names:?}");
             assert_completion_inbox(&store, "hill", &names);
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -1702,8 +1681,7 @@ pub(crate) mod tests {
             [("Spanish:".into(), 1), ("Spanish:::Verbs".into(), 1)]
         );
         assert_completion_inbox(&store, "hill", &["Spanish:", "Spanish:::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1727,8 +1705,7 @@ pub(crate) mod tests {
         assert!(record_completions(&mut store, &snapshots).is_empty());
         assert_completion_inbox(&store, "hill", &["Spanish::Verbs"]);
         assert_eq!(store.decks("cerro").unwrap().len(), 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1756,8 +1733,7 @@ pub(crate) mod tests {
                 .all(|deck| deck.enabled && deck.recipients == ["hill"])
         );
         assert_completion_inbox(&store, "hill", &["Spanish", "Spanish::Verbs"]);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1780,8 +1756,7 @@ pub(crate) mod tests {
                 .iter()
                 .all(|d| !d.enabled && d.recipients.is_empty())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1855,8 +1830,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1896,8 +1870,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1950,8 +1923,7 @@ pub(crate) mod tests {
         assert_eq!(inbox[0].day, DAY - 1);
         assert_eq!(inbox[1].day, DAY);
         assert_eq!(store.decks("cerro").unwrap()[0].name, "Spanish::Verbs");
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -2073,8 +2045,7 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>(),
             vec!["friend", "hill"]
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2116,8 +2087,7 @@ pub(crate) mod tests {
                 .nudges,
             "the setting belongs to one player"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -2225,7 +2195,6 @@ pub(crate) mod tests {
             .unwrap_err(),
             StatusCode::PAYLOAD_TOO_LARGE
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

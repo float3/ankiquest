@@ -262,6 +262,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
 
     use axum::body::Body;
     use axum::extract::ConnectInfo;
@@ -279,11 +280,6 @@ mod tests {
             "private_site": private_site,
             "users": {"cerro": {"token": "cerro-secret"}, "hill": {"token": "hill-secret"}}
         }))
-    }
-
-    fn cleanup(app: Arc<App>, path: PathBuf) {
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
     }
 
     fn encoded(image: RgbImage, format: ImageFormat) -> Vec<u8> {
@@ -611,8 +607,7 @@ mod tests {
         assert!(picture(&store, "cerro").unwrap().is_none());
         assert_eq!(save(&store, "cerro", Some(&image)).unwrap(), 4);
         assert_eq!(picture(&store, "cerro").unwrap(), Some((4, image)));
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) use std::sync::{Arc, Mutex, RwLock};
 pub(crate) use std::time::Duration;
 
-/// A store in a new temporary directory.
+/// A store in a new temporary directory; [`cleanup`] removes it.
 pub(crate) fn temporary_store() -> (Store, PathBuf) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let path = std::env::temp_dir().join(format!(
@@ -25,6 +25,12 @@ pub(crate) fn temporary_store() -> (Store, PathBuf) {
         NEXT.fetch_add(1, Ordering::Relaxed),
     ));
     (Store::open(&path).unwrap(), path)
+}
+
+/// Drops whatever holds the store, then removes its directory.
+pub(crate) fn cleanup<T>(owner: T, path: impl AsRef<Path>) {
+    drop(owner);
+    std::fs::remove_dir_all(path).unwrap();
 }
 
 /// An app over `store` with `config`: accounts loaded from the store, no players loaded.

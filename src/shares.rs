@@ -523,6 +523,7 @@ pub fn routes() -> Router<Arc<App>> {
 mod tests {
     use super::*;
     use crate::game::Event;
+    use crate::test_support::cleanup;
     use crate::test_support::{fixture, headers};
     use crate::wins::tests::moment;
 
@@ -827,8 +828,7 @@ mod tests {
             ask(json!({"win": id, "to": "link"}), "cerro").await.err(),
             Some(StatusCode::UNAUTHORIZED)
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

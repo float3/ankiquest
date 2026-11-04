@@ -786,6 +786,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::decks::tests::*;
+    use crate::test_support::cleanup;
     use crate::test_support::temporary_store;
     #[test]
     fn activity_categories_filter_before_pagination_and_keep_global_unread_count() {
@@ -1178,8 +1179,7 @@ mod tests {
                 .unwrap(),
             0
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1208,8 +1208,7 @@ mod tests {
             )
             .unwrap();
         assert!(!pushed, "selecting a message is not confirmation from ntfy");
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1257,8 +1256,7 @@ mod tests {
             friend,
             "a new tick favors recipients that have not had an attempt yet"
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1336,8 +1334,7 @@ mod tests {
                 .items
                 .is_empty()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1382,8 +1379,7 @@ mod tests {
                 .len(),
             2
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1670,8 +1666,7 @@ mod tests {
             !store.mark_seen("friend", "quest:1:0").unwrap(),
             "accounts without ntfy keep their silent event baseline"
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1709,8 +1704,7 @@ mod tests {
                 .is_none(),
             "nobody is recorded as the sender of a pre-reply notification"
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1769,7 +1763,6 @@ mod tests {
             serde_json::to_value(second).unwrap()["reply_to"],
             serde_json::json!({"title":"💬 Hill","body":"Good job!"})
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 }

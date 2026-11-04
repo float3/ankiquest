@@ -1268,6 +1268,7 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use crate::test_support::now_ms;
     use axum::body::{Body, to_bytes};
     use axum::extract::ConnectInfo;
@@ -1646,8 +1647,7 @@ mod tests {
                 StatusCode::NOT_FOUND
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1679,8 +1679,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(dimensions(&body(response).await), (1080, 1080));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1689,8 +1688,7 @@ mod tests {
         insert(&app, "cerro", "Daily goal reached!", Some("abc"));
         let html = String::from_utf8(body(get(&app, "/w/abc", &[]).await).await).unwrap();
         assert!(html.contains(r#"content="http://anki.example.test/w/abc.wide.png""#));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     /// Writes example cards to `target/card-examples` to look at.

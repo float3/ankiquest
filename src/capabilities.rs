@@ -38,6 +38,7 @@ pub(crate) fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -80,7 +81,6 @@ mod tests {
                 "{name} is snake_case"
             );
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

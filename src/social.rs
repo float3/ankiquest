@@ -725,6 +725,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
@@ -847,8 +848,7 @@ mod tests {
             ["alice", "bob"]
         );
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -994,8 +994,7 @@ mod tests {
             .query_row("select count(*) from groups", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0, "an empty group is deleted");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1064,8 +1063,7 @@ mod tests {
                 .friend_nudges_enabled("ana", "bobby")
                 .unwrap()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1164,8 +1162,7 @@ mod tests {
         );
         assert!(app.global(conn).unwrap().contains("ana"));
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1190,8 +1187,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn study(app: &Arc<App>, user: &str, token: &str) {
@@ -1350,8 +1346,7 @@ mod tests {
         assert_eq!(inbox["friends"][0]["user"], "bobby");
         let (_, records) = call(&app, "GET", "/api/records", &ana, serde_json::Value::Null).await;
         assert!(!records.to_string().contains("alice"));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

@@ -449,6 +449,7 @@ fn read_collection(path: &Path) -> Result<(Vec<Review>, Clock), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ankiquest-{name}-{}", std::process::id()));
@@ -641,8 +642,7 @@ mod tests {
             Some(4),
             "a known interval stays"
         );
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]

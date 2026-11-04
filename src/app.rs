@@ -424,8 +424,7 @@ mod tests {
         ));
         assert!(upload(&[], &[3]));
         assert!(!upload(&[], &[9]));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -449,7 +448,6 @@ mod tests {
             "new reviews replace the cached standing"
         );
         assert!(second.today.reviews > first.today.reviews);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

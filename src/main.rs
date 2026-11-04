@@ -355,8 +355,7 @@ mod tests {
         .unwrap();
         assert_eq!(get("cerro", "cerro").await.unwrap().0.companion, "ankilope");
         assert_eq!(get("hill", "hill").await.unwrap().0.companion, "none");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -461,8 +460,7 @@ mod tests {
         let mut empty_bearer = HeaderMap::new();
         empty_bearer.insert(header::AUTHORIZATION, "Bearer ".parse().unwrap());
         assert!(!authorized(&app, "cerro", &empty_bearer));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -525,8 +523,7 @@ mod tests {
             );
         }
         assert!(app.store.lock().unwrap().decks("cerro").unwrap().is_empty());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -606,8 +603,7 @@ mod tests {
                 .decks
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     /// A card forgotten four times that then earns a 30-day interval, ending a minute ago.
@@ -749,8 +745,7 @@ mod tests {
             "deleting the account takes labels and friends' told-markers"
         );
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -856,8 +851,7 @@ mod tests {
         assert_eq!(told.len(), 1, "telling twice does not repeat it: {inbox:?}");
         assert_eq!(told[0].title, "Hill conquered a hard card");
         assert_eq!(show("hill", at).await.unwrap().0.told, Some(true));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -917,8 +911,7 @@ mod tests {
             app.store.lock().unwrap().decks("cerro").unwrap().is_empty(),
             "the deck name is not kept with cerro's decks"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

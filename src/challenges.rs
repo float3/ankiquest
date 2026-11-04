@@ -1087,8 +1087,7 @@ mod tests {
             "one win per member, however often completion is reconciled"
         );
         assert!(store.notifications("outsider", 200).unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -1134,8 +1133,7 @@ mod tests {
                 .action_count,
             0
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     fn player(user: &str, times: &[i64]) -> Participant {
@@ -1558,8 +1556,7 @@ mod tests {
             1
         );
         assert!(serde_json::from_value::<weekly_challenges::Action>(serde_json::json!({"week_start":draft.week_start,"action":"invite","recipient":"someone-else"})).is_err());
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1682,7 +1679,6 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(cancelled.challenges[0].status, "cancelled");
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

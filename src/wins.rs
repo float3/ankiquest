@@ -684,8 +684,7 @@ pub(crate) mod tests {
                 .unwrap()
                 .is_none()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -743,8 +742,7 @@ pub(crate) mod tests {
             shared_words(&store.conn, &level).unwrap(),
             ("Level 3!".into(), "You reached level 3.".into())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -784,8 +782,7 @@ pub(crate) mod tests {
             assert!(update_sharing(&store.conn, "hill", bad).unwrap().is_none());
         }
         assert_eq!(sharing(&store.conn, "cerro").unwrap(), defaults);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -805,8 +802,7 @@ pub(crate) mod tests {
         let taken = take_automatic(&store.conn, "hill").unwrap();
         assert_eq!(taken.iter().map(|w| w.id).collect::<Vec<_>>(), [auto]);
         assert!(take_automatic(&store.conn, "hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -888,7 +884,6 @@ pub(crate) mod tests {
             page("hill", Some(1), None).await.unwrap()[0]["link"],
             Value::Null
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

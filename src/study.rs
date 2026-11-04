@@ -483,8 +483,7 @@ mod tests {
             send(sample_upload(0, false)).await.announced.is_empty(),
             "a deck is only announced once a day"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -553,8 +552,7 @@ mod tests {
                 .0
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -569,8 +567,7 @@ mod tests {
         assert!(status.contains("Lv "), "{status}");
         let again = upload_as(&app, "hill", plain_upload(reviews_at(start, 4))).await;
         assert_eq!(again.feedback.status, None);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -587,8 +584,7 @@ mod tests {
         .unwrap();
         let done = upload_as(&app, "cerro", sample_upload(0, false)).await;
         assert_eq!(done.feedback.headlines, vec!["📣 Spanish — told 1 friend"]);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -624,7 +620,6 @@ mod tests {
             .to_string();
         assert!(status.starts_with('+'), "{status}");
         assert_eq!(ask(Some(pending[2].id)).await.feedback.status, None);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

@@ -149,6 +149,7 @@ fn baseline(conn: &Connection) -> Result<(), Error> {
 mod tests {
     use super::*;
     use crate::store::Store;
+    use crate::test_support::cleanup;
 
     fn version(conn: &Connection) -> usize {
         conn.query_row("pragma user_version", [], |r| r.get::<_, i64>(0))
@@ -241,8 +242,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!((since, friend_nudges), (7, 0));
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 
     #[test]
@@ -299,7 +299,6 @@ mod tests {
         conn.execute("delete from accounts where user = 'hill'", [])
             .unwrap();
         assert_eq!(count(conn, "account_tokens"), 0);
-        drop(store);
-        std::fs::remove_dir_all(dir).unwrap();
+        cleanup(store, dir);
     }
 }

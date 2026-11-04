@@ -714,11 +714,6 @@ mod tests {
         tick(store, "hill", profile, clock, &Week::default(), now, None).unwrap();
     }
 
-    fn cleanup(store: Store, path: std::path::PathBuf) {
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
-    }
-
     #[test]
     fn reminders_are_individually_opt_in_and_settings_validate() {
         let (mut store, path) = store();
@@ -1568,7 +1563,6 @@ mod tests {
                 .0
                 .urgent_streak
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

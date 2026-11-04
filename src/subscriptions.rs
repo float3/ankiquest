@@ -399,8 +399,7 @@ mod tests {
         assert_eq!(decks[0].recipients, ["friend", "hill"]);
         assert_eq!(decks[1].recipients, ["hill"]);
         assert!(decks.iter().all(|deck| deck.enabled));
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -453,8 +452,7 @@ mod tests {
         assert_eq!(ids(&store), [other, message, reply]);
         let future = notice(&mut store, "hill", "cerro", "completion", now + 1);
         assert!(store.begin_push(future, now + 1).unwrap());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -517,8 +515,7 @@ mod tests {
                 .recipients,
             ["friend"]
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -548,8 +545,7 @@ mod tests {
                 deck.id == "unchanged"
             );
         }
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -614,8 +610,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tomorrow[0].recipients, 2);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -655,8 +650,7 @@ mod tests {
             )
             .unwrap();
         assert!(store.sharing_senders("hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -691,8 +685,7 @@ mod tests {
         );
         assert_eq!(decks[2].recipients, ["friend"]);
         assert!(!decks[2].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -723,8 +716,7 @@ mod tests {
                 .unwrap(),
             0
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -811,8 +803,7 @@ mod tests {
             app.store.lock().unwrap().decks("cerro").unwrap()[0].recipients,
             ["friend", "hill"]
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -927,8 +918,7 @@ mod tests {
                 assert!(!body.to_string().contains("deck_id"));
             }
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -1062,7 +1052,6 @@ mod tests {
                 .0;
         assert!(!settings.settings.enabled);
         assert_eq!(settings.settings.muted_senders, vec!["cerro"]);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

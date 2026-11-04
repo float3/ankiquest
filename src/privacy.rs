@@ -509,6 +509,7 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::cleanup;
     use axum::body::{Body, to_bytes};
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
@@ -625,8 +626,7 @@ mod tests {
             tables, known,
             "decide how deletion and export treat every new table"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -684,8 +684,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -816,8 +815,7 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "the old token stops working"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -834,8 +832,7 @@ mod tests {
             anonymous.contains("the person who runs this AnkiQuest server")
                 && !anonymous.contains("{{")
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -881,8 +878,7 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]

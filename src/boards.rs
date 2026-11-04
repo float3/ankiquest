@@ -405,8 +405,7 @@ mod tests {
             );
             assert!(window.holders.iter().all(|holder| holder.at > 0));
         }
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -446,8 +445,7 @@ mod tests {
         .0;
         assert!(first_look.change.is_none());
         assert_eq!(first_look.week, app.week.start_of(now_ms()));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn rank_of(
@@ -514,7 +512,6 @@ mod tests {
             .change
             .is_none()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

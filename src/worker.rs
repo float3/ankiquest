@@ -731,8 +731,7 @@ mod tests {
                 .all(|n| n.kind != "celebration" || n.win.is_some())
         );
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -769,8 +768,7 @@ mod tests {
                 .unwrap()
         };
         assert!(seen("cerro") > 0 && seen("friend") > 0);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     async fn health_of(app: &Arc<App>) -> (StatusCode, serde_json::Value) {
@@ -813,8 +811,7 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body, serde_json::json!({"ok": false, "worker_age_s": 0}));
         crate::app::fix_now_ms(None);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -826,8 +823,7 @@ mod tests {
             !was_pushed(&app, id),
             "an inbox-only delivery has not been pushed"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -904,8 +900,7 @@ mod tests {
             assert_eq!(inbox[0].id, id);
             assert_eq!(inbox[0].body, "Level 2 is 90 XP away.");
             assert!(!store.mark_seen("hill", "nudge:test").unwrap());
-            drop(store);
-            std::fs::remove_dir_all(path).unwrap();
+            cleanup(store, path);
         }
     }
 
@@ -923,8 +918,7 @@ mod tests {
             !was_pushed(&app, id),
             "an HTTP error must leave the message retryable"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -944,8 +938,7 @@ mod tests {
             "ntfy needs high priority to request vibration and a pop-up"
         );
         assert!(was_pushed(&app, id));
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -992,8 +985,7 @@ mod tests {
                 .body,
             "Good job!"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1044,8 +1036,7 @@ mod tests {
             2
         );
         drop(store);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1085,8 +1076,7 @@ mod tests {
                 .body
                 .contains("has finished")
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1104,8 +1094,7 @@ mod tests {
         assert!(server.join().unwrap().starts_with("POST /friend-topic "));
         assert!(was_pushed(&app, id));
         assert_eq!(app.store.lock().unwrap().conn.query_row("select sum(push_attempts + pushed) from notifications where recipient = 'hill'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1149,8 +1138,7 @@ mod tests {
             "skipped messages must not be leased or marked delivered"
         );
         drop(stalled);
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1218,8 +1206,7 @@ mod tests {
                 .unwrap(),
             count
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[test]
@@ -1284,7 +1271,6 @@ mod tests {
             None,
             "the friend is behind, and ana is not in the original community"
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 }

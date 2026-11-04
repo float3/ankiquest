@@ -268,8 +268,7 @@ mod tests {
         drop(store);
         let store = crate::store::Store::open(&path).unwrap();
         assert!(store.freeze_policy("cerro").unwrap().legacy_until.is_none());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -318,8 +317,7 @@ mod tests {
                 .legacy_until
                 .is_none()
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -353,8 +351,7 @@ mod tests {
                 .unwrap()
                 .enabled_at(crate::app::now_ms())
         );
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -370,8 +367,7 @@ mod tests {
         let store = crate::store::Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap(), before);
         assert!(store.freeze_preferences("hill").unwrap().is_empty());
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -392,8 +388,7 @@ mod tests {
         drop(store);
         let store = crate::store::Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap(), before);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -405,8 +400,7 @@ mod tests {
         let changes = store.freeze_preferences("cerro").unwrap();
         assert_eq!(changes.len(), 3);
         assert!(changes[2].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -439,8 +433,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        drop(app);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(app, path);
     }
 
     #[tokio::test]
@@ -471,8 +464,7 @@ mod tests {
         let store = Store::open(&path).unwrap();
         assert_eq!(store.freeze_preferences("cerro").unwrap().len(), 1);
         assert!(!store.freeze_preferences("cerro").unwrap()[0].enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[tokio::test]
@@ -519,8 +511,7 @@ mod tests {
             "repeated saves cannot change the activation time"
         );
         assert!(history.last().unwrap().enabled);
-        drop(store);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(store, path);
     }
 
     #[test]
@@ -635,7 +626,6 @@ mod tests {
         assert_eq!(reloaded.profile("cerro").unwrap().freezes, 0);
         assert_eq!(reloaded.profile("cerro").unwrap().stored_freezes, 1);
         assert!(!reloaded.profile("cerro").unwrap().freezes_enabled);
-        drop(reloaded);
-        std::fs::remove_dir_all(path).unwrap();
+        cleanup(reloaded, path);
     }
 }
