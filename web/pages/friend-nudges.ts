@@ -50,7 +50,7 @@ export function friendNudges(account: NudgeAccount): void {
       const payload = await account.request<NudgeSettings>(`/api/friend-nudges/${encodeURIComponent(captured.user)}`, undefined, captured);
       if (current(captured, epoch)) render(payload);
     } catch (error) {
-      if (current(captured, epoch)) dialog.innerHTML = aqHtml`<p role="alert">${esc(statusOf(error) === 404 ? aqText("Update the server to use friend nudges.") : messageOf(error))}</p><button type="button" data-nudge-close>Close</button>`;
+      if (current(captured, epoch)) dialog.innerHTML = aqHtml`<p role="alert">${esc(messageOf(error))}</p><button type="button" data-nudge-close>Close</button>`;
     }
   }
   async function change(control: HTMLInputElement | HTMLButtonElement, mode: Change) {

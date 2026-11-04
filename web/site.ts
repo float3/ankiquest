@@ -64,7 +64,7 @@ import {ownerHeaders, send, type SendOptions} from "./http";
   const invalidateStatus = () => { statusPromise = undefined; statusEpoch++; };
   async function logoutSession() {
     const response = await sessionRequest("/auth/logout");
-    if (!response.ok && response.status !== 404) {
+    if (!response.ok) {
       await AnkiQuestI18n.ready;
       throw new Error(aqText("Could not disconnect. Check your connection and try again."));
     }
@@ -97,7 +97,6 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       if (nativeKey(nativeAccount()) === key) return;
     }
   }
-  // A token is kept only for older servers which do not issue an owner session.
   async function connectMember(user: string, token: string, current: () => boolean = () => true): Promise<OwnerSession> {
     const started = connectionEpoch;
     const owner = await fetch("/api/community/reminders/" + encodeURIComponent(user), {cache: "no-store", headers: {Authorization: "Bearer " + token}});
@@ -115,10 +114,9 @@ import {ownerHeaders, send, type SendOptions} from "./http";
       }
       const response = await sessionRequest("/auth/session", token);
       if (!active()) {
-        if (response.status !== 404 && epoch === connectionEpoch) await reconcileNativeAccount(epoch);
+        if (epoch === connectionEpoch) await reconcileNativeAccount(epoch);
         throw await changedConnection();
       }
-      if (response.status === 404) return {user, token};
       if (!response.ok) {
         await AnkiQuestI18n.ready;
         throw new Error(aqText("Could not connect your account. Check the token and try again."));

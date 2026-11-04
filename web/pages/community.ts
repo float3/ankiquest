@@ -24,10 +24,10 @@ interface Recipient { user:string; display:string; }
 interface ChallengeMember { user:string; display:string; status:string; progress:number; }
 interface Challenge { id:number; title:string; kind:string; cooperative:boolean; creator:string; start_at:number; end_at:number; target:number; members:ChallengeMember[]; progress:number; status:string; weekly:boolean; started:boolean; start_when_ready:boolean; }
 interface WeeklySuggestion { week_start:number; expires_at:number; friend:Recipient; target:number; duration_days:number; dismissed:boolean; challenge_id:number|null; }
-interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion?:WeeklySuggestion|null; }
-/** An activity item (src/decks.rs `Notification`); `legacy` pages come from the older /api/notifications. */
+interface ChallengeList { challenges:Challenge[]; recipients:Recipient[]; weekly_suggestion:WeeklySuggestion|null; }
+/** An activity item (src/decks.rs `Notification`). */
 interface Notice { id:number; title:string; body:string; created_at:number; sender:string; replied:boolean; kind:string; read_at?:number|null; challenge_id?:number|null; route?:string|null; action_required?:boolean; reply_to?:{title:string; body:string}; win?:number|null; image?:string|null; reacted?:boolean; }
-interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; legacy?:boolean; }
+interface ActivityPage { items:Notice[]; attention?:Notice[]; unread_count?:number; action_count?:number; latest_id?:number|null; next_before?:number|null; }
 interface SentNotice extends Notice { recipient:string; }
 interface SentPage { items:SentNotice[]; next_before?:number|null; }
 interface NewChallenge { title:string; kind:FormDataEntryValue|null; cooperative:boolean; target:number; duration_days:number; recipients:FormDataEntryValue[]; start_when_ready:boolean; request_id?:string|null; }
@@ -39,7 +39,6 @@ function formField<T extends Element>(form:HTMLFormElement,name:string,type:abst
 const number = (value:unknown) => Number(value || 0).toLocaleString(AnkiQuestI18n.language);
 const amount = (value:unknown) => Math.max(0, Number(value) || 0);
 const errorMessage = (error:unknown) => error instanceof Error ? error.message : String(error);
-const errorStatus = (error:unknown) => error instanceof Error && "status" in error ? error.status : undefined;
 // Set with the first render, once translations are ready (see the end of this file).
 let translated = false;
 const now = new Date();
@@ -267,7 +266,7 @@ function renderChallenges(banner:string) {
 }
 function renderFriendAchievements() {
   const items = (state.friendAchievements?.items || []).filter(item => (item.kind === "completion" || item.kind === "conquest") && item.sender && item.sender !== state.session!.user);
-  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and hard cards they learned at last.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div>${item.kind === "conquest" ? aqHtml`<span class="chip gold">Card conquered</span>` : aqHtml`<span class="chip green">Deck complete</span>`}</div><p>${esc(item.body)}</p>${item.replied ? aqHtml`<p class="settings-hint">Congratulations sent</p>` : aqHtml`<button type="button" data-congratulate>Congratulate</button>`}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml`<p role="status">Loading achievements…</p>` : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${state.friendAchievements?.legacy ? aqText("The last 7 days") : aqText`The last ${state.activityDays} days`}. Only achievements shared with your account appear here.</p></section>`;
+  return aqHtml`<section class="challenge-group" aria-label="Friends' achievements"><div class="card-head"><div><h2>Friends' achievements</h2><p>Decks your friends finished and hard cards they learned at last.</p></div><button type="button" data-achievements-refresh ${state.achievementLoading ? "disabled" : ""}>Refresh achievements</button></div>${state.achievementError ? aqHtml`<p class="notice error" role="alert">${esc(state.achievementError)}</p>` : ""}<div class="stack">${items.length ? items.map(item => aqHtml`<article class="card friend-achievement" data-reply-form="${Number(item.id)}"><div class="list-row">${avatar(item.sender,name(item.sender))}<div class="row-text"><strong>${esc(name(item.sender))}</strong><small><time datetime="${new Date(Number(item.created_at)*1000).toISOString()}">${esc(new Date(Number(item.created_at)*1000).toLocaleString(AnkiQuestI18n.language,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}))}</time></small></div>${item.kind === "conquest" ? aqHtml`<span class="chip gold">Card conquered</span>` : aqHtml`<span class="chip green">Deck complete</span>`}</div><p>${esc(item.body)}</p>${item.replied ? aqHtml`<p class="settings-hint">Congratulations sent</p>` : aqHtml`<button type="button" data-congratulate>Congratulate</button>`}<p class="status" role="status"></p></article>`).join("") : state.achievementLoading ? aqHtml`<p role="status">Loading achievements…</p>` : empty(aqText("Your next shared celebration is ahead."),aqText("Friends can share daily deck completions with you in their deck notification settings."))}</div>${state.friendAchievements?.next_before ? aqHtml`<button type="button" data-achievements-more ${state.achievementLoading ? "disabled" : ""}>Load earlier achievements</button>` : ""}<p class="settings-hint">${aqText`The last ${state.activityDays} days`}. Only achievements shared with your account appear here.</p></section>`;
 }
 function renderChallenge(challenge:Challenge, detail = false) {
   const me = challenge.members.find(member => member.user === state.session!.user), ended = challengeEnded(challenge);
@@ -307,9 +306,9 @@ function renderInbox(payload:ActivityPage|null, items:Notice[]) {
   const attention=Array.isArray(payload?.attention)?payload.attention:[];
   const showAttention=state.activityCategory==="all"&&attention.length>0;
   const visible=showAttention?items.filter(item=>!attention.some(important=>important.id===item.id)):items;
-  const categories=payload?.legacy?"":aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories().map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload?.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
+  const categories=aqHtml`<div class="activity-filters"><div class="activity-categories" role="group" aria-label="Filter activity by type">${activityCategories().map(([key,label])=>aqHtml`<button type="button" data-activity-category="${key}" aria-pressed="${state.activityCategory===key}" ${state.activityLoading?"disabled":""}>${esc(key==="needs_action"&&Number(payload?.action_count)>0?`${label} · ${number(payload?.action_count)}`:label)}</button>`).join("")}</div><button type="button" class="activity-unread-filter" data-activity-unread aria-pressed="${state.activityUnreadOnly}" ${state.activityLoading?"disabled":""}>${aqText("Unread only")}</button></div>`;
   const emptyText=state.activityUnreadOnly?aqText("No unread notifications here."):state.activityCategory==="needs_action"?aqText("No invitations need a response."):state.activityCategory!=="all"?aqText("Nothing in this category yet."):showAttention?aqText("Everything else is up to date."):aqText("You're all caught up.");
-  return aqHtml`${renderAttention(payload)}${categories}${payload?.legacy ? aqHtml`<p class="settings-hint">This server shows the last 7 days. Update the server for saved read status and longer history.</p>` : aqHtml`<label class="activity-window">Show <select id="activity-window"><option value="30" ` + (state.activityDays === 30 ? "selected" : "") + aqHtml`>Last 30 days</option><option value="90" ` + (state.activityDays === 90 ? "selected" : "") + aqHtml`>Last 90 days</option></select></label>`}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml`<p role="status">Loading…</p>` : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
+  return aqHtml`${renderAttention(payload)}${categories}${aqHtml`<label class="activity-window">Show <select id="activity-window"><option value="30" ` + (state.activityDays === 30 ? "selected" : "") + aqHtml`>Last 30 days</option><option value="90" ` + (state.activityDays === 90 ? "selected" : "") + aqHtml`>Last 90 days</option></select></label>`}<div class="stack activity-list">${visible.length ? renderActivityDays(visible) : state.activityLoading ? aqHtml`<p role="status">Loading…</p>` : empty(emptyText,aqText("New activity will appear here."))}</div>${payload?.next_before ? aqHtml`<button type="button" class="load-more" data-activity-more ${state.activityLoading ? "disabled" : ""}>${state.activityLoading ? aqText("Loading…") : aqText("Load earlier activity")}</button>` : ""}`;
 }
 function renderAttention(payload:ActivityPage|null) {
   if(!payload?.action_count || state.activityCategory==="needs_action")return "";
@@ -324,7 +323,7 @@ function renderActivityDays(items:Notice[]) {
 }
 function renderMailbox(payload:ActivityPage|null, unread:number) {
   const box = state.activityBox;
-  return aqHtml`<div class="actions activity-box"><div class="segmented" role="group" aria-label="Activity mailbox"><button type="button" data-activity-box="inbox" aria-pressed="${box === "inbox"}">Inbox</button><button type="button" data-activity-box="sent" aria-pressed="${box === "sent"}">Sent</button></div>${box === "inbox" && unread && !payload?.legacy ? aqHtml`<button type="button" data-activity-read-all>Mark all as read</button>` : ""}</div>`;
+  return aqHtml`<div class="actions activity-box"><div class="segmented" role="group" aria-label="Activity mailbox"><button type="button" data-activity-box="inbox" aria-pressed="${box === "inbox"}">Inbox</button><button type="button" data-activity-box="sent" aria-pressed="${box === "sent"}">Sent</button></div>${box === "inbox" && unread ? aqHtml`<button type="button" data-activity-read-all>Mark all as read</button>` : ""}</div>`;
 }
 function renderSent() {
   if (state.sentLoading && !state.sent) return aqHtml`<p role="status" class="loading-copy">Loading…</p>`;
@@ -361,7 +360,7 @@ function renderCheer(item:Notice) {
 }
 function renderActivityItem(item:Notice) {
   const id = Number(item.id), challenge = Number(item.challenge_id), target = Number.isSafeInteger(challenge) && challenge > 0 ? challenge : /^\/community#challenge-([1-9]\d*)$/.exec(item.route || "")?.[1];
-  const unread = !state.activity?.legacy && !item.read_at;
+  const unread = !item.read_at;
   const answerable = !!item.sender && !item.replied && !target;
   const quickReply = item.kind === "completion" || item.kind === "conquest" || item.kind === "share" ? aqText("Good job!") : item.kind === "reply" || item.kind === "reaction" ? aqText("Thanks!") : item.kind === "nudge" ? aqText("On it!") : "";
   const reaction = item.kind === "reaction", heading = reaction && item.body ? `${item.title}: ${item.body}` : item.title;
@@ -445,13 +444,7 @@ async function loadFriendAchievements(more=false) {
   if(state.challenges)renderChallenges(accountBanner());
   try {
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
-    let payload:ActivityPage;
-    try { payload=await ownerRequest<ActivityPage>(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session); }
-    catch(error) {
-      if(errorStatus(error)===400)payload=await ownerRequest<ActivityPage>(base+(before?"&before="+encodeURIComponent(before):""),undefined,session);
-      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);payload={items:items.slice().reverse(),next_before:null,legacy:true};}
-      else throw error;
-    }
+    const payload=await ownerRequest<ActivityPage>(`${base}&category=deck_completions${before?"&before="+encodeURIComponent(before):""}`,undefined,session);
     if(state.session!==session||epoch!==state.achievementEpoch)return;
     const items=(Array.isArray(payload.items)?payload.items:[]).filter(item=>item.kind==="completion"||item.kind==="conquest");
     state.friendAchievements={...payload,items:before?[...(state.friendAchievements?.items||[]),...items.filter(item=>!state.friendAchievements!.items.some(old=>old.id===item.id))]:items};
@@ -463,15 +456,9 @@ async function loadActivity(more=false) {
   const epoch=++state.activityEpoch,before=more?state.activity?.next_before:null;
   state.activityLoading=true;state.activityError="";renderActivity(accountBanner());
   try {
-    let payload:ActivityPage;
     const base=`/api/activity/${encodeURIComponent(session.user)}?days=${state.activityDays}&limit=100`;
     const filters=`${state.activityCategory!=="all"?"&category="+encodeURIComponent(state.activityCategory):""}${state.activityUnreadOnly?"&unread_only=true":""}`;
-    try { payload=await ownerRequest<ActivityPage>(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session); }
-    catch(error) {
-      if(errorStatus(error)===400&&filters){state.activityCategory="all";state.activityUnreadOnly=false;payload=await ownerRequest<ActivityPage>(base,undefined,session);}
-      else if(errorStatus(error)===404){const items=await ownerRequest<Notice[]>(`/api/notifications/${encodeURIComponent(session.user)}`,undefined,session);state.activityCategory="all";state.activityUnreadOnly=false;payload={items:items.slice().reverse(),unread_count:0,next_before:null,legacy:true};}
-      else throw error;
-    }
+    const payload=await ownerRequest<ActivityPage>(base+filters+(before?"&before="+encodeURIComponent(before):""),undefined,session);
     if(state.session!==session||epoch!==state.activityEpoch)return;
     const items=Array.isArray(payload.items)?payload.items:[];
     state.activity={...payload,items:before?[...(state.activity?.items||[]),...items.filter(item=>!state.activity!.items.some(old=>old.id===item.id))]:items};
@@ -487,12 +474,12 @@ async function loadSent(more=false) {
     if(state.session!==session||epoch!==state.sentEpoch)return;
     const items=Array.isArray(page.items)?page.items:[];
     state.sent={...page,items:before?[...(state.sent?.items||[]),...items]:items};
-  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=errorStatus(error)===404?aqText("This server does not keep sent messages yet."):error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):errorMessage(error); }
+  } catch(error) { if(state.session===session&&epoch===state.sentEpoch)state.sentError=error instanceof TypeError?aqText("Could not load sent messages. Check your connection."):errorMessage(error); }
   finally { if(state.session===session&&epoch===state.sentEpoch){state.sentLoading=false;renderActivity(accountBanner());} }
 }
 async function markAllRead(button:HTMLButtonElement) {
   const session=state.session,through=Number(state.activity?.latest_id)||Math.max(0,...(state.activity?.items||[]).map(item=>Number(item.id)).filter(Number.isSafeInteger));
-  if(!session||!through||state.activity?.legacy)return;
+  if(!session||!through)return;
   button.disabled=true;
   try {
     await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{through},session);
@@ -502,7 +489,7 @@ async function markAllRead(button:HTMLButtonElement) {
   } catch(error) { if(state.session!==session)return;button.disabled=false;const status=$("activity-action-status");if(status){status.className="status error";status.textContent=aqText("Could not mark everything read.")+" "+errorMessage(error);} }
 }
 async function markRead(id:string|number|undefined,rerender=true) {
-  const session=state.session;if(!session||state.activity?.legacy)return;
+  const session=state.session;if(!session)return;
   await ownerRequest(`/api/activity/${encodeURIComponent(session.user)}/read`,{ids:[Number(id)]},session);
   if(state.session!==session)return;
   const matches=[...(state.activity?.items||[]),...(state.activity?.attention||[]),...(state.friendAchievements?.items||[])].filter(item=>Number(item.id)===Number(id));

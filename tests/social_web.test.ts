@@ -10,7 +10,7 @@ const people = {alice: {user: 'alice', display: 'Alice'}, bob: {user: 'bob', dis
 
 function state() {
   return {
-    social: {groups: [{id: 3, name: 'Spanish club', owner: true, invite: 'abc123', members: [people.alice, people.bob]}] as Group[], friends: [] as Person[], incoming: [people.cleo], outgoing: [] as Person[], public: false, muted: undefined as Person[] | undefined},
+    social: {groups: [{id: 3, name: 'Spanish club', owner: true, invite: 'abc123', members: [people.alice, people.bob]}] as Group[], friends: [] as Person[], incoming: [people.cleo], outgoing: [] as Person[], public: false, muted: [] as Person[]},
     writes: [] as Record<string, unknown>[],
     boards: [] as string[],
   };
@@ -65,7 +65,7 @@ const noOverflow = async (page: Page) => {
 test('muting a friend lists them under Muted until unmuted', async () => {
   const browser = await chromium.launch({headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
   try {
-    const f = await fixture(browser, 320, data => { data.social.friends = [people.bob]; data.social.muted = []; });
+    const f = await fixture(browser, 320, data => { data.social.friends = [people.bob]; });
     await f.page.goto('http://ankiquest.test/friends');
     await f.page.getByRole('heading', {name: 'Groups', exact: true}).waitFor();
     assert.equal(await f.page.locator('#muted-people').count(), 0);

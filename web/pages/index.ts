@@ -16,16 +16,15 @@ interface Standing extends Person {
   level: number;
   xp_total: number;
   week_xp: number;
-  /** XP in the requested period; missing from older servers. */
-  xp?: number;
+  /** XP in the requested period. */
+  xp: number;
   period: string;
   periods: Record<Period, number>;
   streak: number;
   streak_state: string;
   day_ends_at: number;
   today_reviews: number;
-  /** Missing from older servers. */
-  today_minutes?: number;
+  today_minutes: number;
   /** Review minutes today needs for the streak; 0 or missing when any review counts. */
   streak_minutes?: number;
 }
@@ -62,8 +61,7 @@ interface Profile extends Person {
   quests: Quest[];
   achievements: Achievement[];
   heatmap: HeatCell[];
-  /** Missing from older servers. */
-  conquests?: Conquest[];
+  conquests: Conquest[];
   last_review_id: number;
 }
 
@@ -194,7 +192,7 @@ function pageHero(title: string, description: string, note = "") {
 }
 
 function leaderboardKpis(rows: Standing[], period: Period) {
-  const total = rows.reduce((sum, row) => sum + (row.xp ?? row.week_xp ?? 0), 0);
+  const total = rows.reduce((sum, row) => sum + row.xp, 0);
   const reviews = rows.reduce((sum, row) => sum + row.today_reviews, 0);
   const bestStreak = Math.max(0, ...rows.map(row => row.streak));
   return aqHtml`<div class="kpis leaderboard-kpis">` +
@@ -270,18 +268,17 @@ function streakBadge(row: Standing) {
   const needed = row.streak_minutes ?? 0;
   const counted = needed > 0 ? row.streak_state === "studied" : row.today_reviews > 0;
   const state = expired || !known ? "unknown" : counted ? "studied" : row.streak_state === "protected" ? "protected" : "pending";
-  const progress = aqText`${num(Math.min(row.today_minutes ?? 0, needed))} of ${num(needed)} minutes today`;
+  const progress = aqText`${num(Math.min(row.today_minutes, needed))} of ${num(needed)} minutes today`;
   const status = state === "studied" ? aqText("Studied today") : needed > 0 && state !== "unknown" ? progress : state === "protected" ? aqText("Streak protected · Not studied yet") : state === "pending" ? aqText("Not studied yet") : aqText("Refresh to see today's study status");
   const label = aqText`${num(row.streak)} day streak · ${status}`;
   return aqHtml`<span class="streak" data-streak-state="${state}" role="img" tabindex="0" aria-label="${esc(label)}" title="${esc(label)}">${streakIcon(state)}${num(row.streak)}</span>`;
 }
 function board(rows: Standing[], me: string) {
   if (!rows.length) return aqHtml`<p class="empty">Nobody has uploaded reviews yet.</p>`;
-  if (rows.every(row => (row.xp ?? row.week_xp) === 0)) return aqHtml`<p class="empty">No XP in this period yet.</p>`;
-  const xpOf = (row: Standing) => row.xp ?? row.week_xp;
-  const lead = Math.max(1, xpOf(rows[0]));
+  if (rows.every(row => row.xp === 0)) return aqHtml`<p class="empty">No XP in this period yet.</p>`;
+  const lead = Math.max(1, rows[0].xp);
   return aqHtml`<ol class="board">${rows.map((r, i) => aqHtml`
-    <li class="${[r.user === me && "me", i === 0 && xpOf(r) > 0 && "lead"].filter(Boolean).join(" ")}">
+    <li class="${[r.user === me && "me", i === 0 && r.xp > 0 && "lead"].filter(Boolean).join(" ")}">
       <span class="rank">${["👑", "🥈", "🥉"][i] ?? i + 1}</span>
       <div class="player-cell">${AnkiQuestSite.avatar(r.user, r.display)}<div class="player-progress">
         <div class="line">
@@ -289,9 +286,9 @@ function board(rows: Standing[], me: string) {
           ${streakBadge(r)}
           <span class="lvl">Lv ${r.level}</span>
         </div>
-        <div class="bar"><i style="width:${pct(xpOf(r), lead)}%"></i></div>
+        <div class="bar"><i style="width:${pct(r.xp, lead)}%"></i></div>
       </div>
-      </div><div class="xp"><b>${num(xpOf(r))}</b><span>${num(r.today_reviews)} today</span></div>
+      </div><div class="xp"><b>${num(r.xp)}</b><span>${num(r.today_reviews)} today</span></div>
     </li>`).join("")}
   </ol><p class="streak-legend">${[["studied",aqText("Studied today")],["pending",aqText("Not studied yet")],["protected",aqText("Streak protected")]].map(([state,label]) => aqHtml`<span data-streak-state="${state}">${streakIcon(state)}${label}</span>`).join("")}</p>`;
 }
@@ -419,7 +416,7 @@ function streakFreezes(player: Profile, owner: boolean) {
 }
 
 function conquests(p: Profile) {
-  const items = p.conquests || [];
+  const items = p.conquests;
   if (!items.length) return "";
   const total = p.lifetime.conquered ?? items.length;
   return aqHtml`<section class="card wide" id="conquests"><div class="card-head"><div><h2>Hard-won cards</h2><p>${total === 1 ? aqText("One card that kept slipping away is learned at last.") : aqText`${num(total)} cards that kept slipping away are learned at last.`}</p></div><span class="symbol" aria-hidden="true">🏆</span></div><div class="ach">${items.map(c => aqHtml`

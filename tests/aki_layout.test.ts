@@ -34,7 +34,7 @@ async function main() {
       await page.evaluate(()=>document.dispatchEvent(new Event('DOMContentLoaded')));
       await page.evaluate(()=>AnkiQuestSite.status());
       await page.evaluate(() => {
-        const p={user:'alice',display:'Alice',level:4,streak:3,streak_state:'studied',day_ends_at:Date.now()+86400000,today:{reviews:20,xp:200},lifetime:{reviews:180,hours:2,best_streak:3,best_combo:10,days_active:9},achievements:[],quests:[{title:'A little practice',progress:6,target:10,reward:20,done:false}],heatmap:[],xp_total:2400,xp_into_level:120,xp_for_next:250};
+        const p={user:'alice',display:'Alice',level:4,streak:3,streak_state:'studied',day_ends_at:Date.now()+86400000,today:{reviews:20,xp:200},lifetime:{reviews:180,hours:2,best_streak:3,best_combo:10,days_active:9},achievements:[],quests:[{title:'A little practice',progress:6,target:10,reward:20,done:false}],heatmap:[],conquests:[],xp_total:2400,xp_into_level:120,xp_for_next:250};
         app.innerHTML=view(p,[{...p,xp:2000,week_xp:2000,today_reviews:20}],true);
         AnkiQuestAki.decorate();AnkiQuestAki.decorate();
         document.querySelectorAll<HTMLImageElement>('.aki-art').forEach(img=>img.loading='eager');

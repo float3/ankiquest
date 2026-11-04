@@ -10,14 +10,14 @@ interface Request {path:string;auth:string|undefined;body:{action?:string;start_
 let browser: Browser;
 before(async()=>{browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHANNEL?{channel:process.env.PLAYWRIGHT_CHANNEL}:process.platform==='win32'?{channel:'msedge'}:{})});});
 after(async()=>browser?.close());
-async function fixture(t: TestContext,{language='en-US',legacy=false}={}) {
+async function fixture(t: TestContext,{language='en-US',suggested=true}={}) {
   const context=await browser.newContext({viewport:{width:390,height:844},locale:language});t.after(()=>context.close());
   const page=await context.newPage();page.setDefaultTimeout(10000);
   const errors: string[]=[],requests: Request[]=[];page.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
   const now=Date.now(),suggestion={week_start:now-1000,expires_at:now+86400000,friend:{user:'hill',display:'Hill::{0}'},target:3,duration_days:7,dismissed:false,challenge_id:null as number|null};
   let challenges: Goal[]=[];
   const control: {hold:Promise<void>|null;fail:boolean}={hold:null,fail:false};
-  const payload=()=>({challenges,recipients:[suggestion.friend],...(legacy?{}:{weekly_suggestion:suggestion})});
+  const payload=()=>({challenges,recipients:[suggestion.friend],weekly_suggestion:suggested?suggestion:null});
   await page.addInitScript(()=>{window.ankiquestSession={user:'cerro',token:'saved-token'};});
   await page.route(origin+'/**',async route=>{
     const req=route.request(),url=new URL(req.url()),p=url.pathname;
@@ -141,8 +141,8 @@ test('double clicks do not duplicate requests and failed choices can be retried'
   await page.locator('[data-weekly-action="invite"]').click();await page.getByText('Waiting for your friend',{exact:true}).waitFor();
   assert.equal(requests.length,2);
 });
-test('older servers still show the custom goal creator',async t=>{
-  const {page}=await fixture(t,{legacy:true});
+test('without a weekly suggestion the custom goal creator still shows',async t=>{
+  const {page}=await fixture(t,{suggested:false});
   assert.equal(await page.locator('.weekly-suggestion').count(),0);
   await page.locator('[data-create-challenge]').click();await page.locator('#challenge-dialog[open]').waitFor();
 });

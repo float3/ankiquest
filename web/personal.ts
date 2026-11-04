@@ -37,7 +37,7 @@ import {failure, refused, request as call, send} from "./http";
   interface SignIn { account: boolean; password: boolean; providers: {provider: string; name: string; linked: boolean}[] }
   interface Device { id: string; kind: "app" | "web"; name: string | null; created_at: number; last_used_at?: number | null; current: boolean }
   interface Group { id: number; name: string; owner: boolean; invite: string | null; members: Person[] }
-  interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean; muted?: Person[] }
+  interface Social { groups: Group[]; friends: Person[]; incoming: Person[]; outgoing: Person[]; public: boolean; muted: Person[] }
   interface Invite { name: string; members: number }
   type SettingName = keyof Settings;
   interface State {
@@ -451,9 +451,8 @@ import {failure, refused, request as call, send} from "./http";
   const members = (count: number) => count === 1 ? tr("1 member") : tr`${count} members`;
   function renderFriends() {
     const social = state.social!, me = state.session!.user;
-    const muted = new Set((social.muted ?? []).map(person => person.user));
-    // Older servers have no mute; they send no `muted` list.
-    const mute = (person: Person) => !social.muted || person.user === me ? ""
+    const muted = new Set(social.muted.map(person => person.user));
+    const mute = (person: Person) => person.user === me ? ""
       : muted.has(person.user) ? action(tr("Unmute"),{action:"unmute",user:person.user})
       : action(tr("Mute"),{action:"mute",user:person.user},`data-confirm="${esc(tr`Mute ${person.display}? You won't hear from them. They are not told.`)}"`);
     const visibility = html`<article class="card"><div class="card-head"><div><h2>${tr("Your profile")}</h2><p>${social.public ? tr("Anyone can see your profile.") : tr("Only your friends and groups can see your profile.")}</p></div></div>${check("",tr("Public profile"),social.public,tr("Show my profile and standings on the global leaderboard."),"data-social-public")}</article>`;
@@ -469,7 +468,7 @@ import {failure, refused, request as call, send} from "./http";
     const member = (item: Group, person: Person) => personRow(person,mute(person)+(item.owner && person.user !== me ? action(tr("Remove"),{action:"remove",group:item.id,member:person.user},`data-confirm="${esc(tr`Remove ${person.display} from ${item.name}?`)}"`) : ""));
     const group = (item: Group) => html`<details class="card social-group" data-group="${item.id}" open><summary><strong>${esc(item.name)}</strong><small>${esc(members(item.members.length))}</small></summary>${invite(item)}<div class="stack">${item.members.map(person=>member(item,person)).join("")}</div><div class="setting-actions">${action(tr("Leave group"),{action:"leave",group:item.id},`data-confirm="${esc(tr`Leave ${item.name}?`)}"`)}</div></details>`;
     const groupsCard = html`<article class="card"><div class="card-head"><div><h2>${tr("Groups")}</h2><p>${tr("Everyone in a group sees each other on the group's leaderboard.")}</p></div></div><form id="group-form" class="social-form"><label class="field"><span>${tr("Group name")}</span><input name="name" required maxlength="40" autocomplete="off"></label><button class="primary" type="submit">${tr("Create group")}</button></form></article>${social.groups.map(group).join("")}`;
-    const mutedCard = social.muted?.length ? html`<article class="card" id="muted-people"><div class="card-head"><div><h2>${tr("Muted")}</h2><p>${tr("No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.")}</p></div></div><div class="stack">${social.muted.map(person=>personRow(person,mute(person))).join("")}</div></article>` : "";
+    const mutedCard = social.muted.length ? html`<article class="card" id="muted-people"><div class="card-head"><div><h2>${tr("Muted")}</h2><p>${tr("No challenge invitations, nudges, conquered cards, deck news, shares or cheers from these people. They are not told.")}</p></div></div><div class="stack">${social.muted.map(person=>personRow(person,mute(person))).join("")}</div></article>` : "";
     $("personal-content").innerHTML = html`<div class="personal-settings">${visibility}${friendsCard}${groupsCard}${mutedCard}</div><p id="social-status" class="status" role="status"></p>`;
   }
   function renderJoin() {
