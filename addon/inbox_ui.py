@@ -18,7 +18,6 @@ from aqt.qt import (
 
 from . import inbox, share, share_ui
 from .language import tr
-from .ui import _enum
 
 SHORTCUT = "Ctrl+Shift+M"
 THUMBNAIL = 180
@@ -29,7 +28,7 @@ state = {"dialog": None, "pictures": {}}
 
 def _plain(text, bold=False, muted=False):
     label = QLabel(text)
-    label.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(True)
     if bold:
         font = label.font()
@@ -148,7 +147,7 @@ def _line(*widgets):
 
 def _row(entry, context):
     frame = QFrame()
-    frame.setFrameShape(_enum(QFrame, "Shape", "StyledPanel"))
+    frame.setFrameShape(QFrame.Shape.StyledPanel)
     layout = QVBoxLayout(frame)
     title, body = inbox.headline(entry)
     layout.addWidget(_plain(title, bold=True))
@@ -248,8 +247,8 @@ def _show_picture(label, png):
         return
     label.setPixmap(pixmap.scaled(
         THUMBNAIL, THUMBNAIL,
-        _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-        _enum(Qt, "TransformationMode", "SmoothTransformation"),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     ))
 
 
@@ -326,7 +325,7 @@ def inbox_dialog(parent, api, companion, current_client, run, open_path, on_repl
 def _build(parent, api, companion, current_client, run, open_path, on_replied):
     dialog = QDialog(parent)
     dialog.setWindowTitle(tr("ankiquest inbox"))
-    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_DeleteOnClose"))
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.resize(680, 640)
     context = Context(dialog, api, companion, current_client, run, open_path, on_replied)
     view = {"items": [], "loading": False}

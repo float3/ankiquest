@@ -13,19 +13,15 @@ from aqt.qt import (
 
 from .language import tr
 
-def _enum(owner, group, name):
-    """Qt 5 keeps these constants on the class, Qt 6 inside a nested enum."""
-    return getattr(getattr(owner, group, owner), name)
-
 
 def _mascot(path):
     image = QLabel()
     image.setPixmap(QPixmap(path).scaled(
         112, 112,
-        _enum(Qt, "AspectRatioMode", "KeepAspectRatio"),
-        _enum(Qt, "TransformationMode", "SmoothTransformation"),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
     ))
-    image.setAlignment(_enum(Qt, "AlignmentFlag", "AlignHCenter"))
+    image.setAlignment(Qt.AlignmentFlag.AlignHCenter)
     return image
 
 
@@ -45,17 +41,17 @@ def session_dialog(parent, title, text, art, on_continue, on_progress, never_aga
     """A small, non-blocking recap with the companion, Continue and progress buttons."""
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
-    dialog.setAttribute(_enum(Qt, "WidgetAttribute", "WA_DeleteOnClose"))
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     layout = QVBoxLayout(dialog)
     if art:
         layout.addWidget(_mascot(art))
     heading = QLabel(title)
     heading.setStyleSheet("font-weight:bold;font-size:15px")
-    heading.setAlignment(_enum(Qt, "AlignmentFlag", "AlignHCenter"))
+    heading.setAlignment(Qt.AlignmentFlag.AlignHCenter)
     layout.addWidget(heading)
     message = QLabel(text)
     message.setWordWrap(True)
-    message.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    message.setTextFormat(Qt.TextFormat.PlainText)
     layout.addWidget(message)
     quiet = None
     if never_again is not None:

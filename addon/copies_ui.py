@@ -18,7 +18,7 @@ from aqt.utils import tooltip
 
 from . import copies
 from .language import tr
-from .ui import _brand, _enum, _scroller
+from .ui import _brand, _scroller
 
 SEEN_KEY = "ankiquestSeenDeckCopies"
 
@@ -183,7 +183,7 @@ def send_dialog(parent, decks, people, sender):
     layout.addWidget(_scroller(list(boxes.values())), 1)
 
     status = QLabel()
-    status.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    status.setTextFormat(Qt.TextFormat.PlainText)
     status.setWordWrap(True)
     layout.addWidget(status)
 
@@ -239,7 +239,7 @@ def offers_dialog(api, offers, names, limit):
     layout = QVBoxLayout(dialog)
     _brand(dialog, layout, state["companion"]())
     status = QLabel()
-    status.setTextFormat(_enum(Qt, "TextFormat", "PlainText"))
+    status.setTextFormat(Qt.TextFormat.PlainText)
     status.setWordWrap(True)
     rows = [_offer_row(api, offer, names, limit, dialog, status) for offer in offers]
     layout.addWidget(_scroller(rows or [QLabel(tr("No deck copies are waiting for you."))]), 1)
@@ -258,7 +258,7 @@ def _offer_row(api, offer, names, limit, dialog, status):
     line = QHBoxLayout(holder)
     line.setContentsMargins(0, 0, 0, 0)
     text = QLabel(copies.offer_html(offer, names, tr))
-    text.setTextFormat(_enum(Qt, "TextFormat", "RichText"))
+    text.setTextFormat(Qt.TextFormat.RichText)
     text.setWordWrap(True)
     take = QPushButton(tr("Import"))
     drop = QPushButton(tr("Dismiss"))
@@ -297,13 +297,8 @@ def _import(api, offer, limit, dialog, status, buttons):
 
 def import_package(mw, path):
     """Anki's own importer, so the usual import dialog and its choices appear."""
-    try:
-        from aqt.import_export.importing import import_file
-    except ImportError:
-        from aqt.importing import importFile
+    from aqt.import_export.importing import import_file
 
-        importFile(mw, path)
-        return
     import_file(mw, path)
 
 
