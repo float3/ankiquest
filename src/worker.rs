@@ -412,7 +412,7 @@ fn deliver_notifications(app: &App, budget: Duration) -> Result<(), Error> {
         }
         let id = delivery.notification.id;
         if push_destination(&app.config, &delivery.user).is_none() {
-            app.store.lock().unwrap().cancel_push(id)?;
+            app.store.lock().unwrap().skip_push(id)?;
             continue;
         }
         let mut reminder_body = None;
@@ -1098,6 +1098,50 @@ mod tests {
         assert!(server.join().unwrap().starts_with("POST /friend-topic "));
         assert!(was_pushed(&app, id));
         assert_eq!(app.store.lock().unwrap().conn.query_row("select sum(push_attempts + pushed) from notifications where recipient = 'hill'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        cleanup(app, path);
+    }
+
+    #[test]
+    fn a_recipient_without_a_topic_keeps_the_inbox_copy_marked_as_having_no_destination() {
+        let (mut app, path) = fixture();
+        let id = queued_message(&app, "hill");
+        deliver_notifications(&app, PUSH_BUDGET).unwrap();
+        let state = |app: &App| {
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row(
+                    "select push_cancelled, pushed from notifications where id = ?1",
+                    [id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap()
+        };
+        assert_eq!(state(&app), (notifications::NO_PUSH_DESTINATION, 0));
+        assert_eq!(
+            app.store
+                .lock()
+                .unwrap()
+                .notifications("hill", now_ms())
+                .unwrap()[0]
+                .id,
+            id
+        );
+        // A topic added later does not push the message that was already skipped.
+        let config = &mut Arc::get_mut(&mut app).unwrap().config;
+        config.ntfy = Some("http://127.0.0.1:9".into());
+        config.users.get_mut("hill").unwrap().ntfy_topic = Some("hill-topic".into());
+        deliver_notifications(&app, PUSH_BUDGET).unwrap();
+        assert_eq!(state(&app), (notifications::NO_PUSH_DESTINATION, 0));
+        assert!(
+            app.store
+                .lock()
+                .unwrap()
+                .take_deck_deliveries(now_ms())
+                .unwrap()
+                .is_empty()
+        );
         cleanup(app, path);
     }
 

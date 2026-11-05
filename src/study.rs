@@ -510,6 +510,7 @@ mod tests {
     #[tokio::test]
     async fn the_upload_reports_what_it_just_announced() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let send = |body: Upload| {
             let app = app.clone();
             async move {
@@ -595,6 +596,7 @@ mod tests {
     #[tokio::test]
     async fn legacy_and_silent_uploads_and_previews_do_not_publish_completion() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let legacy: Upload = serde_json::from_value(serde_json::json!({
             "reviews": [], "clock": {"offset_west_min": 0, "rollover_hour": 4}
         }))
@@ -679,6 +681,7 @@ mod tests {
     #[tokio::test]
     async fn announcements_lead_the_upload_feedback() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         upload_as(&app, "cerro", sample_upload(2, false)).await;
         let _ = set_decks(
             State(app.clone()),

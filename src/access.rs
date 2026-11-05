@@ -1226,6 +1226,20 @@ mod tests {
         assert_eq!(activity["window_days"], 90);
         assert_eq!(activity["items"][0]["id"], alice);
         assert!(activity["items"][0]["read_at"].is_null());
+        let fetched_at = |id: &serde_json::Value| -> Option<i64> {
+            app.store
+                .lock()
+                .unwrap()
+                .conn
+                .query_row(
+                    "select fetched_at from notifications where id = ?1",
+                    [id.as_i64().unwrap()],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        let first_fetch = fetched_at(&serde_json::json!(alice)).unwrap();
+        assert_eq!(fetched_at(&serde_json::json!(bob)), None);
         for _ in 0..2 {
             assert_eq!(
                 request(
@@ -1258,6 +1272,9 @@ mod tests {
         assert!(legacy.is_array());
         assert_eq!(legacy[0]["id"], alice);
         assert!(legacy[0]["read_at"].is_i64());
+        // Fetching again keeps the first time the inbox returned it.
+        assert_eq!(fetched_at(&serde_json::json!(alice)), Some(first_fetch));
+        assert_eq!(fetched_at(&serde_json::json!(bob)), None);
         assert_eq!(
             app.store
                 .lock()

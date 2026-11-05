@@ -247,6 +247,15 @@ impl Store {
             .is_some())
     }
 
+    /// Players whose client has sent at least one review upload.
+    pub fn synced_users(&self) -> Result<std::collections::HashSet<String>, Error> {
+        Ok(self
+            .conn
+            .prepare("select user from review_syncs")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
     pub fn last_review_sync(&self, user: &str) -> Result<Option<i64>, Error> {
         self.conn
             .query_row(

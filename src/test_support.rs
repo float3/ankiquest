@@ -192,3 +192,18 @@ pub(crate) async fn upload_as(app: &Arc<App>, user: &str, body: Upload) -> Uploa
     .unwrap()
     .0
 }
+
+/// Records that `users` have used the app once, as their first upload would, so that
+/// they can be picked as deck recipients.
+pub(crate) fn used_app(app: &App, users: &[&str]) {
+    let store = app.store.lock().unwrap();
+    for user in users {
+        store
+            .conn
+            .execute(
+                "insert or ignore into review_syncs (user, received_at) values (?1, 0)",
+                [user],
+            )
+            .unwrap();
+    }
+}

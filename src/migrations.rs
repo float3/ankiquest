@@ -10,7 +10,7 @@ use rusqlite::Connection;
 
 type Step = fn(&Connection) -> Result<(), Error>;
 
-const STEPS: &[Step] = &[baseline];
+const STEPS: &[Step] = &[baseline, notification_fetches];
 
 /// Brings the database up to the latest step, then turns foreign keys on for the connection.
 pub fn run(conn: &Connection) -> Result<(), Error> {
@@ -143,6 +143,11 @@ fn baseline(conn: &Connection) -> Result<(), Error> {
         [],
     )?;
     Ok(())
+}
+
+/// When the player's own inbox request first returned a notification; null until then.
+fn notification_fetches(conn: &Connection) -> Result<(), Error> {
+    add_column(conn, "notifications", "fetched_at", "integer")
 }
 
 #[cfg(test)]
