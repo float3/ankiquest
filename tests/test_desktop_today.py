@@ -732,9 +732,9 @@ class HomeTests(unittest.TestCase):
         """Loads capabilities naming `main`, with the token working there when `works`."""
         self.api.language = "en"
         self.api.server_info = Mock(return_value=(frozenset({"wins"}), main))
-        there = SimpleNamespace(base=main.rstrip("/") if main else main, profile=Mock())
+        there = SimpleNamespace(base=main.rstrip("/") if main else main, devices=Mock())
         if not works:
-            there.profile.side_effect = OSError("unauthorized")
+            there.devices.side_effect = OSError("unauthorized")
         self.home.Client = Mock(return_value=there)
         self.addon.client = lambda: self.addon.Client(
             self.settings["url"], self.settings["user"], self.settings["token"], "en")
@@ -748,7 +748,7 @@ class HomeTests(unittest.TestCase):
         self.remember("cards", 1)
         there = self.moving_to("https://anki.example.test")
         self.home.Client.assert_called_once_with("https://anki.example.test", "hill", "secret", "en")
-        there.profile.assert_called_once_with()
+        there.devices.assert_called_once_with()
         self.assertEqual("https://anki.example.test", self.settings["url"])
         self.assertEqual(["https://anki.example.test", "hill"], self.mw.pm.profile[self.home.PLAN_KEY]["account"])
         self.assertEqual(["https://anki.example.test", "hill"], self.mw.pm.profile[self.home.SESSION_KEY]["account"])

@@ -134,6 +134,10 @@ class Client:
     def profile(self):
         return self._request("/api/profile/" + self.user)
 
+    def devices(self):
+        """This player's signed-in devices; answers only with a working token, so it also checks one."""
+        return self._request("/api/devices/" + self.user)
+
     def leaderboard(self):
         """Every visible player's standing, with XP for each period."""
         return self._request("/api/leaderboard")

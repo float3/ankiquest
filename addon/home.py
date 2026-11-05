@@ -439,7 +439,7 @@ def load_capabilities(api):
 
 def move_to_main_address(api, main):
     """Moves a player saved at an older address of their server to its main address `main`,
-    once one signed-in request with their token works there. Keeps the saved address when it
+    once one signed-in request with their token works there (the device list, which needs it). Keeps the saved address when it
     does not, and says nothing either way."""
     if not address.should_move(api.base, main) or local["moving"]:
         return
@@ -466,7 +466,7 @@ def move_to_main_address(api, main):
         if addon().state.get("companion_account") == account(api):
             addon().state["companion_account"] = account(there)
 
-    mw.taskman.run_in_background(there.profile, done)
+    mw.taskman.run_in_background(there.devices, done)
 
 
 def server_celebrates_goal(api):
