@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -182,6 +182,18 @@ impl Directory {
             uses.last.insert(hash.clone(), now);
             uses.unsaved.insert(hash, now);
         }
+    }
+
+    /// Players who have used one of their current device tokens at least once.
+    pub(crate) fn token_users(&self) -> HashSet<String> {
+        let uses = self.uses.lock().unwrap();
+        self.tokens
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(hash, _)| uses.last.contains_key(*hash))
+            .map(|(_, owner)| owner.clone())
+            .collect()
     }
 
     /// When the token with this hash was last used, to within an hour.
@@ -1378,6 +1390,7 @@ mod tests {
         let listed = list(&app, "ana", &with_token(&phone)).await;
         let used = listed["devices"][0]["last_used_at"].as_i64().unwrap();
         assert!(used > now_ms() - 60_000, "{listed}");
+        assert!(app.accounts.token_users().contains("ana"));
         assert_eq!(
             listed["devices"][1]["last_used_at"],
             serde_json::Value::Null

@@ -43,8 +43,11 @@ impl Fixture {
         }))
         .unwrap();
         crate::app::fix_now_ms(Some(NOW_MS));
+        let app = Arc::new(crate::test_support::app_from(store, config));
+        // Players who have used the app, so the deck recipient picker offers them.
+        crate::test_support::used_app(&app, &["cerro", "friend"]);
         Self {
-            app: Arc::new(crate::test_support::app_from(store, config)),
+            app,
             path,
             secrets: Vec::new(),
         }

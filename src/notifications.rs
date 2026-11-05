@@ -7,6 +7,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const INBOX_AGE_MS: i64 = 7 * DAY_MS;
+/// `push_cancelled` for a notification that was never pushed because its
+/// recipient has no ntfy topic. A real cancellation (a mute, an opt-out) is 1.
+/// Any non-zero value keeps the worker from pushing it.
+pub(crate) const NO_PUSH_DESTINATION: i64 = 2;
 pub const ACTIVITY_DAYS: u32 = 90;
 const ACTIVITY_AGE_MS: i64 = ACTIVITY_DAYS as i64 * DAY_MS;
 pub(crate) const PUSH_LEASE_MS: i64 = 60_000;
@@ -761,17 +765,35 @@ impl Store {
         Ok(())
     }
 
-    /// Stops pushing a notification that has nowhere to go. An inbox message
-    /// stays in the inbox; a push-only one is dropped, keeping its seen key.
-    pub fn cancel_push(&mut self, id: i64) -> Result<(), Error> {
+    /// Stops pushing a notification whose recipient has no ntfy topic. An inbox
+    /// message stays in the inbox for the phone's own checks, marked
+    /// [`NO_PUSH_DESTINATION`] rather than cancelled; a push-only one is dropped,
+    /// keeping its seen key.
+    pub fn skip_push(&mut self, id: i64) -> Result<(), Error> {
         self.conn.execute(
             "delete from notifications where id = ?1 and pushed = 0 and push_only = 1",
             [id],
         )?;
         self.conn.execute(
-            "update notifications set push_cancelled = 1 where id = ?1 and pushed = 0",
-            [id],
+            "update notifications set push_cancelled = ?2 where id = ?1 and pushed = 0 and push_cancelled = 0",
+            params![id, NO_PUSH_DESTINATION],
         )?;
+        Ok(())
+    }
+
+    /// Notes when the player's own inbox request first returned these notifications.
+    pub fn mark_fetched(&mut self, user: &str, ids: &[i64], now_ms: i64) -> Result<(), Error> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "update notifications set fetched_at = ?3
+                 where id = ?1 and recipient = ?2 and fetched_at is null",
+            )?;
+            for id in ids {
+                stmt.execute(params![id, user, now_ms])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 

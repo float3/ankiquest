@@ -542,6 +542,7 @@ mod tests {
     #[tokio::test]
     async fn authenticated_upload_preferences_and_inbox_end_to_end() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let _ = upload(
             State(app.clone()),
             UrlPath("cerro".into()),
@@ -889,6 +890,7 @@ mod tests {
     #[tokio::test]
     async fn a_finished_deck_reaches_only_the_friends_picked_and_once_a_day() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let share = |user: &str, recipients: &[&str]| {
             decks::share_deck(
                 State(app.clone()),

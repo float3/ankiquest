@@ -49,6 +49,10 @@ pub(crate) async fn get_notifications(
         wins::decorate(&mut notice, &base);
         result.push(notice);
     }
+    let fetched: Vec<i64> = result.iter().map(|notice| notice.id).collect();
+    store
+        .mark_fetched(&user, &fetched, now)
+        .map_err(store_error)?;
     Ok(Json(result))
 }
 
@@ -103,6 +107,15 @@ async fn activity(
         shares::localize(&store.conn, notice, &language).map_err(store_error)?;
         wins::decorate(notice, &base);
     }
+    let fetched: Vec<i64> = activity
+        .items
+        .iter()
+        .chain(&activity.attention)
+        .map(|notice| notice.id)
+        .collect();
+    store
+        .mark_fetched(&user, &fetched, now)
+        .map_err(store_error)?;
     Ok(Json(activity))
 }
 
@@ -312,6 +325,7 @@ mod tests {
     #[tokio::test]
     async fn a_completion_can_be_answered_once_and_the_answer_answered_back() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let post = |app: Arc<App>, body: Upload| async move {
             let _ = upload(
                 State(app),

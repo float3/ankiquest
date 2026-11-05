@@ -726,6 +726,7 @@ mod tests {
         use tower::ServiceExt;
 
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let _ = upload(
             State(app.clone()),
             UrlPath("cerro".into()),
@@ -924,6 +925,7 @@ mod tests {
     #[tokio::test]
     async fn recipient_mutes_change_upload_delivery_without_changing_outgoing_settings() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let _ = upload(
             State(app.clone()),
             UrlPath("cerro".into()),

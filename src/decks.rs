@@ -75,7 +75,7 @@ pub struct IncomingSettings {
     pub muted_senders: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Deck {
     pub id: String,
     pub name: String,
@@ -142,7 +142,7 @@ pub fn valid_preferences(
     known_decks: &[Deck],
     recipients: &[Recipient],
 ) -> bool {
-    let deck_ids: HashSet<_> = known_decks.iter().map(|d| d.id.as_str()).collect();
+    let known: HashMap<_, _> = known_decks.iter().map(|d| (d.id.as_str(), d)).collect();
     let users: HashSet<_> = recipients.iter().map(|r| r.user.as_str()).collect();
     let mut ids = HashSet::new();
     preferences.len() <= MAX_DECKS
@@ -150,14 +150,15 @@ pub fn valid_preferences(
             let unique: HashSet<_> = deck.recipients.iter().collect();
             valid_text(&deck.id, 128)
                 && ids.insert(&deck.id)
-                && deck_ids.contains(deck.id.as_str())
                 && deck.recipients.len() <= MAX_RECIPIENTS
                 && unique.len() == deck.recipients.len()
                 && (!deck.enabled || !deck.recipients.is_empty())
-                && deck
-                    .recipients
-                    .iter()
-                    .all(|user| users.contains(user.as_str()))
+                && known.get(deck.id.as_str()).is_some_and(|known| {
+                    // Someone chosen before the list narrowed stays accepted for that deck.
+                    deck.recipients.iter().all(|user| {
+                        users.contains(user.as_str()) || known.recipients.contains(user)
+                    })
+                })
         })
 }
 
@@ -646,9 +647,21 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<Settings, Error
         .keys()
         .filter(|candidate| push_destination(&app.config, candidate).is_some())
         .cloned();
+    // Someone who can sign in but never has would only collect messages nobody reads.
+    let mut used = store.synced_users()?;
+    used.extend(app.accounts.token_users());
+    used.extend(
+        app.players
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(_, player)| !player.reviews.is_empty())
+            .map(|(user, _)| user.clone()),
+    );
     let users: BTreeSet<String> = app
         .members()
         .into_iter()
+        .filter(|candidate| used.contains(candidate))
         .chain(pushable)
         .filter(|candidate| {
             candidate != user && circle.contains(candidate) && !unsubscribed.contains(candidate)
@@ -1982,6 +1995,25 @@ pub(crate) mod tests {
             &decks,
             &recipients
         ));
+        // Someone already chosen for a deck, but no longer offered, can be saved again
+        // for that deck only.
+        let chosen = vec![
+            Deck {
+                recipients: vec!["dormant".into()],
+                ..decks[0].clone()
+            },
+            Deck {
+                id: "2".into(),
+                ..decks[0].clone()
+            },
+        ];
+        let keep = |id: &str| Preference {
+            id: id.into(),
+            enabled: true,
+            recipients: vec!["dormant".into(), "hill".into()],
+        };
+        assert!(valid_preferences(&[keep("1")], &chosen, &recipients));
+        assert!(!valid_preferences(&[keep("2")], &chosen, &recipients));
         assert!(
             serde_json::from_str::<SettingsUpdate>(
                 r#"{"decks":[{"id":"1","enabled":true,"recipients":["hill"],"owner":"other"}]}"#
@@ -1991,7 +2023,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn recipient_choices_require_a_configured_delivery_channel() {
+    fn recipient_choices_require_a_configured_delivery_channel_and_use_of_the_app() {
         let (mut app, path) = fixture();
         let config = &mut Arc::get_mut(&mut app).unwrap().config;
         config.ntfy = Some("http://localhost:9999".into());
@@ -2019,38 +2051,35 @@ pub(crate) mod tests {
                 ..UserConfig::default()
             },
         );
+        let offered = |app: &App| {
+            deck_settings(app, &app.store.lock().unwrap(), "cerro")
+                .unwrap()
+                .recipients
+                .into_iter()
+                .map(|r| r.user)
+                .collect::<Vec<_>>()
+        };
+        // Hill and friend can sign in but never have.
+        assert_eq!(offered(&app), vec!["push-only"]);
+        crate::test_support::used_app(&app, &["friend"]);
         {
             let mut store = app.store.lock().unwrap();
             store
                 .upsert("imported", &[], &[], Clock::default())
                 .unwrap();
-            let settings = deck_settings(&app, &store, "cerro").unwrap();
-            assert_eq!(
-                settings
-                    .recipients
-                    .iter()
-                    .map(|r| r.user.as_str())
-                    .collect::<Vec<_>>(),
-                vec!["friend", "hill", "push-only"]
-            );
-            assert!(settings.decks.is_empty());
+            store.upsert("hill", &[], &[], Clock::default()).unwrap();
+            assert!(store.decks("cerro").unwrap().is_empty());
         }
+        assert_eq!(offered(&app), vec!["friend", "hill", "push-only"]);
         Arc::get_mut(&mut app).unwrap().config.ntfy = None;
-        assert_eq!(
-            deck_settings(&app, &app.store.lock().unwrap(), "cerro")
-                .unwrap()
-                .recipients
-                .iter()
-                .map(|r| r.user.as_str())
-                .collect::<Vec<_>>(),
-            vec!["friend", "hill"]
-        );
+        assert_eq!(offered(&app), vec!["friend", "hill"]);
         cleanup(app, path);
     }
 
     #[tokio::test]
     async fn nudges_are_off_until_asked_for_and_then_stay_on() {
         let (app, path) = fixture();
+        crate::test_support::used_app(&app, &["cerro", "hill", "friend"]);
         let _ = upload(
             State(app.clone()),
             UrlPath("cerro".into()),
