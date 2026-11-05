@@ -289,6 +289,9 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
   remove-account <user>           delete a self-service account and everything about it
   set-password <user>             give a self-service account a new random password, for
                                   someone who forgot theirs; prints it once
+  adopt-players                   turn every configured player into a regular account that
+                                  keeps its name, display name and token, so the player
+                                  can then be removed from the configuration
   grant-freeze <user> <date>...   protect a player's streak on these days (YYYY-MM-DD)
   revoke-freeze <user> <date>...  take that protection away again
   streak-minutes <user> <minutes|default>
@@ -304,6 +307,7 @@ pub enum Command {
     Sql(String),
     RemoveAccount(String),
     SetPassword(String),
+    AdoptPlayers,
     GrantFreeze(String, Vec<String>, bool),
     PlayerStreakMinutes(String, Option<u32>),
 }
@@ -329,6 +333,7 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["sql", query] => Command::Sql(query.to_string()),
         ["remove-account", user] => Command::RemoveAccount(user.to_string()),
         ["set-password", user] => Command::SetPassword(user.to_string()),
+        ["adopt-players"] => Command::AdoptPlayers,
         ["streak-minutes", user, "default"] => Command::PlayerStreakMinutes(user.to_string(), None),
         ["streak-minutes", user, minutes] => Command::PlayerStreakMinutes(
             user.to_string(),
@@ -409,6 +414,9 @@ pub fn run(
 ) -> Result<String, Error> {
     if let Command::Sql(query) = &command {
         return sql(state_dir, query);
+    }
+    if command == Command::AdoptPlayers {
+        return Err("adopt-players needs the configured players; use adopt()".into());
     }
     let store = Store::open(state_dir)?;
     let conn = &store.conn;
@@ -550,7 +558,7 @@ other devices stay signed in.
 "
             )
         }
-        Command::Sql(_) => unreachable!(),
+        Command::Sql(_) | Command::AdoptPlayers => unreachable!(),
     })
 }
 
@@ -570,6 +578,65 @@ fn temporary_password() -> Result<String, Error> {
             }
         }
     }
+    Ok(out)
+}
+
+/// A configured player to turn into an account: name, display name and token.
+pub struct Configured {
+    pub user: String,
+    pub display: Option<String>,
+    pub token: Option<String>,
+}
+
+/// Makes every configured player with a token a regular account with the same name, display
+/// name and token. Existing phones stay signed in, and the player can then leave the
+/// configuration. Players who already have an account are left alone.
+pub fn adopt(state_dir: &Path, players: &[Configured], now_ms: i64) -> Result<String, Error> {
+    let mut store = Store::open(state_dir)?;
+    let tx = store.conn.transaction()?;
+    let mut out = String::new();
+    let mut sorted: Vec<&Configured> = players.iter().collect();
+    sorted.sort_by(|a, b| a.user.cmp(&b.user));
+    for player in sorted {
+        let Some(token) = player.token.as_deref().filter(|t| !t.is_empty()) else {
+            out += &format!(
+                "{}: skipped, no token in the configuration
+",
+                player.user
+            );
+            continue;
+        };
+        let display = player.display.as_deref().unwrap_or(&player.user);
+        if !crate::accounts::create(&tx, &player.user, display, "", now_ms)? {
+            out += &format!(
+                "{}: already an account
+",
+                player.user
+            );
+            continue;
+        }
+        tx.execute(
+            "insert or ignore into account_tokens (token_hash, user, device, created_at) values (?1, ?2, ?3, ?4)",
+            params![crate::accounts::token_hash(token), player.user, "Moved from the server configuration", now_ms],
+        )?;
+        admin_log(
+            &tx,
+            now_ms,
+            format!(
+                "admin turned the configured player {} into an account",
+                player.user
+            ),
+        )?;
+        out += &format!(
+            "{}: now an account, signed in on the same devices
+",
+            player.user
+        );
+    }
+    tx.commit()?;
+    out += "remove adopted players from the configuration and restart; they keep everything.
+            they have no password yet: give them one with set-password, or let them link a sign-in provider.
+";
     Ok(out)
 }
 
@@ -690,6 +757,60 @@ mod tests {
             std::env::temp_dir().join(format!("ankiquest-admin-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn configured_players_become_accounts_that_keep_their_token() {
+        let dir = state("adopt");
+        {
+            let store = Store::open(&dir).unwrap();
+            crate::accounts::create(&store.conn, "bo", "Bo", "", 0).unwrap();
+        }
+        let players = [
+            Configured {
+                user: "ana".into(),
+                display: Some("Ana María".into()),
+                token: Some("ana-token".into()),
+            },
+            Configured {
+                user: "bo".into(),
+                display: None,
+                token: Some("bo-token".into()),
+            },
+            Configured {
+                user: "cy".into(),
+                display: None,
+                token: None,
+            },
+        ];
+        let out = adopt(&dir, &players, 5).unwrap();
+        assert!(out.contains("ana: now an account"), "{out}");
+        assert!(out.contains("bo: already an account"), "{out}");
+        assert!(out.contains("cy: skipped"), "{out}");
+        let store = Store::open(&dir).unwrap();
+        let directory = crate::accounts::Directory::load(&store.conn).unwrap();
+        assert_eq!(
+            directory.token_owner("ana-token").as_deref(),
+            Some("ana"),
+            "the phone stays signed in"
+        );
+        assert_eq!(directory.account("ana").unwrap().display, "Ana María");
+        assert_eq!(
+            directory.token_owner("bo-token"),
+            None,
+            "an existing account is left alone"
+        );
+        assert!(!directory.contains("cy"));
+        assert!(
+            adopt(&dir, &players, 6)
+                .unwrap()
+                .contains("ana: already an account"),
+            "running it twice is safe"
+        );
+        assert_eq!(
+            parse(&words(&["adopt-players"])).unwrap(),
+            Command::AdoptPlayers
+        );
     }
 
     #[test]

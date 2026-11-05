@@ -139,6 +139,18 @@ async fn main() -> Result<(), Error> {
         };
         let output = match command {
             None => Ok(format!("{}\n", admin::USAGE)),
+            Some(Ok(admin::Command::AdoptPlayers)) => config.load_tokens().and_then(|()| {
+                let players: Vec<admin::Configured> = config
+                    .users
+                    .iter()
+                    .map(|(user, c)| admin::Configured {
+                        user: user.clone(),
+                        display: c.display.clone(),
+                        token: c.token.clone(),
+                    })
+                    .collect();
+                admin::adopt(&config.state_dir, &players, now_ms())
+            }),
             Some(command) => {
                 command.and_then(|c| admin::run(&config.state_dir, config.settings(), c, now_ms()))
             }
