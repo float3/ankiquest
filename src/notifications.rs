@@ -115,6 +115,10 @@ pub struct Notification {
     pub share_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub share_body: Option<String>,
+    /// The stable event key of the win this row is about (`conquered:{at}`, `level:4`, …),
+    /// so clients can tell which moment they already showed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moment: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,6 +181,7 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
         quiet: row.get(17)?,
         share_title: None,
         share_body: None,
+        moment: row.get(18)?,
     })
 }
 
@@ -187,7 +192,8 @@ const NOTICE_COLUMNS: &str = concat!(
     action_required_sql!(),
     ",n.reply_to_title,n.reply_to_body,n.topic,n.win_id,
  exists(select 1 from reactions r where r.reactor=n.recipient and r.notification=n.id),
- (select w.link_token from wins w where w.id=n.win_id),n.quiet"
+ (select w.link_token from wins w where w.id=n.win_id),n.quiet,
+ (select w.key from wins w where w.id=n.win_id)"
 );
 /// A notification written by the server itself: a nudge, or a message sent by hand.
 pub struct Outgoing<'a> {
@@ -441,7 +447,7 @@ impl Store {
                 |row| {
                     Ok(Sent {
                         notice: notification(row)?,
-                        recipient: row.get(18)?,
+                        recipient: row.get(19)?,
                     })
                 },
             )?
@@ -721,14 +727,14 @@ impl Store {
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, ready.recipient
+                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, (select w.key from wins w where w.id = ready.win_id), ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
                 completion_visible_sql("notifications", "notifications.recipient")
             ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
-                    user: r.get(18)?,
+                    user: r.get(19)?,
                     notification: notification(r)?,
                 })
             })?
@@ -1571,12 +1577,29 @@ mod tests {
             ("celebration", "Title record:day:1")
         );
         assert_eq!(inbox[0].topic.as_deref(), Some("record"));
+        assert_eq!(
+            inbox[0].moment.as_deref(),
+            Some("record:day:1"),
+            "a celebration names the win it is about"
+        );
+        assert_eq!(
+            serde_json::to_value(&inbox[0]).unwrap()["moment"],
+            "record:day:1"
+        );
 
         let many: Vec<Event> = (0..5).map(|i| event(&format!("level:{i}"))).collect();
         store.queue_events("hill", &many, DAY, NOW, false).unwrap();
         let inbox = store.notifications("hill", NOW).unwrap();
         assert_eq!(inbox.len(), 2);
         assert_eq!(inbox[1].title, "5 new unlocks");
+        assert_eq!(inbox[1].moment, None, "a group is about no single win");
+        assert!(
+            serde_json::to_value(&inbox[1])
+                .unwrap()
+                .get("moment")
+                .is_none(),
+            "rows without a win leave the field out"
+        );
         assert_eq!(
             inbox[1].topic.as_deref(),
             Some("level"),
