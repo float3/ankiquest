@@ -363,11 +363,22 @@
           (pkgs.writeShellScriptBin "ankiquest-message" ''
             exec ${lib.getExe cfg.package} ${configFile} message "$@"
           '')
-          # The state belongs to the service's dynamic user, so run as it.
+          # The state belongs to the service's dynamic user, so run as it. Commands that
+          # change players back the database up to /var/backups/ankiquest first: the
+          # dynamic user may write there during the command, and root owns it afterwards.
           (pkgs.writeShellScriptBin "ankiquest-admin" ''
-            exec ${config.systemd.package}/bin/systemd-run --quiet --pipe --wait --collect \
+            backups=/var/backups/ankiquest
+            ${pkgs.coreutils}/bin/install -d -m 0700 "$backups"
+            if [ -d /var/lib/private/ankiquest ]; then
+              ${pkgs.coreutils}/bin/chown --reference=/var/lib/private/ankiquest "$backups"
+            fi
+            status=0
+            ${config.systemd.package}/bin/systemd-run --quiet --pipe --wait --collect \
               -p User=ankiquest -p DynamicUser=yes -p StateDirectory=ankiquest \
-              ${lib.getExe cfg.package} ${configFile} admin "$@"
+              -p ReadWritePaths="$backups" -E ANKIQUEST_BACKUP_DIR="$backups" \
+              ${lib.getExe cfg.package} ${configFile} admin "$@" || status=$?
+            ${pkgs.coreutils}/bin/chown -R root:root "$backups"
+            exit "$status"
           '')
         ];
 

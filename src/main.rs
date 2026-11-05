@@ -151,6 +151,20 @@ async fn main() -> Result<(), Error> {
                     .collect();
                 admin::adopt(&config.state_dir, &players, now_ms())
             }),
+            Some(Ok(command)) if command.is_about_people() => {
+                let backups = std::env::var_os("ANKIQUEST_BACKUP_DIR")
+                    .map_or_else(|| config.state_dir.join("backups"), Into::into);
+                admin::people(
+                    &admin::Setup {
+                        state_dir: &config.state_dir,
+                        backups: &backups,
+                        configured: config.users.keys().cloned().collect(),
+                        sync_base: config.sync_base.as_deref(),
+                    },
+                    command,
+                    now_ms(),
+                )
+            }
             Some(command) => {
                 command.and_then(|c| admin::run(&config.state_dir, config.settings(), c, now_ms()))
             }
@@ -202,6 +216,7 @@ async fn main() -> Result<(), Error> {
         store: Mutex::new(store),
     });
 
+    privacy::warn_about_unknown_players(&app);
     worker::spawn(app.clone());
 
     let router = router(app.clone());

@@ -77,7 +77,7 @@ pub(crate) fn muted(conn: &Connection, recipient: &str, sender: &str) -> rusqlit
     )
 }
 
-fn pair<'a>(x: &'a str, y: &'a str) -> (&'a str, &'a str) {
+pub(crate) fn pair<'a>(x: &'a str, y: &'a str) -> (&'a str, &'a str) {
     if x < y { (x, y) } else { (y, x) }
 }
 
@@ -106,7 +106,7 @@ pub fn group_members(conn: &Connection, group: i64) -> rusqlite::Result<BTreeSet
         .collect::<Result<_, _>>()
 }
 
-fn is_member(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<bool> {
+pub(crate) fn is_member(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<bool> {
     conn.prepare("select 1 from group_members where group_id = ?1 and user = ?2")?
         .exists(params![group, user])
 }
@@ -149,6 +149,23 @@ impl Scope {
     }
 }
 
+/// A player's friends, group mates and the player, plus `legacy_players()` when the player is
+/// legacy too: everyone from before accounts shares the original community.
+pub(crate) fn circle_of(
+    conn: &Connection,
+    user: &str,
+    legacy: bool,
+    legacy_players: impl FnOnce() -> BTreeSet<String>,
+) -> rusqlite::Result<BTreeSet<String>> {
+    let mut circle = friends(conn, user)?;
+    circle.extend(group_mates(conn, user)?);
+    if legacy {
+        circle.extend(legacy_players());
+    }
+    circle.insert(user.to_string());
+    Ok(circle)
+}
+
 impl App {
     /// Players from before accounts existed: configured and sync-folder players.
     pub fn legacy(&self, user: &str) -> bool {
@@ -171,17 +188,12 @@ impl App {
 
     /// The people a player shares something with, including the player.
     pub fn circle(&self, conn: &Connection, user: &str) -> rusqlite::Result<BTreeSet<String>> {
-        let mut circle = friends(conn, user)?;
-        circle.extend(group_mates(conn, user)?);
-        if self.legacy(user) {
-            circle.extend(
-                self.known_users()
-                    .into_iter()
-                    .filter(|other| self.legacy(other)),
-            );
-        }
-        circle.insert(user.to_string());
-        Ok(circle)
+        circle_of(conn, user, self.legacy(user), || {
+            self.known_users()
+                .into_iter()
+                .filter(|other| self.legacy(other))
+                .collect()
+        })
     }
 
     pub fn connected(&self, conn: &Connection, a: &str, b: &str) -> rusqlite::Result<bool> {
@@ -670,7 +682,16 @@ pub fn leave(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<()> 
 
 /// Stops deck notifications between people who no longer share a group or friendship.
 fn prune(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<()> {
-    let circle = app.circle(conn, user)?;
+    prune_outside(conn, user, &app.circle(conn, user)?).map(|_| ())
+}
+
+/// Deletes deck recipients between `user` and anyone outside their `circle`, and returns how many.
+pub(crate) fn prune_outside(
+    conn: &Connection,
+    user: &str,
+    circle: &BTreeSet<String>,
+) -> rusqlite::Result<usize> {
+    let mut removed = 0;
     let pairs: Vec<(String, String)> = conn
         .prepare("select distinct owner, recipient from deck_recipients where owner = ?1 or recipient = ?1")?
         .query_map([user], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -678,16 +699,16 @@ fn prune(app: &App, conn: &Connection, user: &str) -> rusqlite::Result<()> {
     for (owner, recipient) in pairs {
         let other = if owner == user { &recipient } else { &owner };
         if !circle.contains(other) {
-            conn.execute(
+            removed += conn.execute(
                 "delete from deck_recipients where owner = ?1 and recipient = ?2",
                 params![owner, recipient],
             )?;
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
-fn owns(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<bool> {
+pub(crate) fn owns(conn: &Connection, group: i64, user: &str) -> rusqlite::Result<bool> {
     conn.prepare("select 1 from group_members where group_id = ?1 and user = ?2 and owner = 1")?
         .exists(params![group, user])
 }
