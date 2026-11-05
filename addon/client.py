@@ -105,14 +105,23 @@ class Client:
 
     def capabilities(self):
         """The features this server names at /api/capabilities; none for a server without it."""
+        return self.server_info()[0]
+
+    def server_info(self):
+        """The features this server names at /api/capabilities and its `public_url`, the main
+        address, when it names one (else None)."""
         try:
             answer = request_json(self.base + "/api/capabilities")
         except ServerError as error:
             if error.status == 404:
-                return frozenset()
+                return frozenset(), None
             raise
         features = answer.get("features") if isinstance(answer, dict) else None
-        return frozenset(name for name in features or () if isinstance(name, str))
+        url = answer.get("public_url") if isinstance(answer, dict) else None
+        return (
+            frozenset(name for name in features or () if isinstance(name, str)),
+            url if isinstance(url, str) else None,
+        )
 
     def rank(self, previous, week=None):
         """The weekly order, and how this player moved since `previous`, the order seen in

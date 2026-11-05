@@ -12,5 +12,6 @@
     "share_cards",
     "wins"
   ],
+  "public_url": "https://anki.example.test",
   "version": 1
 }
