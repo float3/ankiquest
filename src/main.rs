@@ -805,6 +805,25 @@ mod tests {
             (None, None),
             "only the owner sees sharing state"
         );
+        assert_eq!(mine.win, None, "no win until the worker keeps one");
+        let win = crate::wins::create(
+            &app.store.lock().unwrap().conn,
+            "hill",
+            &format!("conquered:{at}"),
+            0,
+            now_ms(),
+            "Card conquered",
+            "",
+            &serde_json::json!({}),
+        )
+        .unwrap();
+        assert!(win.is_some());
+        assert_eq!(show("hill", at).await.unwrap().0.win, win);
+        assert_eq!(
+            show("cerro", at).await.unwrap().0.win,
+            None,
+            "only the owner can share the win's card"
+        );
         assert_eq!(
             show("hill", at + 1).await.err(),
             Some(StatusCode::NOT_FOUND)
