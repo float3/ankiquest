@@ -8,8 +8,10 @@ these additions preserve bearer authentication and the existing notification arr
 `GET /api/capabilities` needs no sign-in, also on a private site, and may be cached for five minutes (`Cache-Control: max-age=300`). It answers what this server supports, so a client can turn a feature on when the server has it instead of waiting for a deploy:
 
 ```json
-{ "version": 1, "features": ["activity", "cookie_session", "deck_share", "devices", "goal_backlog_days", "mute", "reactions", "review_offsets", "share_cards", "wins"] }
+{ "version": 1, "features": ["activity", "app_sign_in", "cookie_session", "deck_share", "devices", "goal_backlog_days", "mute", "reactions", "review_offsets", "share_cards", "wins"], "public_url": "https://anki.example.test" }
 ```
+
+`public_url` is the server's main address, without a trailing slash, and is present only when the server has `public_url` configured. A client that saved another address for the same server (an old address that proxies to it) may move to this one: it checks that its saved token works there with one signed-in request that needs it, such as `GET /api/devices/{user}` (the profile also answers without a token), and only then saves the new address and moves anything it keeps per address. Clients only move to an `https` address, keep the saved one when the check fails or they are offline, and ignore the field otherwise.
 
 | feature | meaning |
 |---|---|

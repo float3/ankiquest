@@ -36,7 +36,7 @@ class Server(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/capabilities" and not Server.old_server:
-            self.answer(200, {"version": 1, "features": ["share_cards", "wins", 3]})
+            self.answer(200, {"version": 1, "features": ["share_cards", "wins", 3], "public_url": "https://anki.example.test"})
         else:
             self.answer(404, None)
 
@@ -91,9 +91,11 @@ class AccountTests(unittest.TestCase):
     def test_capabilities_are_read_and_an_older_server_has_none(self):
         api = self.client.Client(self.base, "ana", "device-token")
         self.assertEqual(frozenset({"share_cards", "wins"}), api.capabilities())
+        self.assertEqual((frozenset({"share_cards", "wins"}), "https://anki.example.test"), api.server_info())
         Server.old_server = True
         try:
             self.assertEqual(frozenset(), api.capabilities())
+            self.assertEqual((frozenset(), None), api.server_info())
         finally:
             Server.old_server = False
 

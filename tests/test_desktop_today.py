@@ -714,19 +714,56 @@ class HomeTests(unittest.TestCase):
 
     def test_the_goal_popup_is_left_to_a_server_with_wins(self):
         self.remember("cards", 1)
-        self.api.capabilities = Mock(return_value=frozenset({"wins"}))
+        self.api.server_info = Mock(return_value=(frozenset({"wins"}), None))
         self.session(2)
         dialog = self.home.today_ui.session_dialog
         self.assertEqual("Streak secured! 🔥", dialog.call_args.args[1])
         self.assertNotIn("goal", dialog.call_args.args[2].lower())
-        self.api.capabilities.assert_called_once_with()
+        self.api.server_info.assert_called_once_with()
 
     def test_an_older_server_without_wins_keeps_the_goal_popup(self):
         self.remember("cards", 1)
-        self.api.capabilities = Mock(return_value=frozenset())
+        self.api.server_info = Mock(return_value=(frozenset(), None))
         self.home.load_capabilities(self.api)
         self.session(2)
         self.assertEqual("Daily goal reached! 🎉", self.home.today_ui.session_dialog.call_args.args[1])
+
+    def moving_to(self, main, works=True):
+        """Loads capabilities naming `main`, with the token working there when `works`."""
+        self.api.language = "en"
+        self.api.server_info = Mock(return_value=(frozenset({"wins"}), main))
+        there = SimpleNamespace(base=main.rstrip("/") if main else main, devices=Mock())
+        if not works:
+            there.devices.side_effect = OSError("unauthorized")
+        self.home.Client = Mock(return_value=there)
+        self.addon.client = lambda: self.addon.Client(
+            self.settings["url"], self.settings["user"], self.settings["token"], "en")
+        self.mw.pm.profile[self.home.SESSION_KEY] = {"account": ["https://example.test", "hill"], "reviews": 2}
+        self.settings[self.home.SETUP_SHOWN] = ["https://example.test hill"]
+        self.home.local["capabilities"] = None
+        self.home.load_capabilities(self.api)
+        return there
+
+    def test_a_player_moves_to_the_main_address_once_the_token_works_there(self):
+        self.remember("cards", 1)
+        there = self.moving_to("https://anki.example.test")
+        self.home.Client.assert_called_once_with("https://anki.example.test", "hill", "secret", "en")
+        there.devices.assert_called_once_with()
+        self.assertEqual("https://anki.example.test", self.settings["url"])
+        self.assertEqual(["https://anki.example.test", "hill"], self.mw.pm.profile[self.home.PLAN_KEY]["account"])
+        self.assertEqual(["https://anki.example.test", "hill"], self.mw.pm.profile[self.home.SESSION_KEY]["account"])
+        self.assertEqual(["https://anki.example.test hill"], self.settings[self.home.SETUP_SHOWN])
+
+    def test_a_player_stays_when_the_token_fails_at_the_main_address(self):
+        self.moving_to("https://anki.example.test", works=False)
+        self.assertEqual("https://example.test", self.settings["url"])
+        self.assertEqual(["https://example.test", "hill"], self.mw.pm.profile[self.home.SESSION_KEY]["account"])
+
+    def test_a_player_stays_at_the_same_or_a_plain_http_address(self):
+        for main in ("https://example.test", "https://example.test/", "http://anki.example.test", None):
+            self.moving_to(main)
+            self.home.Client.assert_not_called()
+            self.assertEqual("https://example.test", self.settings["url"])
 
     def write_config(self, _, values):
         self.settings = dict(values)

@@ -5,9 +5,9 @@ from pathlib import Path
 
 from aqt import gui_hooks, mw
 
-from . import goal_ui, goals, moods, today, today_ui
+from . import address, goal_ui, goals, moods, today, today_ui
 from .board import PAGES
-from .client import offset_west_min
+from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
 from .language import tr
 
@@ -36,6 +36,7 @@ local = {
     "goal_loading": False,
     "capabilities": None,
     "capabilities_loading": False,
+    "moving": False,
 }
 
 
@@ -426,11 +427,46 @@ def load_capabilities(api):
     def done(future):
         local["capabilities_loading"] = False
         try:
-            local["capabilities"] = (api.base, future.result())
+            features, public_url = future.result()
         except Exception as e:
             print("ankiquest capabilities:", e)
+            return
+        local["capabilities"] = (api.base, features)
+        move_to_main_address(api, address.main_address({"public_url": public_url}))
 
-    mw.taskman.run_in_background(lambda: api.capabilities(), done)
+    mw.taskman.run_in_background(lambda: api.server_info(), done)
+
+
+def move_to_main_address(api, main):
+    """Moves a player saved at an older address of their server to its main address `main`,
+    once one signed-in request with their token works there (the device list, which needs it). Keeps the saved address when it
+    does not, and says nothing either way."""
+    if not address.should_move(api.base, main) or local["moving"]:
+        return
+    local["moving"] = True
+    there = Client(main, api.name, api.token, api.language)
+
+    def done(future):
+        local["moving"] = False
+        try:
+            future.result()
+        except Exception as e:
+            print("ankiquest main address:", e)
+            return
+        if account(addon().client()) != account(api):
+            return
+        address.move_profile(mw.pm.profile, api.base, there.base)
+        values = {"url": there.base}
+        shown = addon().config().get(SETUP_SHOWN)
+        if shown:
+            values[SETUP_SHOWN] = address.move_shown(shown, api.base, there.base)
+        addon().save_config(values)
+        local["capabilities"] = (there.base, local["capabilities"][1]) if local["capabilities"] else None
+        local["board_account"] = None
+        if addon().state.get("companion_account") == account(api):
+            addon().state["companion_account"] = account(there)
+
+    mw.taskman.run_in_background(there.devices, done)
 
 
 def server_celebrates_goal(api):
