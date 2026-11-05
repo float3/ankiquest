@@ -1043,6 +1043,7 @@ mod tests {
                 decks: vec![],
                 nudges: Some(true),
                 celebrations: None,
+                global_leaderboard: None,
             }),
         )
         .await

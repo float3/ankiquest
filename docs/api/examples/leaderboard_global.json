@@ -1,0 +1,37 @@
+[
+  {
+    "day_ends_at": 1793246400000,
+    "display": "Hill",
+    "level": 3,
+    "me": true,
+    "period": "day",
+    "periods": {
+      "all": 713,
+      "day": 107,
+      "hour": 51,
+      "month": 713,
+      "week": 246,
+      "year": 713
+    },
+    "rank": 1,
+    "shown": true,
+    "streak": 12,
+    "streak_minutes": 0,
+    "streak_state": "studied",
+    "today_minutes": 0,
+    "today_reviews": 5,
+    "user": "hill",
+    "week_xp": 246,
+    "xp": 107,
+    "xp_total": 713
+  },
+  {
+    "display": "Ana",
+    "level": 1,
+    "period": "day",
+    "rank": 2,
+    "streak": 1,
+    "user": "ana",
+    "xp": 20
+  }
+]

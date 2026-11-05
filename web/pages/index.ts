@@ -11,20 +11,23 @@ type WinScope = "shared" | "lifetime";
 
 interface Person { user: string; display: string; }
 
-/** A row of `/api/leaderboard` (`Standing` in src/main.rs). */
+/**
+ * A row of `/api/leaderboard` (`Standing` in src/boards.rs). On the global board, a stranger who
+ * only opted in has just `user`, `display`, `level`, `xp`, `period`, `streak` and `rank`.
+ */
 interface Standing extends Person {
   level: number;
-  xp_total: number;
-  week_xp: number;
+  xp_total?: number;
+  week_xp?: number;
   /** XP in the requested period. */
   xp: number;
   period: string;
-  periods: Record<Period, number>;
+  periods?: Record<Period, number>;
   streak: number;
-  streak_state: string;
-  day_ends_at: number;
-  today_reviews: number;
-  today_minutes: number;
+  streak_state?: string;
+  day_ends_at?: number;
+  today_reviews?: number;
+  today_minutes?: number;
   /** Review minutes today needs for the streak; 0 or missing when any review counts. */
   streak_minutes?: number;
   /** XP still counting toward the week that just reset, while this player's day began before it. */
@@ -199,7 +202,7 @@ function pageHero(title: string, description: string, note = "") {
 
 function leaderboardKpis(rows: Standing[], period: Period) {
   const total = rows.reduce((sum, row) => sum + row.xp, 0);
-  const reviews = rows.reduce((sum, row) => sum + row.today_reviews, 0);
+  const reviews = rows.reduce((sum, row) => sum + (row.today_reviews ?? 0), 0);
   const bestStreak = Math.max(0, ...rows.map(row => row.streak));
   return aqHtml`<div class="kpis leaderboard-kpis">` +
     AnkiQuestSite.kpi(aqText("Community XP"), num(total), PERIODS[period], "gold") +
@@ -279,9 +282,9 @@ function streakBadge(row: Standing) {
   const expired = row.day_ends_at && row.day_ends_at <= Date.now();
   const known = typeof row.today_reviews === "number";
   const needed = row.streak_minutes ?? 0;
-  const counted = needed > 0 ? row.streak_state === "studied" : row.today_reviews > 0;
+  const counted = needed > 0 ? row.streak_state === "studied" : (row.today_reviews ?? 0) > 0;
   const state = expired || !known ? "unknown" : counted ? "studied" : row.streak_state === "protected" ? "protected" : "pending";
-  const progress = aqText`${num(Math.min(row.today_minutes, needed))} of ${num(needed)} minutes today`;
+  const progress = aqText`${num(Math.min(row.today_minutes ?? 0, needed))} of ${num(needed)} minutes today`;
   const status = state === "studied" ? aqText("Studied today") : needed > 0 && state !== "unknown" ? progress : state === "protected" ? aqText("Streak protected · Not studied yet") : state === "pending" ? aqText("Not studied yet") : aqText("Refresh to see today's study status");
   const label = aqText`${num(row.streak)} day streak · ${status}`;
   return aqHtml`<span class="streak" data-streak-state="${state}" role="img" tabindex="0" aria-label="${esc(label)}" title="${esc(label)}">${streakIcon(state)}${num(row.streak)}</span>`;
@@ -301,7 +304,7 @@ function board(rows: Standing[], me: string) {
         </div>
         <div class="bar"><i style="width:${pct(r.xp, lead)}%"></i></div>
       </div>
-      </div><div class="xp"><b>${num(r.xp)}</b><span>${num(r.today_reviews)} today</span>${r.closing_xp != null && r.day_ends_at > Date.now() ? aqHtml`<span class="closing-xp">${esc(aqText`${num(r.closing_xp)} XP still counting for last week`)}</span>` : ""}</div>
+      </div><div class="xp"><b>${num(r.xp)}</b>${r.today_reviews != null ? aqHtml`<span>${num(r.today_reviews)} today</span>` : ""}${r.closing_xp != null && (r.day_ends_at ?? 0) > Date.now() ? aqHtml`<span class="closing-xp">${esc(aqText`${num(r.closing_xp)} XP still counting for last week`)}</span>` : ""}</div>
     </li>`).join("")}
   </ol><p class="streak-legend">${[["studied",aqText("Studied today")],["pending",aqText("Not studied yet")],["protected",aqText("Streak protected")]].map(([state,label]) => aqHtml`<span data-streak-state="${state}">${streakIcon(state)}${label}</span>`).join("")}</p>`;
 }

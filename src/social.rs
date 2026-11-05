@@ -136,11 +136,16 @@ pub enum Scope {
 }
 
 impl Scope {
-    pub fn parse(value: Option<&str>) -> Option<Option<Scope>> {
+    /// A board's `scope`, with `group` naming the group for `scope=group`. `friends` and
+    /// `circle` are the same board; `group:<id>` is the website's spelling of a group.
+    pub fn parse(value: Option<&str>, group: Option<&str>) -> Option<Option<Scope>> {
         match value {
             None | Some("") => Some(None),
-            Some("circle") => Some(Some(Scope::Circle)),
+            Some("circle" | "friends") => Some(Some(Scope::Circle)),
             Some("global") => Some(Some(Scope::Global)),
+            Some("group") => group
+                .and_then(|id| id.parse().ok())
+                .map(|id| Some(Scope::Group(id))),
             Some(other) => other
                 .strip_prefix("group:")
                 .and_then(|id| id.parse().ok())
@@ -1248,8 +1253,8 @@ mod tests {
         .await;
         assert_eq!(
             users(&board),
-            ["alice"],
-            "the global board only lists public profiles"
+            ["alice", "ana"],
+            "the global board lists public profiles and the viewer, not Bobby who did not opt in"
         );
         let (_, board) = call(
             &app,
@@ -1360,10 +1365,26 @@ mod tests {
 
     #[test]
     fn scopes_parse() {
-        assert_eq!(Scope::parse(None), Some(None));
-        assert_eq!(Scope::parse(Some("circle")), Some(Some(Scope::Circle)));
-        assert_eq!(Scope::parse(Some("group:7")), Some(Some(Scope::Group(7))));
-        assert_eq!(Scope::parse(Some("group:x")), None);
-        assert_eq!(Scope::parse(Some("everyone")), None);
+        assert_eq!(Scope::parse(None, None), Some(None));
+        assert_eq!(
+            Scope::parse(Some("circle"), None),
+            Some(Some(Scope::Circle))
+        );
+        assert_eq!(
+            Scope::parse(Some("group:7"), None),
+            Some(Some(Scope::Group(7)))
+        );
+        assert_eq!(Scope::parse(Some("group:x"), None), None);
+        assert_eq!(Scope::parse(Some("everyone"), None), None);
+        assert_eq!(
+            Scope::parse(Some("friends"), None),
+            Some(Some(Scope::Circle))
+        );
+        assert_eq!(
+            Scope::parse(Some("group"), Some("7")),
+            Some(Some(Scope::Group(7)))
+        );
+        assert_eq!(Scope::parse(Some("group"), None), None);
+        assert_eq!(Scope::parse(Some("group"), Some("x")), None);
     }
 }

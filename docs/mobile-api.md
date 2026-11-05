@@ -126,7 +126,7 @@ repeated successful accept, decline, leave, and creator cancel operations are id
 
 ### friends and groups for apps
 
-`GET /api/social/{user}` answers `{ "friends", "incoming", "outgoing", "muted", "groups", "public" }`. `friends`, `incoming` (requests waiting for the player), `outgoing` (the player's requests waiting for an answer) and `muted` are people as `{ "user", "display" }`, by display name. each group has `id`, `name`, `owner` (whether the player owns it), `invite` (its invite code, only for the owner, otherwise null) and `members`. `public` is whether the player's profile is on the global board. a group's invite link is `/join/{invite}` on the server's site.
+`GET /api/social/{user}` answers `{ "friends", "incoming", "outgoing", "muted", "groups", "public" }`. `friends`, `incoming` (requests waiting for the player), `outgoing` (the player's requests waiting for an answer) and `muted` are people as `{ "user", "display" }`, by display name. each group has `id`, `name`, `owner` (whether the player owns it), `invite` (its invite code, only for the owner, otherwise null) and `members`. `public` is whether the player's profile is public: anyone may open it, and it is on the global board in full (see the global leaderboard below for the separate opt-in that lists a player there without opening the profile). a group's invite link is `/join/{invite}` on the server's site.
 
 `POST /api/social/{user}` takes one `{ "action", ... }` and answers the same object as the `GET`, so a client redraws from the answer:
 
@@ -157,7 +157,23 @@ wins, the daily goal (`/api/goal/{user}`), sharing policies (`/api/sharing/{user
 
 the app's native leaderboard and player profiles read the same JSON as the website's `/`, `/hour` … `/all` and `/week#<user>` pages.
 
-`GET /api/leaderboard?period=hour|day|week|month|year|all` answers the players the viewer may see, ordered by `xp` in that period, then `xp_total`, then `user`. An unknown or missing `period` is `week`. Each row has `user`, `display`, `level`, `xp` (the requested period), `period`, `periods` (every period's XP), `xp_total`, `week_xp`, `streak`, `streak_state`, and today's `today_reviews`, `today_minutes` and `streak_minutes` (review minutes the streak needs; 0 when any review counts), valid until `day_ends_at` (ms). `closing_xp` is there only while the player's current day began before the weekly reset: the XP still counting toward the week that just ended on the board (see `closing_week` below). Optional `scope` is `circle`, `global` or `group:<id>`, as on the website's board picker; a group the viewer is not in is `403`, anything else unknown `400`. Without it the board is the viewer's friends and groups, or everyone public.
+`GET /api/leaderboard?period=hour|day|week|month|year|all` answers the players the viewer may see, ordered by `xp` in that period, then `xp_total`, then `user`. An unknown or missing `period` is `week`. Each row has `user`, `display`, `level`, `xp` (the requested period), `period`, `periods` (every period's XP), `xp_total`, `week_xp`, `streak`, `streak_state`, and today's `today_reviews`, `today_minutes` and `streak_minutes` (review minutes the streak needs; 0 when any review counts), valid until `day_ends_at` (ms). `closing_xp` is there only while the player's current day began before the weekly reset: the XP still counting toward the week that just ended on the board (see `closing_week` below). Optional `scope` picks the players:
+
+- `friends` (or `circle`): the viewer, their friends and the members of their groups. this is also the board without a `scope`, so older apps see what they always did; a viewer who is not signed in gets `global` instead.
+- `group` with `group=<id>` (or `group:<id>`, as on the website's board picker): the members of that group only. a group the viewer is not in, or that does not exist, is `403`; `scope=group` without a numeric `group` is `400`.
+- `global`: the global leaderboard, see below.
+
+anything else is `400`. rows come only for players who have synced reviews.
+
+### the global leaderboard
+
+`GET /api/leaderboard?scope=global&period=…` ranks everyone who turned on the global leaderboard, plus public profiles (a profile made public with the `visibility` action, and configured players, who are public unless they say otherwise). a viewer who is not signed in sees only the public profiles. players the viewer muted are left out; muting stays one way, so a player who muted the viewer still sees the viewer and is still seen. the board lists the first 100 places, plus the viewer's own row when it is further down, and every row has `rank`, its place from 1 among everyone on that board. ranks are unique even for equal XP (the order is the one above).
+
+the viewer's own row is always there once they have synced reviews, opted in or not. it carries `"me": true` and `shown`: whether other players see it on this board. with `"shown": false` the app can say "you, not shown to others". other rows have neither field.
+
+rows of players the viewer can already see in full (themselves, their friends and group mates, and public profiles) are the same as on the circle board. any other player (a stranger who only turned the global leaderboard on) has only `rank`, `user`, `display`, `level`, `xp` (the requested period), `period` and `streak`: no `periods`, `xp_total`, `week_xp`, `streak_state`, today's counts, `day_ends_at` or `closing_xp`. `user` is there for the profile picture (`GET /api/avatar/{user}`) and to mute them with `POST /api/social/{user}` `{"action": "mute", "user"}`, which also takes them off the viewer's global board. their profile stays private: `GET /api/profile/{user}` is still `404` for strangers. records and `POST /api/rank` do not include strangers.
+
+the opt-in is `global_leaderboard` in the player's settings, beside `nudges` and `celebrations`: `GET /api/decks/{user}` answers it (false until the player turns it on) and `POST /api/decks/{user}` with `{"decks": [], "global_leaderboard": true}` changes it and keeps everything else, answering the same settings. older servers have no such field; an app should then hide the switch and the global board. examples: `leaderboard_global.json` (a viewer whose stranger row is Ana), `leaderboard_global_hidden.json` (Ana before opting in: her row with `"shown": false`) and `global_leaderboard_on.json` (the settings answer after turning it on).
 
 `GET /api/week` answers `{ "ends_at", "starts_at", "timezone" }`: when the competition week, and so the weekly board, began and resets (ms).
 

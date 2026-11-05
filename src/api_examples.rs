@@ -715,6 +715,42 @@ async fn examples_match_the_handlers() {
         .await,
     ));
 
+    // The global leaderboard: Ana, who has no friends yet, sees the public profiles and her own
+    // row, which nobody else sees until she turns the global leaderboard on. Then Hill sees her
+    // there as a stranger: name, level, XP and streak only.
+    f.call("POST", "/api/reviews/ana", Some(&ana), f.reviews(2))
+        .await;
+    examples.push((
+        "leaderboard_global_hidden",
+        f.call(
+            "GET",
+            "/api/leaderboard?scope=global",
+            Some(&ana),
+            Value::Null,
+        )
+        .await,
+    ));
+    examples.push((
+        "global_leaderboard_on",
+        f.call(
+            "POST",
+            "/api/decks/ana",
+            Some(&ana),
+            json!({"decks": [], "global_leaderboard": true}),
+        )
+        .await,
+    ));
+    examples.push((
+        "leaderboard_global",
+        f.call(
+            "GET",
+            "/api/leaderboard?scope=global&period=day",
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
     // and belongs to one of Friend's.
