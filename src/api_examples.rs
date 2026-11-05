@@ -679,6 +679,18 @@ async fn examples_match_the_handlers() {
             [conquered],
         )
         .unwrap();
+    // The worker keeps the conquest as a win, whose card the owner can share.
+    crate::wins::create(
+        &f.app.store.lock().unwrap().conn,
+        "hill",
+        &format!("conquered:{conquered}"),
+        Clock::default().day(NOW_MS),
+        NOW_MS,
+        "Card conquered",
+        "A card you forgot 4 times now stays with you for weeks.",
+        &json!({}),
+    )
+    .unwrap();
     examples.push((
         "conquest",
         f.call(

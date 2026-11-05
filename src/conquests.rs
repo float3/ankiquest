@@ -69,6 +69,10 @@ pub(crate) struct Shared {
     pub(crate) told: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) friends: Option<usize>,
+    /// For the owner only, once the worker has kept the conquest as a win: its id, so the
+    /// app can share the win's card (`POST /api/share/{user}` with `to: "link"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) win: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,15 +111,17 @@ pub(crate) async fn show(
     }
     let conquest = find(&app, &user, at).ok_or(StatusCode::NOT_FOUND)?;
     let label = label_of(&app.store.lock().unwrap().conn, &user, at).map_err(store_error)?;
-    let (told, friends) = if authorized(&app, &user, &headers) {
+    let (told, friends, win) = if authorized(&app, &user, &headers) {
         let store = app.store.lock().unwrap();
         let told = store.is_seen(&user, &told_key(at)).map_err(store_error)?;
         let friends = crate::social::friends(&store.conn, &user)
             .map_err(store_error)?
             .len();
-        (Some(told), Some(friends))
+        let win = crate::wins::id_of(&store.conn, &user, &format!("conquered:{at}"))
+            .map_err(store_error)?;
+        (Some(told), Some(friends), win)
     } else {
-        (None, None)
+        (None, None, None)
     };
     Ok(Json(Shared {
         display: app.display(&user),
@@ -124,6 +130,7 @@ pub(crate) async fn show(
         label,
         told,
         friends,
+        win,
     }))
 }
 
