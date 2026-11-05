@@ -18,6 +18,7 @@ XP never depends on which answer button was pressed, so there is no incentive to
 - `sql "<query>"` runs a read-only query against the state database.
 - `remove-account <user>` deletes a self-service account and everything about it, as if they had deleted it themselves; the service carries it out within a minute. players from the configuration are removed there instead.
 - `set-password <user>` gives a self-service account a new random password (16 letters and digits, in groups of four) and prints it once, for someone who forgot theirs. it works straight away, also for an account that signs in with a provider; their devices stay signed in. pass it on privately and ask them to change it under Settings. the log records that it happened, not the password.
+- `adopt-players` turns every configured player with a token into a regular account with the same name, display name and token, so their devices stay signed in. players who already have an account are left alone, and running it twice is safe. afterwards remove them from `users` in the configuration and restart; they keep all their history, friends and groups. they have no password yet: give them one with `set-password`, or let them link a sign-in provider.
 
 ## dev console
 
