@@ -43,28 +43,173 @@ pub(crate) struct Standing {
 struct BoardQuery {
     period: Option<String>,
     scope: Option<String>,
+    /// The group of `scope=group`.
+    group: Option<String>,
 }
+
+impl BoardQuery {
+    fn scope(&self) -> Result<Option<social::Scope>, StatusCode> {
+        social::Scope::parse(self.scope.as_deref(), self.group.as_deref())
+            .ok_or(StatusCode::BAD_REQUEST)
+    }
+}
+
+/// How many players the global board lists, besides the viewer's own row.
+const GLOBAL_ROWS: usize = 100;
 
 /// The players a board shows this viewer, or why it cannot.
 fn board_users(
     app: &App,
     headers: &HeaderMap,
-    scope: Option<&str>,
+    scope: Option<social::Scope>,
 ) -> Result<BTreeSet<String>, StatusCode> {
-    let scope = social::Scope::parse(scope).ok_or(StatusCode::BAD_REQUEST)?;
     let viewer = access::viewer(app, headers);
     app.board(&app.store.lock().unwrap().conn, &viewer, scope)
         .map_err(store_error)?
         .ok_or(StatusCode::FORBIDDEN)
 }
 
+/// A circle or group board lists [`Standing`]s; the global board lists [`GlobalRow`]s.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Board {
+    Standings(Vec<Standing>),
+    Global(Vec<GlobalRow>),
+}
+
+/// A row of the global board.
+#[derive(Serialize)]
+struct GlobalRow {
+    /// The player's place among everyone on the global board, from 1.
+    rank: usize,
+    #[serde(flatten)]
+    row: GlobalStanding,
+    /// Only on the viewer's own row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    me: Option<bool>,
+    /// Only on the viewer's own row: whether other players see it on this board.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shown: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum GlobalStanding {
+    /// The viewer, someone in their circle, or a public profile: as on the circle board.
+    Full(Standing),
+    /// A stranger who only turned on the global leaderboard.
+    Stranger(Stranger),
+}
+
+/// What the global board shows of a player the viewer does not otherwise see.
+#[derive(Serialize)]
+struct Stranger {
+    user: String,
+    display: String,
+    level: u64,
+    xp: u64,
+    period: String,
+    streak: u64,
+}
+
+impl From<Standing> for Stranger {
+    fn from(standing: Standing) -> Self {
+        Stranger {
+            user: standing.user,
+            display: standing.display,
+            level: standing.level,
+            xp: standing.xp,
+            period: standing.period,
+            streak: standing.streak,
+        }
+    }
+}
+
+/// Everyone on the global board for this viewer, and those of them the viewer may see in
+/// full. Signed-in players also see everyone who turned on the global leaderboard, and
+/// themselves, but not the people they muted.
+fn global_users(
+    app: &App,
+    viewer: &social::Viewer,
+) -> Result<(BTreeSet<String>, BTreeSet<String>), crate::Error> {
+    let store = app.store.lock().unwrap();
+    let conn = &store.conn;
+    let mut full = app
+        .board(conn, viewer, Some(social::Scope::Global))?
+        .unwrap_or_default();
+    let mut users = full.clone();
+    if let Some(me) = &viewer.member {
+        users.extend(
+            store
+                .global_leaderboard_players()?
+                .into_iter()
+                .filter(|user| app.is_user(user)),
+        );
+        full.extend(app.circle(conn, me)?);
+        let muted: BTreeSet<String> = conn
+            .prepare("select sender from muted_people where recipient = ?1")?
+            .query_map([me], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        users.retain(|user| !muted.contains(user));
+        users.insert(me.clone());
+    }
+    full.retain(|user| users.contains(user));
+    Ok((users, full))
+}
+
+/// The top of the global board, plus the viewer's own row when it falls below.
+fn global_board(
+    app: &App,
+    viewer: &social::Viewer,
+    period: Option<String>,
+) -> Result<Vec<GlobalRow>, crate::Error> {
+    let (users, full) = global_users(app, viewer)?;
+    let me = viewer.member.as_deref();
+    let shown = match me {
+        Some(me) => {
+            let store = app.store.lock().unwrap();
+            store.global_leaderboard(me)? || app.is_public(&store.conn, me)?
+        }
+        None => false,
+    };
+    Ok(standings(app, &users, period)
+        .into_iter()
+        .enumerate()
+        .filter(|(place, standing)| *place < GLOBAL_ROWS || Some(standing.user.as_str()) == me)
+        .map(|(place, standing)| {
+            let mine = Some(standing.user.as_str()) == me;
+            GlobalRow {
+                rank: place + 1,
+                me: mine.then_some(true),
+                shown: mine.then_some(shown),
+                row: if full.contains(&standing.user) {
+                    GlobalStanding::Full(standing)
+                } else {
+                    GlobalStanding::Stranger(standing.into())
+                },
+            }
+        })
+        .collect())
+}
+
 async fn leaderboard(
     State(app): State<Arc<App>>,
     Query(query): Query<BoardQuery>,
     headers: HeaderMap,
-) -> Result<Json<Vec<Standing>>, StatusCode> {
-    let users = board_users(&app, &headers, query.scope.as_deref())?;
-    Ok(Json(standings(&app, &users, query.period)))
+) -> Result<Json<Board>, StatusCode> {
+    let scope = query.scope()?;
+    if scope == Some(social::Scope::Global) {
+        let viewer = access::viewer(&app, &headers);
+        return global_board(&app, &viewer, query.period)
+            .map(|rows| Json(Board::Global(rows)))
+            .map_err(store_error);
+    }
+    let users = board_users(&app, &headers, scope)?;
+    Ok(Json(Board::Standings(standings(
+        &app,
+        &users,
+        query.period,
+    ))))
 }
 
 pub(crate) fn standings(
@@ -267,7 +412,7 @@ async fn records(
     Query(query): Query<BoardQuery>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RecordBoard>>, StatusCode> {
-    let profiles = app.standings_among(&board_users(&app, &headers, query.scope.as_deref())?);
+    let profiles = app.standings_among(&board_users(&app, &headers, query.scope()?)?);
     let mut board: Vec<RecordBoard> = Records::NAMES
         .iter()
         .map(|window| {
@@ -658,6 +803,275 @@ mod tests {
             .await
             .change
             .is_none()
+        );
+        cleanup(app, path);
+    }
+
+    /// A new account that studied `count` cards ten minutes ago, and its device token.
+    fn account(app: &App, user: &str, count: i64) -> String {
+        let display = format!("{}{}", user[..1].to_uppercase(), &user[1..]);
+        crate::accounts::create(&app.store.lock().unwrap().conn, user, &display, "", 0).unwrap();
+        app.accounts.insert(user, &display);
+        with_reviews(app, user, count);
+        app.issue_token(user, "Phone").unwrap()
+    }
+
+    fn opt_in(app: &App, user: &str) {
+        let mut store = app.store.lock().unwrap();
+        store.set_global_leaderboard(user, true).unwrap();
+    }
+
+    async fn get(
+        app: &Arc<App>,
+        uri: &str,
+        token: Option<&str>,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = axum::http::Request::builder().uri(uri);
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        json_response(route(app, request.body(axum::body::Body::empty()).unwrap()).await).await
+    }
+
+    fn users(board: &serde_json::Value) -> Vec<&str> {
+        board
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["user"].as_str().unwrap())
+            .collect()
+    }
+
+    fn row<'a>(board: &'a serde_json::Value, user: &str) -> &'a serde_json::Value {
+        board
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["user"] == user)
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn without_a_scope_and_with_friends_the_board_is_the_circle_as_before() {
+        let (app, path) = fixture();
+        with_reviews(&app, "hill", 5);
+        with_reviews(&app, "cerro", 3);
+        let ana = account(&app, "ana", 40);
+        opt_in(&app, "ana");
+        let (status, default) = get(&app, "/api/leaderboard", Some("hill-secret")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(users(&default), ["hill", "cerro"]);
+        assert!(default[0]["today_reviews"].is_u64());
+        assert!(default[0].get("rank").is_none(), "{default}");
+        for scope in ["friends", "circle"] {
+            let uri = format!("/api/leaderboard?scope={scope}");
+            assert_eq!(get(&app, &uri, Some("hill-secret")).await.1, default);
+        }
+        let (_, own) = get(&app, "/api/leaderboard", Some(&ana)).await;
+        assert_eq!(users(&own), ["ana"], "an account starts alone");
+        assert_eq!(
+            get(&app, "/api/leaderboard?scope=nobody", Some(&ana))
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn a_group_board_lists_its_members_only_for_members() {
+        let (app, path) = fixture();
+        let ana = account(&app, "ana", 4);
+        let bobby = account(&app, "bobby", 6);
+        let carla = account(&app, "carla", 8);
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute_batch(
+                "insert into groups values (1, 'Spanish club', 'invite', 'ana', 0);
+                 insert into group_members values (1, 'ana', 1, 0), (1, 'bobby', 0, 0);
+                 insert into groups values (2, 'Night owls', 'other', 'carla', 0);
+                 insert into group_members values (2, 'carla', 1, 0), (2, 'ana', 0, 0);",
+            )
+            .unwrap();
+        for uri in [
+            "/api/leaderboard?scope=group&group=1",
+            "/api/leaderboard?scope=group:1",
+        ] {
+            let (status, board) = get(&app, uri, Some(&bobby)).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(users(&board), ["bobby", "ana"], "{uri}");
+        }
+        let (_, circle) = get(&app, "/api/leaderboard?scope=friends", Some(&ana)).await;
+        assert_eq!(users(&circle), ["carla", "bobby", "ana"]);
+        for uri in [
+            "/api/leaderboard?scope=group&group=1",
+            "/api/leaderboard?scope=group&group=99",
+            "/api/records?scope=group&group=1",
+        ] {
+            assert_eq!(
+                get(&app, uri, Some(&carla)).await.0,
+                StatusCode::FORBIDDEN,
+                "{uri}"
+            );
+        }
+        assert_eq!(
+            get(&app, "/api/leaderboard?scope=group", Some(&ana))
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn the_global_board_lists_who_opted_in_and_the_viewer() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        account(&app, "bobby", 6);
+        let carla = account(&app, "carla", 8);
+        opt_in(&app, "bobby");
+        let (status, board) =
+            get(&app, "/api/leaderboard?scope=global&period=day", Some(&ana)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(users(&board), ["bobby", "ana"], "Carla did not opt in");
+        let mine = row(&board, "ana");
+        assert_eq!(
+            (mine["me"].as_bool(), mine["shown"].as_bool()),
+            (Some(true), Some(false))
+        );
+        assert_eq!(mine["rank"], 2);
+        assert!(
+            mine["today_reviews"].is_u64(),
+            "the viewer sees their own row in full"
+        );
+        let stranger = row(&board, "bobby");
+        let mut fields: Vec<&str> = stranger
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort();
+        assert_eq!(
+            fields,
+            ["display", "level", "period", "rank", "streak", "user", "xp"],
+            "nothing about today, the week or decks for strangers"
+        );
+        assert_eq!(stranger["display"], "Bobby");
+        assert_eq!(stranger["period"], "day");
+        assert_eq!(
+            get(&app, "/api/profile/bobby", Some(&ana)).await.0,
+            StatusCode::NOT_FOUND,
+            "the profile stays private"
+        );
+
+        // Turning it on through the settings the app reads.
+        let set = axum::http::Request::builder()
+            .method("POST")
+            .uri("/api/decks/ana")
+            .header("authorization", format!("Bearer {ana}"))
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                r#"{"decks": [], "global_leaderboard": true}"#,
+            ))
+            .unwrap();
+        let (status, settings) = json_response(route(&app, set).await).await;
+        assert_eq!(
+            (status, settings["global_leaderboard"].as_bool()),
+            (StatusCode::OK, Some(true))
+        );
+        assert_eq!(
+            get(&app, "/api/decks/carla", Some(&carla)).await.1["global_leaderboard"],
+            false
+        );
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&carla)).await;
+        assert_eq!(users(&board), ["carla", "bobby", "ana"]);
+        assert_eq!(row(&board, "carla")["shown"], false);
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
+        assert_eq!(row(&board, "ana")["shown"], true);
+        assert!(!users(&board).contains(&"carla"));
+
+        // Friends see each other in full there too.
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into friendships (a, b, requested_by, accepted, created_at)
+                 values ('ana', 'bobby', 'ana', 1, 0)",
+                [],
+            )
+            .unwrap();
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
+        assert!(row(&board, "bobby")["today_reviews"].is_u64());
+        assert!(row(&board, "bobby").get("me").is_none());
+
+        // Without signing in, only public profiles are there.
+        let (status, board) = get(&app, "/api/leaderboard?scope=global", None).await;
+        assert_eq!((status, users(&board)), (StatusCode::OK, vec![]));
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn the_global_board_leaves_out_people_the_viewer_muted() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        let bobby = account(&app, "bobby", 6);
+        opt_in(&app, "ana");
+        opt_in(&app, "bobby");
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into muted_people (recipient, sender, created_at) values ('ana', 'bobby', 0)",
+                [],
+            )
+            .unwrap();
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
+        assert_eq!(users(&board), ["ana"]);
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&bobby)).await;
+        assert_eq!(
+            users(&board),
+            ["bobby", "ana"],
+            "muting is one way, as everywhere else"
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn the_global_board_lists_the_top_hundred_and_the_viewer() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        for index in 0..105 {
+            let user = format!("player{index:03}");
+            account(&app, &user, index + 2);
+            opt_in(&app, &user);
+        }
+        let last = account(&app, "zoe", 1);
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&last)).await;
+        let rows = board.as_array().unwrap();
+        assert_eq!(rows.len(), GLOBAL_ROWS + 1);
+        assert_eq!(rows[0]["rank"], 1);
+        assert_eq!(rows[GLOBAL_ROWS - 1]["rank"], GLOBAL_ROWS);
+        let mine = &rows[GLOBAL_ROWS];
+        assert_eq!(
+            (&mine["user"], &mine["rank"], &mine["me"]),
+            (
+                &serde_json::json!("zoe"),
+                &serde_json::json!(106),
+                &serde_json::json!(true)
+            )
+        );
+        let top = app
+            .issue_token(rows[0]["user"].as_str().unwrap(), "Tablet")
+            .unwrap();
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&top)).await;
+        assert_eq!(
+            board.as_array().unwrap().len(),
+            GLOBAL_ROWS,
+            "the viewer is in the top already"
         );
         cleanup(app, path);
     }

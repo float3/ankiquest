@@ -10,7 +10,7 @@ use rusqlite::Connection;
 
 type Step = fn(&Connection) -> Result<(), Error>;
 
-const STEPS: &[Step] = &[baseline, notification_fetches];
+const STEPS: &[Step] = &[baseline, notification_fetches, global_leaderboard];
 
 /// Brings the database up to the latest step, then turns foreign keys on for the connection.
 pub fn run(conn: &Connection) -> Result<(), Error> {
@@ -148,6 +148,16 @@ fn baseline(conn: &Connection) -> Result<(), Error> {
 /// When the player's own inbox request first returned a notification; null until then.
 fn notification_fetches(conn: &Connection) -> Result<(), Error> {
     add_column(conn, "notifications", "fetched_at", "integer")
+}
+
+/// Whether the player chose to appear on the global leaderboard; off until they turn it on.
+fn global_leaderboard(conn: &Connection) -> Result<(), Error> {
+    add_column(
+        conn,
+        "player_settings",
+        "global_leaderboard",
+        "integer not null default 0",
+    )
 }
 
 #[cfg(test)]

@@ -166,6 +166,7 @@ pub(crate) fn preferences(recipients: &[&str]) -> decks::SettingsUpdate {
         }],
         nudges: None,
         celebrations: None,
+        global_leaderboard: None,
     }
 }
 

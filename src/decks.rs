@@ -65,6 +65,9 @@ pub struct SettingsUpdate {
     pub nudges: Option<bool>,
     #[serde(default)]
     pub celebrations: Option<bool>,
+    /// Whether the player appears on the global leaderboard; left out to keep the choice.
+    #[serde(default)]
+    pub global_leaderboard: Option<bool>,
 }
 
 /// Preferences owned by the recipient, independent of what senders choose to share.
@@ -95,6 +98,9 @@ pub struct Settings {
     pub recipients: Vec<Recipient>,
     pub nudges: bool,
     pub celebrations: bool,
+    /// Whether other signed-in players see this player on the global leaderboard. Off until
+    /// the player turns it on; a public profile is listed there either way.
+    pub global_leaderboard: bool,
 }
 
 /// A completion that was just announced, echoed back so the client can say so locally.
@@ -619,6 +625,28 @@ impl Store {
         Ok(())
     }
 
+    pub fn global_leaderboard(&self, user: &str) -> Result<bool, Error> {
+        self.player_setting(user, "global_leaderboard", false)
+    }
+
+    pub fn set_global_leaderboard(&mut self, user: &str, shown: bool) -> Result<(), Error> {
+        self.conn.execute(
+            "insert into player_settings (user, global_leaderboard) values (?1, ?2)
+             on conflict (user) do update set global_leaderboard = excluded.global_leaderboard",
+            params![user, shown],
+        )?;
+        Ok(())
+    }
+
+    /// Everyone who turned on the global leaderboard.
+    pub fn global_leaderboard_players(&self) -> Result<BTreeSet<String>, Error> {
+        Ok(self
+            .conn
+            .prepare("select user from player_settings where global_leaderboard = 1")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
     pub fn set_nudges(&mut self, user: &str, enabled: bool) -> Result<(), Error> {
         let tx = self.conn.transaction()?;
         tx.execute(
@@ -672,6 +700,7 @@ fn deck_settings(app: &App, store: &Store, user: &str) -> Result<Settings, Error
         recipients: users.into_iter().map(|user| app.recipient(user)).collect(),
         nudges: store.nudges_enabled(user)?,
         celebrations: store.celebrations_enabled(user)?,
+        global_leaderboard: store.global_leaderboard(user)?,
     })
 }
 
@@ -711,6 +740,11 @@ pub(crate) async fn set_decks(
     if let Some(celebrations) = update.celebrations {
         store
             .set_celebrations(&user, celebrations)
+            .map_err(store_error)?;
+    }
+    if let Some(shown) = update.global_leaderboard {
+        store
+            .set_global_leaderboard(&user, shown)
             .map_err(store_error)?;
     }
     deck_settings(&app, &store, &user)
@@ -2143,6 +2177,7 @@ pub(crate) mod tests {
                 }],
                 nudges: None,
                 celebrations: None,
+                global_leaderboard: None,
             },
             SettingsUpdate {
                 decks: vec![
@@ -2159,6 +2194,7 @@ pub(crate) mod tests {
                 ],
                 nudges: None,
                 celebrations: None,
+                global_leaderboard: None,
             },
         ] {
             assert_eq!(

@@ -869,6 +869,7 @@ mod tests {
                     decks: vec![],
                     nudges: Some(false),
                     celebrations: None,
+                    global_leaderboard: None,
                 }),
             )
             .await
@@ -884,6 +885,7 @@ mod tests {
                         decks: vec![],
                         nudges: Some(true),
                         celebrations: None,
+                        global_leaderboard: None,
                     }),
                 )
                 .await
