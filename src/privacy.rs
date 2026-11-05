@@ -14,6 +14,7 @@ use axum::{Json, Router, routing::get};
 use rusqlite::Connection;
 use rusqlite::types::ValueRef;
 use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -149,7 +150,7 @@ const OWNED: &[(&str, &str)] = &[
     ("community_members", "user = ?1"),
     ("community_requests", "creator = ?1"),
     ("community_weekly_suggestions", "owner = ?1 or friend = ?1"),
-    ("friendships", "a = ?1 or b = ?1"),
+    ("friendships", "a = ?1 or b = ?1 or requested_by = ?1"),
     ("avatars", "user = ?1"),
     ("wins", "user = ?1"),
     ("conquest_labels", "user = ?1"),
@@ -172,6 +173,143 @@ const OWNED: &[(&str, &str)] = &[
     ("goals", "user = ?1"),
     ("sharing_settings", "user = ?1"),
     ("accounts", "user = ?1"),
+];
+
+/// Every column that holds a player's name. `forget` clears them all, and the startup check
+/// looks through them for players the server no longer knows.
+pub(crate) const NAMED: &[(&str, &str)] = &[
+    ("account_removals", "user"),
+    ("account_tokens", "user"),
+    ("accounts", "user"),
+    ("announcements", "sender"),
+    ("avatars", "user"),
+    ("clock_history", "user"),
+    ("clocks", "user"),
+    ("community_challenges", "creator"),
+    ("community_members", "user"),
+    ("community_requests", "creator"),
+    ("community_weekly_suggestions", "friend"),
+    ("community_weekly_suggestions", "owner"),
+    ("companion_preferences", "user"),
+    ("conquest_labels", "user"),
+    ("deck_completions", "owner"),
+    ("deck_copy_offers", "sender"),
+    ("deck_copy_recipients", "recipient"),
+    ("deck_recipients", "owner"),
+    ("deck_recipients", "recipient"),
+    ("decks", "owner"),
+    ("freeze_grant_reloads", "user"),
+    ("freeze_grants", "user"),
+    ("freeze_legacy_players", "user"),
+    ("freeze_preferences", "user"),
+    ("friend_nudge_muted_senders", "recipient"),
+    ("friend_nudge_muted_senders", "sender"),
+    ("friendships", "a"),
+    ("friendships", "b"),
+    ("friendships", "requested_by"),
+    ("goals", "user"),
+    ("group_members", "user"),
+    ("groups", "created_by"),
+    ("incoming_muted_senders", "recipient"),
+    ("incoming_muted_senders", "sender"),
+    ("incoming_settings", "user"),
+    ("languages", "user"),
+    ("muted_people", "recipient"),
+    ("muted_people", "sender"),
+    ("notifications", "recipient"),
+    ("notifications", "sender"),
+    ("player_settings", "user"),
+    ("player_streak_minutes", "user"),
+    ("reactions", "reactor"),
+    ("reactions", "sender"),
+    ("reminder_baselines", "user"),
+    ("reminder_settings", "user"),
+    ("review_syncs", "user"),
+    ("reviews", "user"),
+    ("seen", "user"),
+    ("sender_unsubscriptions", "recipient"),
+    ("sender_unsubscriptions", "sender"),
+    ("server_log", "user"),
+    ("sharing_settings", "user"),
+    ("sign_in_links", "user"),
+    ("subscription_baselines", "recipient"),
+    ("subscription_baselines", "sender"),
+    ("sync_signatures", "user"),
+    ("unsubscribed_decks", "recipient"),
+    ("unsubscribed_decks", "sender"),
+    ("visibility", "user"),
+    ("win_deliveries", "recipient"),
+    ("wins", "user"),
+];
+
+/// Text columns that hold something other than a player's name.
+#[cfg(test)]
+const NOT_NAMES: &[&str] = &[
+    "account_token_uses.token_hash",
+    "account_tokens.device",
+    "account_tokens.token_hash",
+    "accounts.display",
+    "accounts.password_hash",
+    "announcements.body",
+    "announcements.groups",
+    "announcements.title",
+    "community_challenges.kind",
+    "community_challenges.title",
+    "community_members.status",
+    "community_requests.payload",
+    "community_requests.request_id",
+    "companion_preferences.companion",
+    // Past winners stay in the community's history.
+    "competition_meta.payload",
+    "competition_periods.key",
+    "competition_periods.kind",
+    "competition_periods.payload",
+    "conquest_labels.label",
+    "deck_completions.deck_id",
+    "deck_copy_offers.deck",
+    "deck_recipients.deck_id",
+    "decks.id",
+    "decks.name",
+    "freeze_grants.date",
+    "goals.mode",
+    "groups.invite",
+    "groups.name",
+    "languages.language",
+    "notifications.body",
+    "notifications.kind",
+    "notifications.reply_to_body",
+    "notifications.reply_to_title",
+    "notifications.title",
+    "notifications.topic",
+    "reminder_baselines.kind",
+    "reminder_settings.settings",
+    // Keys can name another player; `forget` matches those patterns.
+    "seen.key",
+    "server_log.level",
+    "server_log.message",
+    "server_settings.key",
+    "server_settings.value",
+    "sharing_settings.policies",
+    "sign_in_links.provider",
+    "sign_in_links.subject",
+    "subscription_baselines.deck_id",
+    "sync_signatures.files",
+    "unsubscribed_decks.deck_id",
+    "wins.art",
+    "wins.body",
+    "wins.key",
+    "wins.kind",
+    "wins.link_token",
+    "wins.stats",
+    "wins.title",
+];
+
+/// Name columns that `forget` clears outside `OWNED`.
+#[cfg(test)]
+const FORGOTTEN_SEPARATELY: &[(&str, &str)] = &[
+    ("group_members", "user"),
+    ("groups", "created_by"),
+    ("community_challenges", "creator"),
 ];
 
 /// Tables without per-player rows, or handled separately in `forget`.
@@ -227,16 +365,26 @@ pub fn export(conn: &Connection, user: &str) -> rusqlite::Result<serde_json::Val
     Ok(document.into())
 }
 
-/// Deletes the player's rows everywhere. Groups pass to their next member, and goals the player created end for everyone.
-pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<()> {
+/// Deletes the player's rows everywhere, and returns how many rows went from each table.
+/// Groups pass to their next member, and goals the player created end for everyone.
+pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<Vec<(String, usize)>> {
     let transaction = conn.unchecked_transaction()?;
+    let mut removed = BTreeMap::<String, usize>::new();
     let groups: Vec<i64> = transaction
         .prepare("select group_id from group_members where user = ?1")?
         .query_map([user], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
+    if !groups.is_empty() {
+        removed.insert("group_members".into(), groups.len());
+    }
     for group in groups {
         crate::social::leave(&transaction, group, user)?;
     }
+    // Who created a group is not shown anywhere, and the group lives on with its members.
+    transaction.execute(
+        "update groups set created_by = '' where created_by = ?1",
+        [user],
+    )?;
     let created = "select id from community_challenges where creator = ?1";
     for table in [
         "community_members",
@@ -253,14 +401,102 @@ pub fn forget(conn: &Connection, user: &str) -> rusqlite::Result<()> {
         [user],
     )?;
     transaction.execute(&format!("update community_weekly_suggestions set challenge = null where challenge in ({created})"), [user])?;
-    transaction.execute(
+    let challenges = transaction.execute(
         "delete from community_challenges where creator = ?1",
         [user],
     )?;
-    for (table, condition) in OWNED {
-        transaction.execute(&format!("delete from {table} where {condition}"), [user])?;
+    if challenges > 0 {
+        removed.insert("community_challenges".into(), challenges);
     }
-    transaction.commit()
+    for (table, condition) in OWNED {
+        let count =
+            transaction.execute(&format!("delete from {table} where {condition}"), [user])?;
+        if count > 0 {
+            *removed.entry((*table).to_string()).or_default() += count;
+        }
+    }
+    transaction.commit()?;
+    Ok(removed.into_iter().collect())
+}
+
+/// Whether any row names `user`.
+pub fn mentioned(conn: &Connection, user: &str) -> rusqlite::Result<bool> {
+    for (table, column) in NAMED {
+        if conn
+            .prepare(&format!(
+                "select 1 from {table} where {column} = ?1 limit 1"
+            ))?
+            .exists([user])?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Rows per table, for each player named somewhere.
+pub type Footprints = BTreeMap<String, BTreeMap<String, i64>>;
+
+/// Players named in some row but not in `known`, with how many rows name them in each table.
+pub fn unknown_players(
+    conn: &Connection,
+    known: &BTreeSet<String>,
+) -> rusqlite::Result<Footprints> {
+    let mut unknown = Footprints::new();
+    for (table, column) in NAMED {
+        let rows: Vec<(String, i64)> = conn
+            .prepare(&format!(
+                "select {column}, count(*) from {table} where {column} != '' group by {column}"
+            ))?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (user, count) in rows {
+            if !known.contains(&user) {
+                *unknown
+                    .entry(user)
+                    .or_default()
+                    .entry((*table).to_string())
+                    .or_default() += count;
+            }
+        }
+    }
+    Ok(unknown)
+}
+
+/// Warns in the server log about rows of players who are neither configured, nor an account,
+/// nor in the sync folder, for example after a player was taken out of the configuration.
+/// Nothing is deleted: `admin remove-player` does that once someone has looked.
+pub fn warn_about_unknown_players(app: &App) {
+    let mut known: BTreeSet<String> = app.config.users.keys().cloned().collect();
+    known.extend(app.accounts.users());
+    if let Some(base) = &app.config.sync_base {
+        match crate::worker::sync_users(base) {
+            Ok(users) => known.extend(users),
+            Err(error) => {
+                log_error!(
+                    "skipped the check for unknown players: the sync folder could not be read: {error}"
+                );
+                return;
+            }
+        }
+    }
+    let found = unknown_players(&app.store.lock().unwrap().conn, &known);
+    match found {
+        Ok(found) => {
+            for (user, tables) in found {
+                let rows: Vec<String> = tables
+                    .iter()
+                    .map(|(table, count)| format!("{table} {count}"))
+                    .collect();
+                log_warning!(
+                    user: user,
+                    "rows of {user}, who is not configured, an account or in the sync folder: {}. admin remove-player {user} deletes them",
+                    rows.join(", ")
+                );
+            }
+        }
+        Err(error) => log_error!("the check for unknown players failed: {error}"),
+    }
 }
 
 /// Drops a forgotten account from memory and signs it out everywhere.
@@ -513,7 +749,6 @@ mod tests {
     use axum::body::{Body, to_bytes};
 
     use axum::http::Request;
-    use std::collections::BTreeSet;
     use std::path::PathBuf;
 
     fn fixture() -> (Arc<App>, PathBuf) {
@@ -618,6 +853,85 @@ mod tests {
             tables, known,
             "decide how deletion and export treat every new table"
         );
+        cleanup(app, path);
+    }
+
+    #[test]
+    fn every_text_column_is_known_to_hold_a_name_or_not() {
+        let (app, path) = fixture();
+        let columns: BTreeSet<String> = app
+            .store
+            .lock()
+            .unwrap()
+            .conn
+            .prepare(
+                "select m.name || '.' || c.name from sqlite_master m join pragma_table_info(m.name) c
+                 where m.type = 'table' and m.name not like 'sqlite_%'
+                   and (upper(c.type) like '%TEXT%' or c.type = '')",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let named: BTreeSet<String> = NAMED
+            .iter()
+            .map(|(table, column)| format!("{table}.{column}"))
+            .collect();
+        let classified: BTreeSet<String> = named
+            .iter()
+            .cloned()
+            .chain(NOT_NAMES.iter().map(|c| c.to_string()))
+            .collect();
+        assert_eq!(
+            classified.len(),
+            NAMED.len() + NOT_NAMES.len(),
+            "a column is listed twice"
+        );
+        assert_eq!(
+            columns, classified,
+            "add a new text column to NAMED if it holds a player's name, otherwise to NOT_NAMES"
+        );
+        cleanup(app, path);
+    }
+
+    #[test]
+    fn forgetting_clears_every_column_that_names_a_player() {
+        let missing: Vec<String> = NAMED
+            .iter()
+            .filter(|named| !FORGOTTEN_SEPARATELY.contains(named))
+            .filter(|(table, column)| {
+                !OWNED.iter().any(|(owned, condition)| {
+                    owned == table
+                        && condition
+                            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                            .any(|word| word == *column)
+                })
+            })
+            .map(|(table, column)| format!("{table}.{column}"))
+            .collect();
+        assert!(missing.is_empty(), "OWNED does not clear {missing:?}");
+    }
+
+    #[test]
+    fn rows_of_players_the_server_does_not_know_are_found_and_kept() {
+        let (app, path) = fixture();
+        seed(&app, "gone", "alice");
+        {
+            let conn = &app.store.lock().unwrap().conn;
+            let known: BTreeSet<String> = ["alice".to_string()].into();
+            let unknown = unknown_players(conn, &known).unwrap();
+            assert_eq!(unknown.keys().collect::<Vec<_>>(), ["gone"]);
+            let tables = &unknown["gone"];
+            assert_eq!(tables["reviews"], 1);
+            assert_eq!(tables["deck_recipients"], 2, "as owner and as recipient");
+            assert_eq!(tables["notifications"], 2, "as sender and as recipient");
+            assert!(mentioned(conn, "gone").unwrap());
+            let removed = forget(conn, "gone").unwrap();
+            assert!(removed.contains(&("reviews".to_string(), 1)), "{removed:?}");
+            assert!(unknown_players(conn, &known).unwrap().is_empty());
+            assert!(!mentioned(conn, "gone").unwrap());
+        }
         cleanup(app, path);
     }
 

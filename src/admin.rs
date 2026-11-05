@@ -5,7 +5,8 @@
 use crate::game::{DAY_MS, PlayerStreakChange, ReviewWeighting, StreakChange, StreakRule};
 use crate::store::{Error, Store};
 use chrono::DateTime;
-use rusqlite::{Connection, OpenFlags, params, types::ValueRef};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params, types::ValueRef};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -31,6 +32,16 @@ macro_rules! log_info {
     };
     ($($arg:tt)*) => {
         $crate::admin::record("info", None, format!($($arg)*))
+    };
+}
+
+/// Like `log_error!`, for things someone should look at that are not failures.
+macro_rules! log_warning {
+    (user: $user:expr, $($arg:tt)*) => {
+        $crate::admin::record("warning", Some(&*$user), format!($($arg)*))
+    };
+    ($($arg:tt)*) => {
+        $crate::admin::record("warning", None, format!($($arg)*))
     };
 }
 
@@ -283,10 +294,20 @@ pub const USAGE: &str = "usage: ankiquest [config.json] admin <command>
   settings                        show the settings the service is using
   set <setting> <value>           override a setting while the service runs
   reset <setting>                 go back to the configured value
-  logs [--since <n>m|h|d|all] [--level info|error] [--user <player>] [--limit <n>]
+  logs [--since <n>m|h|d|all] [--level info|warning|error] [--user <player>] [--limit <n>]
                                   print the server log (default: last 7 days, 200 lines)
   sql <query>                     run a read-only SQL query against the state
   remove-account <user>           delete a self-service account and everything about it
+  remove-player <user>            delete everything stored about any player, also one no
+                                  longer configured; backs the database up first
+  group-add <group> <user>...|--all
+                                  put players in a group (by id), with the same limits as
+                                  joining by invite
+  group-remove <group> <user>...  take players out of a group; the longest member inherits
+                                  it, and decks stop going to people no longer connected
+  befriend <user> <user>...|--all make every pair of these players friends
+  unfriend <user> [<user>...]     end the friendships between the first player and the
+                                  others, or all of the first player's friendships
   set-password <user>             give a self-service account a new random password, for
                                   someone who forgot theirs; prints it once
   adopt-players                   turn every configured player into a regular account that
@@ -310,6 +331,57 @@ pub enum Command {
     AdoptPlayers,
     GrantFreeze(String, Vec<String>, bool),
     PlayerStreakMinutes(String, Option<u32>),
+    RemovePlayer(String),
+    GroupAdd(i64, Players),
+    GroupRemove(i64, Vec<String>),
+    Befriend(Players),
+    Unfriend(String, Vec<String>),
+}
+
+/// The players a command names, or everyone.
+#[derive(Debug, PartialEq)]
+pub enum Players {
+    All,
+    Named(Vec<String>),
+}
+
+impl Command {
+    /// Commands about who plays and who is connected, which need the configuration; see [`people`].
+    pub fn is_about_people(&self) -> bool {
+        matches!(
+            self,
+            Command::RemovePlayer(_)
+                | Command::GroupAdd(..)
+                | Command::GroupRemove(..)
+                | Command::Befriend(_)
+                | Command::Unfriend(..)
+        )
+    }
+}
+
+fn group_id(value: &str) -> Result<i64, Error> {
+    value.parse().map_err(|_| {
+        format!("{value} is not a group id; find it with: sql \"select id, name from groups\"")
+            .into()
+    })
+}
+
+fn names(words: &[&str]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for word in words {
+        if !names.iter().any(|name| name == word) {
+            names.push(word.to_string());
+        }
+    }
+    names
+}
+
+fn players(words: &[&str]) -> Players {
+    if words == ["--all"] {
+        Players::All
+    } else {
+        Players::Named(names(words))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -332,6 +404,17 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
         ["reset", key] => Command::Reset(key_of(key)),
         ["sql", query] => Command::Sql(query.to_string()),
         ["remove-account", user] => Command::RemoveAccount(user.to_string()),
+        ["remove-player", user] => Command::RemovePlayer(user.to_string()),
+        ["group-add", group, users @ ..] if !users.is_empty() => {
+            Command::GroupAdd(group_id(group)?, players(users))
+        }
+        ["group-remove", group, users @ ..] if !users.is_empty() => {
+            Command::GroupRemove(group_id(group)?, names(users))
+        }
+        ["befriend", users @ ..] if users == ["--all"] || users.len() >= 2 => {
+            Command::Befriend(players(users))
+        }
+        ["unfriend", user, others @ ..] => Command::Unfriend(user.to_string(), names(others)),
         ["set-password", user] => Command::SetPassword(user.to_string()),
         ["adopt-players"] => Command::AdoptPlayers,
         ["streak-minutes", user, "default"] => Command::PlayerStreakMinutes(user.to_string(), None),
@@ -372,10 +455,10 @@ pub fn parse(args: &[String]) -> Result<Command, Error> {
                     .ok_or_else(|| format!("{option} needs a value"))?;
                 match *option {
                     "--since" => filter.since_ms = parse_age(value)?,
-                    "--level" if matches!(*value, "info" | "error") => {
+                    "--level" if matches!(*value, "info" | "warning" | "error") => {
                         filter.level = Some(value.to_string());
                     }
-                    "--level" => return Err("--level must be info or error".into()),
+                    "--level" => return Err("--level must be info, warning or error".into()),
                     "--user" => filter.user = Some(value.to_string()),
                     "--limit" => {
                         filter.limit = value.parse().map_err(|_| "--limit must be a number")?;
@@ -415,8 +498,8 @@ pub fn run(
     if let Command::Sql(query) = &command {
         return sql(state_dir, query);
     }
-    if command == Command::AdoptPlayers {
-        return Err("adopt-players needs the configured players; use adopt()".into());
+    if command == Command::AdoptPlayers || command.is_about_people() {
+        return Err("this command needs the configuration; use adopt() or people()".into());
     }
     let store = Store::open(state_dir)?;
     let conn = &store.conn;
@@ -558,7 +641,7 @@ other devices stay signed in.
 "
             )
         }
-        Command::Sql(_) | Command::AdoptPlayers => unreachable!(),
+        _ => unreachable!(),
     })
 }
 
@@ -638,6 +721,383 @@ pub fn adopt(state_dir: &Path, players: &[Configured], now_ms: i64) -> Result<St
             they have no password yet: give them one with set-password, or let them link a sign-in provider.
 ";
     Ok(out)
+}
+
+/// What [`people`] needs from the configuration besides the state.
+pub struct Setup<'a> {
+    pub state_dir: &'a Path,
+    /// Where each change backs the database up before it writes.
+    pub backups: &'a Path,
+    /// The players in the configuration.
+    pub configured: BTreeSet<String>,
+    pub sync_base: Option<&'a Path>,
+}
+
+/// Who plays here, as the running service sees it.
+struct Roster {
+    configured: BTreeSet<String>,
+    accounts: BTreeSet<String>,
+    /// Everyone with a history, configured or with an account.
+    known: BTreeSet<String>,
+}
+
+impl Roster {
+    fn load(store: &Store, configured: BTreeSet<String>) -> Result<Self, Error> {
+        let accounts: BTreeSet<String> = store
+            .conn
+            .prepare("select user from accounts")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut known: BTreeSet<String> = store.users()?.into_iter().collect();
+        known.extend(configured.iter().cloned());
+        known.extend(accounts.iter().cloned());
+        Ok(Roster {
+            configured,
+            accounts,
+            known,
+        })
+    }
+
+    /// Players others can befriend: configured players and accounts, as `App::is_user`.
+    fn players(&self) -> BTreeSet<String> {
+        self.configured.union(&self.accounts).cloned().collect()
+    }
+
+    fn named(&self, who: Players) -> Result<Vec<String>, Error> {
+        let players = self.players();
+        match who {
+            Players::All => Ok(players.into_iter().collect()),
+            Players::Named(users) => {
+                let strangers: Vec<&str> = users
+                    .iter()
+                    .filter(|user| !players.contains(*user))
+                    .map(String::as_str)
+                    .collect();
+                if strangers.is_empty() {
+                    Ok(users)
+                } else {
+                    Err(format!(
+                        "not a player on this server: {}; nothing was changed",
+                        strangers.join(", ")
+                    )
+                    .into())
+                }
+            }
+        }
+    }
+
+    /// As `App::circle`.
+    fn circle(&self, conn: &Connection, user: &str) -> rusqlite::Result<BTreeSet<String>> {
+        crate::social::circle_of(conn, user, !self.accounts.contains(user), || {
+            self.known
+                .iter()
+                .filter(|other| !self.accounts.contains(*other))
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// Stops deck notifications `user` no longer has a connection for, and says how many.
+    fn prune(&self, conn: &Connection, user: &str) -> Result<String, Error> {
+        let removed = crate::social::prune_outside(conn, user, &self.circle(conn, user)?)?;
+        Ok(if removed == 0 {
+            String::new()
+        } else {
+            format!(
+                "; {removed} deck notification(s) to or from people no longer connected stopped"
+            )
+        })
+    }
+}
+
+/// Copies the whole database to `dir` before a change, so it can be undone by hand.
+fn backup(conn: &Connection, dir: &Path, verb: &str, now_ms: i64) -> Result<String, Error> {
+    std::fs::create_dir_all(dir).map_err(|error| {
+        format!(
+            "could not create the backup folder {}: {error}; nothing was changed",
+            dir.display()
+        )
+    })?;
+    let stamp = DateTime::from_timestamp_millis(now_ms).map_or_else(
+        || now_ms.to_string(),
+        |at| at.format("%Y%m%d-%H%M%S").to_string(),
+    );
+    let mut path = dir.join(format!("ankiquest-{stamp}-{verb}.db"));
+    let mut n = 1;
+    while path.exists() {
+        n += 1;
+        path = dir.join(format!("ankiquest-{stamp}-{verb}-{n}.db"));
+    }
+    let shown = path.display().to_string();
+    conn.execute("vacuum into ?1", [&shown]).map_err(|error| {
+        format!("could not back the database up to {shown}: {error}; nothing was changed")
+    })?;
+    Ok(format!("backed up the database to {shown}\n"))
+}
+
+/// The commands about who plays and who is connected with whom. Each checks first, then backs
+/// the database up, then writes and says what changed. The running service reads groups and
+/// friendships from the database on every request, so changes apply straight away; a removed
+/// player leaves its memory on its next tick.
+pub fn people(setup: &Setup, command: Command, now_ms: i64) -> Result<String, Error> {
+    let store = Store::open(setup.state_dir)?;
+    let roster = Roster::load(&store, setup.configured.clone())?;
+    let conn = &store.conn;
+    let group_name = |group: i64| -> Result<String, Error> {
+        conn.query_row("select name from groups where id = ?1", [group], |r| {
+            r.get(0)
+        })
+        .optional()?
+        .ok_or_else(|| {
+            format!(
+                "there is no group {group}; list them with: sql \"select id, name from groups\""
+            )
+            .into()
+        })
+    };
+    let live = "the service sees this straight away, no restart needed.\n";
+    Ok(match command {
+        Command::GroupAdd(group, who) => {
+            let name = group_name(group)?;
+            let users = roster.named(who)?;
+            let mut out = backup(conn, setup.backups, "group-add", now_ms)?;
+            let tx = conn.unchecked_transaction()?;
+            let mut added = Vec::new();
+            for user in &users {
+                if crate::social::is_member(&tx, group, user)? {
+                    out += &format!("{user}: already in {name}\n");
+                    continue;
+                }
+                let groups: i64 = tx.query_row(
+                    "select count(*) from group_members where user = ?1",
+                    [user],
+                    |r| r.get(0),
+                )?;
+                let members: i64 = tx.query_row(
+                    "select count(*) from group_members where group_id = ?1",
+                    [group],
+                    |r| r.get(0),
+                )?;
+                if groups >= crate::social::MAX_GROUPS {
+                    out += &format!(
+                        "{user}: skipped, already in {} groups\n",
+                        crate::social::MAX_GROUPS
+                    );
+                    continue;
+                }
+                if members >= crate::social::MAX_MEMBERS {
+                    out += &format!(
+                        "{user}: skipped, {name} is full ({} members)\n",
+                        crate::social::MAX_MEMBERS
+                    );
+                    continue;
+                }
+                tx.execute(
+                    "insert into group_members (group_id, user, owner, joined_at) values (?1, ?2, 0, ?3)",
+                    params![group, user, now_ms],
+                )?;
+                out += &format!("{user}: added to {name}\n");
+                added.push(user.as_str());
+            }
+            if !added.is_empty() {
+                admin_log(
+                    &tx,
+                    now_ms,
+                    format!("admin added {} to group {group}", added.join(", ")),
+                )?;
+            }
+            tx.commit()?;
+            out + live
+        }
+        Command::GroupRemove(group, users) => {
+            let name = group_name(group)?;
+            let mut out = backup(conn, setup.backups, "group-remove", now_ms)?;
+            let tx = conn.unchecked_transaction()?;
+            let mut removed = Vec::new();
+            for user in &users {
+                if !crate::social::is_member(&tx, group, user)? {
+                    out += &format!("{user}: not in {name}\n");
+                    continue;
+                }
+                let owned = crate::social::owns(&tx, group, user)?;
+                crate::social::leave(&tx, group, user)?;
+                let pruned = roster.prune(&tx, user)?;
+                out += &format!("{user}: removed from {name}{pruned}\n");
+                if owned {
+                    let next: Option<String> = tx
+                        .query_row(
+                            "select user from group_members where group_id = ?1 and owner = 1",
+                            [group],
+                            |r| r.get(0),
+                        )
+                        .optional()?;
+                    if let Some(next) = next {
+                        out += &format!("{next} now owns {name}\n");
+                    }
+                }
+                removed.push(user.as_str());
+            }
+            if !tx
+                .prepare("select 1 from groups where id = ?1")?
+                .exists([group])?
+            {
+                out += &format!("{name} had nobody left and was deleted\n");
+            }
+            if !removed.is_empty() {
+                admin_log(
+                    &tx,
+                    now_ms,
+                    format!("admin removed {} from group {group}", removed.join(", ")),
+                )?;
+            }
+            tx.commit()?;
+            out + live
+        }
+        Command::Befriend(who) => {
+            let users = roster.named(who)?;
+            if users.len() < 2 {
+                return Err("befriend needs at least two players".into());
+            }
+            let mut out = backup(conn, setup.backups, "befriend", now_ms)?;
+            let tx = conn.unchecked_transaction()?;
+            let (mut made, mut already) = (0, 0);
+            for (i, x) in users.iter().enumerate() {
+                for y in &users[i + 1..] {
+                    let (a, b) = crate::social::pair(x, y);
+                    let accepted: Option<bool> = tx
+                        .query_row(
+                            "select accepted from friendships where a = ?1 and b = ?2",
+                            params![a, b],
+                            |r| r.get(0),
+                        )
+                        .optional()?;
+                    match accepted {
+                        Some(true) => {
+                            already += 1;
+                            continue;
+                        }
+                        Some(false) => {
+                            tx.execute(
+                                "update friendships set accepted = 1 where a = ?1 and b = ?2",
+                                params![a, b],
+                            )?;
+                            out += &format!(
+                                "{a} and {b}: friends now (the open request was accepted)\n"
+                            );
+                        }
+                        None => {
+                            tx.execute(
+                                "insert into friendships (a, b, requested_by, accepted, created_at) values (?1, ?2, ?1, 1, ?3)",
+                                params![a, b, now_ms],
+                            )?;
+                            out += &format!("{a} and {b}: friends now\n");
+                        }
+                    }
+                    made += 1;
+                }
+            }
+            if already > 0 {
+                out += &format!("{already} pair(s) were friends already\n");
+            }
+            if made > 0 {
+                admin_log(
+                    &tx,
+                    now_ms,
+                    format!(
+                        "admin made {made} pair(s) of friends among {}",
+                        users.join(", ")
+                    ),
+                )?;
+            }
+            tx.commit()?;
+            out + live
+        }
+        Command::Unfriend(user, others) => {
+            let rows: Vec<(String, String, bool)> = conn
+                .prepare(
+                    "select a, b, accepted from friendships where a = ?1 or b = ?1 order by a, b",
+                )?
+                .query_map([&user], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<Result<_, _>>()?;
+            let rows: Vec<(String, String, bool)> = rows
+                .into_iter()
+                .filter(|(a, b, _)| {
+                    let other = if *a == user { b } else { a };
+                    others.is_empty() || others.contains(other)
+                })
+                .collect();
+            if rows.is_empty() {
+                return Ok(format!(
+                    "{user} has no such friendship or request; nothing was changed.\n"
+                ));
+            }
+            let mut out = backup(conn, setup.backups, "unfriend", now_ms)?;
+            let tx = conn.unchecked_transaction()?;
+            let mut ended = Vec::new();
+            for (a, b, accepted) in &rows {
+                tx.execute(
+                    "delete from friendships where a = ?1 and b = ?2",
+                    params![a, b],
+                )?;
+                let other = if *a == user { b } else { a };
+                let what = if *accepted {
+                    "no longer friends"
+                } else {
+                    "friend request withdrawn"
+                };
+                out += &format!("{user} and {other}: {what}\n");
+                ended.push(other.as_str());
+            }
+            let pruned = roster.prune(&tx, &user)?;
+            if !pruned.is_empty() {
+                out += &format!("{user}{pruned}\n");
+            }
+            admin_log(
+                &tx,
+                now_ms,
+                format!(
+                    "admin ended the friendships of {user} with {}",
+                    ended.join(", ")
+                ),
+            )?;
+            tx.commit()?;
+            out + live
+        }
+        Command::RemovePlayer(user) => {
+            if !crate::privacy::mentioned(conn, &user)? {
+                return Err(format!("nothing is stored about {user}; nothing was changed").into());
+            }
+            let mut out = backup(conn, setup.backups, "remove-player", now_ms)?;
+            let removed = crate::privacy::forget(conn, &user)?;
+            // The running service then drops them from memory and signs their devices out.
+            conn.execute(
+                "insert or ignore into account_removals (user, requested_at) values (?1, ?2)",
+                params![user, now_ms],
+            )?;
+            admin_log(conn, now_ms, format!("admin removed the player {user}"))?;
+            out += &format!("removed everything about {user}:\n");
+            for (table, rows) in removed {
+                out += &format!("    {table}: {rows} row(s)\n");
+            }
+            out += "the service forgets them within a minute and signs their devices out.\n";
+            if roster.configured.contains(&user) {
+                out += &format!(
+                    "{user} is still in the configuration: take them out of users and restart, or they come back with nothing.\n"
+                );
+            }
+            if let Some(base) = setup.sync_base {
+                let folder = base.join(&user);
+                if folder.join("collection.anki2").is_file() {
+                    out += &format!(
+                        "their sync folder {} is still there, so the next import brings their reviews back; remove them from the sync server too.\n",
+                        folder.display()
+                    );
+                }
+            }
+            out
+        }
+        _ => return Err("not a command about players; use run()".into()),
+    })
 }
 
 fn admin_log(conn: &Connection, now_ms: i64, message: String) -> Result<(), Error> {
@@ -1185,5 +1645,251 @@ mod tests {
             10
         );
         cleanup(store, dir);
+    }
+
+    fn setup<'a>(dir: &'a std::path::Path, backups: &'a std::path::Path) -> Setup<'a> {
+        Setup {
+            state_dir: dir,
+            backups,
+            configured: ["cfg".to_string()].into(),
+            sync_base: None,
+        }
+    }
+
+    fn rows(store: &Store, sql: &str) -> Vec<String> {
+        store
+            .conn
+            .prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn backups_in(dir: &std::path::Path) -> usize {
+        std::fs::read_dir(dir).map_or(0, |entries| entries.count())
+    }
+
+    #[test]
+    fn groups_and_friendships_change_with_the_apis_checks_and_a_backup_first() {
+        let dir = state("people");
+        let backups = dir.join("backups");
+        {
+            let store = Store::open(&dir).unwrap();
+            for user in ["ana", "bo", "cy"] {
+                crate::accounts::create(&store.conn, user, user, "", 0).unwrap();
+            }
+            store
+                .conn
+                .execute_batch(
+                    "insert into groups (id, name, invite, created_by, created_at) values (1, 'Club', 'x', 'ana', 0);
+                     insert into group_members (group_id, user, owner, joined_at) values (1, 'ana', 1, 0), (1, 'bo', 0, 1);
+                     insert into decks (owner, id, name, enabled) values ('ana', 'd', 'Spanish', 1);
+                     insert into deck_recipients (owner, deck_id, recipient) values ('ana', 'd', 'bo');
+                     insert into friendships (a, b, requested_by, accepted, created_at) values ('bo', 'cy', 'cy', 0, 0);",
+                )
+                .unwrap();
+        }
+        let go = |args: &[&str]| people(&setup(&dir, &backups), parse(&words(args)).unwrap(), NOW);
+
+        let error = go(&["group-add", "1", "cy", "nobody"])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("nobody") && error.contains("nothing was changed"),
+            "{error}"
+        );
+        assert_eq!(backups_in(&backups), 0, "nothing to undo, so no backup");
+        assert!(
+            go(&["group-add", "9", "cy"])
+                .unwrap_err()
+                .to_string()
+                .contains("no group 9")
+        );
+
+        let out = go(&["group-add", "1", "--all"]).unwrap();
+        assert!(out.contains("backed up the database to"), "{out}");
+        assert!(out.contains("ana: already in Club"), "{out}");
+        assert!(
+            out.contains("cfg: added to Club") && out.contains("cy: added to Club"),
+            "{out}"
+        );
+        assert!(out.contains("no restart"), "{out}");
+        assert_eq!(backups_in(&backups), 1);
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(
+            rows(
+                &store,
+                "select user from group_members where group_id = 1 order by user"
+            ),
+            ["ana", "bo", "cfg", "cy"]
+        );
+
+        let out = go(&["befriend", "ana", "bo", "cy"]).unwrap();
+        assert!(out.contains("ana and bo: friends now"), "{out}");
+        assert!(
+            out.contains("bo and cy: friends now (the open request was accepted)"),
+            "{out}"
+        );
+        assert!(
+            go(&["befriend", "ana", "bo"])
+                .unwrap()
+                .contains("1 pair(s) were friends already")
+        );
+        assert_eq!(
+            rows(
+                &store,
+                "select a || '-' || b from friendships where accepted = 1 order by a, b"
+            ),
+            ["ana-bo", "ana-cy", "bo-cy"]
+        );
+
+        let out = go(&["group-remove", "1", "ana", "zed"]).unwrap();
+        assert!(out.contains("ana: removed from Club"), "{out}");
+        assert!(out.contains("zed: not in Club"), "{out}");
+        assert!(
+            out.contains("bo now owns Club"),
+            "the longest member inherits it: {out}"
+        );
+        assert_eq!(
+            rows(&store, "select owner from deck_recipients"),
+            ["ana"],
+            "still friends, so the deck still goes to bo"
+        );
+
+        let out = go(&["unfriend", "ana"]).unwrap();
+        assert!(
+            out.contains("ana and bo: no longer friends") && out.contains("ana and cy"),
+            "{out}"
+        );
+        assert!(out.contains("1 deck notification(s)"), "{out}");
+        assert!(rows(&store, "select owner from deck_recipients").is_empty());
+        assert!(
+            go(&["unfriend", "ana", "bo"])
+                .unwrap()
+                .contains("nothing was changed")
+        );
+
+        let out = go(&["group-remove", "1", "bo", "cfg", "cy"]).unwrap();
+        assert!(
+            out.contains("Club had nobody left and was deleted"),
+            "{out}"
+        );
+        assert!(rows(&store, "select name from groups").is_empty());
+        assert!(
+            rows(&store, "select message from server_log")
+                .iter()
+                .any(|m| m == "admin added cfg, cy to group 1"),
+        );
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn a_player_who_left_the_configuration_can_be_removed_entirely() {
+        let dir = state("remove-player");
+        let backups = dir.join("backups");
+        {
+            let store = Store::open(&dir).unwrap();
+            crate::accounts::create(&store.conn, "ana", "Ana", "", 0).unwrap();
+            store
+                .conn
+                .execute_batch(
+                    "insert into reviews (user, id, cid, last_ivl, time_ms, kind) values ('gone', 1, 10, 1, 5000, 1), ('ana', 2, 20, 1, 5000, 1);
+                     insert into deck_recipients (owner, deck_id, recipient) values ('ana', 'd', 'gone'), ('gone', 'e', 'ana');
+                     insert into notifications (recipient, sender, title, body, day, created_at, kind) values ('ana', 'gone', 't', 'b', 1, 1, 'reply'), ('gone', 'ana', 't', 'b', 1, 1, 'reply');
+                     insert into community_weekly_suggestions (owner, week_start, expires_at, friend) values ('ana', 1, 2, 'gone');
+                     insert into friendships (a, b, requested_by, accepted, created_at) values ('ana', 'gone', 'gone', 1, 0);
+                     insert into groups (id, name, invite, created_by, created_at) values (1, 'Club', 'x', 'gone', 0);
+                     insert into group_members (group_id, user, owner, joined_at) values (1, 'gone', 1, 0), (1, 'ana', 0, 1);",
+                )
+                .unwrap();
+        }
+        let go = |user: &str| {
+            people(
+                &setup(&dir, &backups),
+                parse(&words(&["remove-player", user])).unwrap(),
+                NOW,
+            )
+        };
+        assert!(
+            go("nobody")
+                .unwrap_err()
+                .to_string()
+                .contains("nothing is stored about nobody")
+        );
+        assert_eq!(backups_in(&backups), 0);
+        let out = go("gone").unwrap();
+        assert!(out.contains("backed up the database to"), "{out}");
+        for removed in [
+            "reviews: 1 row(s)",
+            "deck_recipients: 2 row(s)",
+            "notifications: 2 row(s)",
+            "community_weekly_suggestions: 1 row(s)",
+            "friendships: 1 row(s)",
+            "group_members: 1 row(s)",
+        ] {
+            assert!(out.contains(removed), "{removed} in {out}");
+        }
+        assert_eq!(backups_in(&backups), 1);
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(
+            rows(&store, "select user from account_removals"),
+            ["gone"],
+            "the running service is told to drop them from memory"
+        );
+        store
+            .conn
+            .execute("delete from account_removals", [])
+            .unwrap();
+        assert!(!crate::privacy::mentioned(&store.conn, "gone").unwrap());
+        assert_eq!(
+            rows(&store, "select user from group_members where owner = 1"),
+            ["ana"]
+        );
+        assert_eq!(rows(&store, "select user from reviews"), ["ana"]);
+        assert_eq!(
+            rows(&store, "select friend from community_weekly_suggestions"),
+            Vec::<String>::new()
+        );
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn people_commands_parse() {
+        assert_eq!(
+            parse(&words(&["group-add", "3", "ana", "bo", "ana"])).unwrap(),
+            Command::GroupAdd(3, Players::Named(vec!["ana".into(), "bo".into()]))
+        );
+        assert_eq!(
+            parse(&words(&["befriend", "--all"])).unwrap(),
+            Command::Befriend(Players::All)
+        );
+        assert!(parse(&words(&["befriend", "ana"])).is_err());
+        assert!(parse(&words(&["group-add", "club", "ana"])).is_err());
+        assert!(parse(&words(&["group-remove", "1"])).is_err());
+        assert_eq!(
+            parse(&words(&["unfriend", "ana"])).unwrap(),
+            Command::Unfriend("ana".into(), vec![])
+        );
+        assert_eq!(
+            parse(&words(&["logs", "--level", "warning"])).unwrap(),
+            Command::Logs(LogFilter {
+                since_ms: Some(7 * DAY_MS),
+                level: Some("warning".into()),
+                user: None,
+                limit: 200,
+            })
+        );
+        assert!(
+            run(
+                &state("people-run"),
+                configured(),
+                Command::RemovePlayer("x".into()),
+                NOW
+            )
+            .is_err(),
+            "run() has no configuration to check against"
+        );
     }
 }
