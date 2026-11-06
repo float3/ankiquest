@@ -442,6 +442,42 @@ pub(crate) fn create(
     Ok(Some(id))
 }
 
+/// The id of `user`'s win for `key`, keeping one now when there is none: for moments from
+/// before wins were kept, so their card can still be shared. Unlike [`create`] it never queues
+/// the win for friends, whatever the player's policy. `None` for a key that is no win.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn keep(
+    conn: &Connection,
+    user: &str,
+    key: &str,
+    day: i64,
+    created_at: i64,
+    title: &str,
+    body: &str,
+    stats: &Value,
+) -> rusqlite::Result<Option<i64>> {
+    let Some(kind) = kind_of(key) else {
+        return Ok(None);
+    };
+    let art = art(kind, &companion(conn, user)?);
+    conn.execute(
+        "insert or ignore into wins (user, kind, key, day, created_at, title, body, stats, art)
+         values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            user,
+            kind,
+            key,
+            day,
+            created_at,
+            title,
+            body,
+            stats.to_string(),
+            art
+        ],
+    )?;
+    id_of(conn, user, key)
+}
+
 /// The wins a friend's `share` row `notification` carried, oldest first.
 pub(crate) fn delivered(conn: &Connection, notification: i64) -> rusqlite::Result<Vec<Win>> {
     conn.prepare(&format!(

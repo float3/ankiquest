@@ -54,6 +54,7 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `community.json` | `GET /api/community?year=2026&month=10`: the competition calendar, weeks and seasons |
 | `conquest.json` | `GET /api/conquests/{user}/{at}`, the owner's view of a labelled conquered card |
 | `conquest_tell.json` | `POST /api/conquests/{user}/{at}/tell` |
+| `conquest_untell.json` | `DELETE /api/conquests/{user}/{at}/tell`, taking telling friends back |
 | `leaderboard_global_hidden.json` | `GET /api/leaderboard?scope=global` for a player who has not opted in: public profiles in full and their own row, `"shown": false` |
 | `global_leaderboard_on.json` | `POST /api/decks/{user}` `{"decks": [], "global_leaderboard": true}` |
 | `leaderboard_global.json` | `GET /api/leaderboard?scope=global&period=day`: the viewer's own row and a stranger who opted in |

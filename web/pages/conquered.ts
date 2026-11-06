@@ -1,5 +1,5 @@
 import {escape as esc, nativeAccount, number as num} from "../common";
-import {request} from "../http";
+import {refused, request} from "../http";
 
 const {t:aqText,html:aqHtml} = AnkiQuestI18n;
 const DAY_MS = 86_400_000;
@@ -14,6 +14,8 @@ interface Shared {
   /** For the owner only. */
   told?: boolean;
   friends?: number;
+  /** For the owner only, while telling friends can still be taken back (ms). */
+  undo_until?: number;
 }
 
 const app = document.getElementById("app")!;
@@ -158,12 +160,18 @@ function say(message: string, error = false) {
   status.textContent = message;
 }
 
+/* Drawn as soon as the card shows, so Share hands it over within the click: browsers refuse
+   to share once the click's moment has passed, which drawing it then could outlast. */
+let drawn: Promise<Blob | null> = Promise.resolve(null);
+
 async function share(data: Shared, mine: boolean) {
   const text = shareText(data, mine), url = pageUrl();
-  const blob = await picture(data);
+  const blob = await drawn;
   const files = blob ? [new File([blob], "conquered.png", {type: "image/png"})] : [];
   try {
-    if (files.length && navigator.canShare?.({files})) await navigator.share({files, text, url});
+    if (files.length && navigator.canShare?.({files, text, url})) await navigator.share({files, text, url});
+    // Some share targets take a picture with text but no link; the link then goes in the text.
+    else if (files.length && navigator.canShare?.({files, text})) await navigator.share({files, text: `${text} ${url}`});
     else if (navigator.share) await navigator.share({text, url});
     else return copy(data, mine);
   } catch (error) {
@@ -182,7 +190,7 @@ async function copy(data: Shared, mine: boolean) {
 }
 
 async function download(data: Shared) {
-  const blob = await picture(data);
+  const blob = await drawn ?? await picture(data);
   if (!blob) return say(aqText("This browser cannot draw the picture."), true);
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -195,12 +203,33 @@ async function tell(data: Shared, session: OwnerSession, button: HTMLButtonEleme
   button.disabled = true;
   say(aqText("Telling your friends…"));
   try {
-    const {told} = await request<{told: number}>(`/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/tell`, {session, json: {}});
+    const {told} = await request<{told: number}>(tellPath(), {session, json: {}});
     button.textContent = aqText("Friends told");
+    await load();
     say(told === 1 ? aqText("One friend will see it in their activity.") : aqText`${told} friends will see it in their activity.`);
   } catch (_) {
     button.disabled = false;
     say(aqText("Your friends could not be told. Please try again."), true);
+  }
+}
+
+const tellPath = () => `/api/conquests/${encodeURIComponent(user)}/${encodeURIComponent(at)}/tell`;
+
+/** Takes telling friends back from those who have not seen it yet, while the server allows it. */
+async function untell(session: OwnerSession, button: HTMLButtonElement) {
+  button.disabled = true;
+  say(aqText("Taking it back…"));
+  try {
+    await request(tellPath(), {method: "DELETE", session});
+    await load();
+    say(aqText("Taken back from friends who had not seen it yet."));
+  } catch (error) {
+    if (refused(error) && error.status === 409) {
+      await load();
+      return say(aqText("It is too late to take this back."), true);
+    }
+    button.disabled = false;
+    say(aqText("That could not be taken back. Please try again."), true);
   }
 }
 
@@ -228,8 +257,11 @@ function render(data: Shared, session: OwnerSession | null) {
   const c = data.conquest;
   const when = new Date(c.at).toLocaleDateString(AnkiQuestI18n.language, {year: "numeric", month: "long", day: "numeric"});
   const friends = data.friends ?? 0;
+  const undo = data.told && (data.undo_until ?? 0) > Date.now();
   const tellButton = !mine ? "" : data.told
-    ? aqHtml`<button type="button" disabled>Friends told</button>`
+    ? undo
+      ? aqHtml`<div class="pair"><button type="button" disabled>Friends told</button><button type="button" id="conquest-untell">Undo</button></div>`
+      : aqHtml`<button type="button" disabled>Friends told</button>`
     : friends > 0
       ? aqHtml`<button type="button" id="conquest-tell">Tell my friends</button>`
       : "";
@@ -263,11 +295,14 @@ function render(data: Shared, session: OwnerSession | null) {
 </article>`;
   // The companion's art loads lazily elsewhere; here it is the point of the page.
   app.querySelector<HTMLImageElement>(".aki-art")?.setAttribute("loading", "eager");
+  drawn = picture(data).catch(() => null);
   document.getElementById("conquest-share")!.addEventListener("click", () => share(data, mine));
   document.getElementById("conquest-copy")!.addEventListener("click", () => copy(data, mine));
   document.getElementById("conquest-download")!.addEventListener("click", () => download(data));
   const button = document.getElementById("conquest-tell") as HTMLButtonElement | null;
   if (button && session) button.addEventListener("click", () => tell(data, session, button));
+  const untellButton = document.getElementById("conquest-untell") as HTMLButtonElement | null;
+  if (untellButton && session) untellButton.addEventListener("click", () => untell(session, untellButton));
   if (mine && session) {
     document.getElementById("conquest-label-form")?.addEventListener("submit", event => {
       event.preventDefault();
