@@ -181,13 +181,36 @@ the opt-in is `global_leaderboard` in the player's settings, beside `nudges` and
 
 `GET /api/profile/{user}` answers the player's level, XP, `periods`, `records`, streak and `streak_state`, streak freezes (`stored_freezes`, `freezes_enabled`, `freeze_earned_today`), `today`, `lifetime`, daily `quests`, `achievements`, `heatmap` and `conquests`. Only the owner's own profile has `goal`. `closing_week: { "xp", "ends_at" }` is there only while the player's current Anki day began before the weekly reset, so it still counts toward the closing week although `week_xp` already shows the new one: `xp` is what counts toward the closing week, today's included, and `ends_at` (ms) is when it closes for them, the end of their current day. West of `week_timezone` this lasts up to the player's own rollover, about 9 hours in California for a reset at Monday 00:00 UTC; clients show it as "last week still counting" and drop it once `ends_at` has passed. A player the viewer may not see is `404`, the same as an unknown one. The owner's recent wins are `GET /api/wins/{user}` (see [sharing.md](sharing.md)).
 
+### day verdicts
+
+The server is the only judge of a day. `streak_state` is today's verdict for the streak: `studied` (today already counts), `protected` (a freeze or grant kept yesterday and today has not counted yet) or `pending` (today has not counted yet). `today` has `starts_at` (when today began, ms), `reviews`, `time_ms` (exact review time; `minutes` rounds it down), `minutes` and `streak_minutes` (the minutes today needs; 0 when any review counts), all valid until `day_ends_at`. Each `heatmap` cell has `date`, `reviews`, `minutes`, `streak_minutes` (what that day needed), `xp`, `frozen` and `state`:
+
+| `state` | meaning |
+| --- | --- |
+| `met` | the day reached the streak minimum and counts toward the streak |
+| `short` | reviews short of the minimum; today stays `short` until it is met or ends |
+| `frozen` | a freeze or an admin's grant kept the streak through the day, reviewed or not |
+| `skipped` | moving the clock east stepped over the day; it keeps the streak like a frozen day |
+| `none` | no reviews, and nothing kept the streak |
+
+`frozen` is true for both `frozen` and `skipped`. Clients colour and word days by `state`; a day with reviews is not a study day for the streak unless it is `met`. The study history (`GET /api/study/{user}`) has the same `state` and `streak_minutes` on each day.
+
+A client may judge one thing itself: today, with reviews it holds but has not uploaded yet, so that it can show progress right after answering offline. It does so only the server's way, and shows the result as waiting for upload until the server confirms it:
+
+- a profile whose `day_ends_at` has passed says nothing about today: show today as unknown;
+- unsent reviews are those with an id after `last_review_id`; of them, only ids from `today.starts_at` up to `day_ends_at` count toward today, each with its revlog time, uncapped beyond what Anki records;
+- today is met when `streak_state` is `studied`, or when there is at least one review and `today.time_ms` plus the unsent reviews' time reaches `today.streak_minutes` minutes;
+- the streak is `streak` plus one when today becomes met and `streak_state` was not `studied`; otherwise `streak`, and while not met the state stays `streak_state`. An unsent review from an earlier day can change that day's verdict, so the streak and, while today is not met, its state are then unknown until the upload lands.
+
+`tests/fixtures/day_verdicts.json` holds cases worked out by the server (`src/day_verdicts.rs`); clients test their copy of the rule against it.
+
 ## records and study history
 
 the app's native records and study history screens read the same JSON as the website's `/records` and `/history` pages.
 
 `GET /api/records` answers seven boards, in this order: `hour`, `day`, `week`, `month` and `year` (the best rolling hour, 24 hours, 7, 30 and 365 days of XP anyone has had), then `streak` (longest streak) and `days` (days studied). Each is `{ "window", "unit", "holders" }`, `unit` being `xp` or `days`. `holders` are the top three players with anything at all, best first, each with `user`, `display`, `value`, `detail` (the reviews in that window; 0 for `streak` and `days`), `at` and `until` (ms). For a rolling window `at` is its first review and `until` its last; a streak's `at` is when it ended and `days`' when the player first studied, with `until` the same. Optional `scope` and who is included are as for `GET /api/leaderboard`. example: `records.json`.
 
-`GET /api/study/{user}?year=YYYY` is the owner's own study calendar, for the year asked or the player's current one: `{ "year", "years", "days", "last_review_at", "last_received_at", "latest_session" }`. `years` lists every year with history, newest first. `days` has one entry per Anki day from the player's first study day on (days without reviews included, with zeros), each with `date` (`YYYY-MM-DD`, following the player's cutoff), `at` (when that day began, ms), `reviews`, `time_ms`, `xp`, `new_cards`, `streak` (the streak on that day) and `frozen` (a streak freeze covered it). `last_review_at` is the newest uploaded review (ms) and `last_received_at` when reviews last arrived; either is null before the first upload. `latest_session` is null or `{ "started_at", "ended_at", "reviews", "time_ms", "new_cards" }`. Another player's history is `401` or `403`, a year outside the supported range `400`. example: `study.json`.
+`GET /api/study/{user}?year=YYYY` is the owner's own study calendar, for the year asked or the player's current one: `{ "year", "years", "days", "last_review_at", "last_received_at", "latest_session" }`. `years` lists every year with history, newest first. `days` has one entry per Anki day from the player's first study day on (days without reviews included, with zeros), each with `date` (`YYYY-MM-DD`, following the player's cutoff), `at` (when that day began, ms), `reviews`, `time_ms`, `xp`, `new_cards`, `streak` (the streak on that day) and `frozen` (a streak freeze covered it), `streak_minutes` (what the day needed) and `state` (the server's verdict, as in the heatmap; see [day verdicts](#day-verdicts)). `last_review_at` is the newest uploaded review (ms) and `last_received_at` when reviews last arrived; either is null before the first upload. `latest_session` is null or `{ "started_at", "ended_at", "reviews", "time_ms", "new_cards" }`. Another player's history is `401` or `403`, a year outside the supported range `400`. example: `study.json`.
 
 ## community calendar, reminders and conquered cards
 

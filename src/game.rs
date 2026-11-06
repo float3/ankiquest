@@ -849,8 +849,51 @@ pub struct AchievementView {
 pub struct HeatCell {
     pub date: String,
     pub reviews: u64,
+    /// Review minutes that day, rounded down, as the streak minimum counts them.
+    pub minutes: u64,
+    /// The minutes the day needed to count toward the streak; 0 when any review counted.
+    pub streak_minutes: u64,
     pub xp: u64,
+    /// A freeze, an admin's grant or a clock change kept the streak through the day.
     pub frozen: bool,
+    pub state: DayState,
+}
+
+/// The server's verdict on one Anki day. Clients colour and word days by it instead of
+/// judging the reviews themselves, so every screen says the same of a day.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DayState {
+    /// The day reached the streak minimum and counts toward the streak.
+    Met,
+    /// Reviews short of the minimum. Today stays short until it is met or ends.
+    Short,
+    /// A freeze or an admin's grant kept the streak through the day, reviewed or not.
+    Frozen,
+    /// Moving the clock east stepped over the day, so nobody could study in it. It keeps
+    /// the streak like a frozen day.
+    Skipped,
+    /// No reviews, and nothing kept the streak.
+    None,
+}
+
+impl DayState {
+    /// The verdict on a day with `reviews` taking `time_ms`, which needed `needed_ms` to
+    /// count, and was `frozen` (or `skipped`) after it ended. A covered day reads as
+    /// covered even with reviews: it did not count on its own.
+    pub fn of(reviews: u64, time_ms: i64, needed_ms: i64, frozen: bool, skipped: bool) -> Self {
+        if reviews > 0 && time_ms >= needed_ms {
+            DayState::Met
+        } else if skipped && frozen {
+            DayState::Skipped
+        } else if frozen {
+            DayState::Frozen
+        } else if reviews > 0 {
+            DayState::Short
+        } else {
+            DayState::None
+        }
+    }
 }
 
 /// One encouraging message, with the key that keeps it to once a day.
@@ -1052,7 +1095,12 @@ impl Periods {
 
 #[derive(Serialize, Clone, Debug, Default)]
 pub struct Today {
+    /// When today began (ms): reviews from then until `day_ends_at` count toward today.
+    pub starts_at: i64,
     pub reviews: u64,
+    /// Review time today, exact, which `minutes` rounds down. Clients add reviews that
+    /// are not uploaded yet to it before comparing with `streak_minutes`.
+    pub time_ms: i64,
     pub minutes: u64,
     /// Review minutes today needs to count toward the streak; 0 when any review counts.
     pub streak_minutes: u64,
@@ -1104,6 +1152,9 @@ pub struct HistoryDay {
     pub new_cards: u64,
     pub streak: u64,
     pub frozen: bool,
+    /// The minutes the day needed to count toward the streak; 0 when any review counted.
+    pub streak_minutes: u64,
+    pub state: DayState,
 }
 
 #[derive(Serialize, Clone, Copy, Debug)]
@@ -1532,6 +1583,7 @@ pub fn compute_with_rules(
     let mut recent: VecDeque<DayStats> = VecDeque::new();
     let mut unlocked: Vec<Option<i64>> = vec![None; ACHIEVEMENTS.len()];
     let mut day_xp: BTreeMap<i64, u64> = BTreeMap::new();
+    let mut day_needed: BTreeMap<i64, i64> = BTreeMap::new();
     let mut xp_total = 0u64;
     let mut today_quests = Vec::new();
     let mut events = Vec::new();
@@ -1676,7 +1728,16 @@ pub fn compute_with_rules(
             new_cards: s.new_cards,
             streak,
             frozen: frozen.contains(&day),
+            streak_minutes: (needed_ms / 60_000) as u64,
+            state: DayState::of(
+                s.reviews,
+                s.time_ms,
+                needed_ms,
+                frozen.contains(&day),
+                skipped.contains(&day),
+            ),
         });
+        day_needed.insert(day, needed_ms);
         if xp > 0 {
             day_xp.insert(day, xp);
         }
@@ -1720,11 +1781,25 @@ pub fn compute_with_rules(
         .collect();
 
     let heatmap = (today - HEATMAP_DAYS + 1..=today)
-        .map(|day| HeatCell {
-            date: date_string(day),
-            reviews: days.get(&day).map_or(0, |s| s.reviews),
-            xp: day_xp.get(&day).copied().unwrap_or(0),
-            frozen: frozen.contains(&day),
+        .map(|day| {
+            let (reviews, time_ms) = days.get(&day).map_or((0, 0), |s| (s.reviews, s.time_ms));
+            // Before the first study day nothing was needed: no day had begun to count.
+            let needed_ms = day_needed.get(&day).copied().unwrap_or(0);
+            HeatCell {
+                date: date_string(day),
+                reviews,
+                minutes: (time_ms.max(0) / 60_000) as u64,
+                streak_minutes: (needed_ms / 60_000) as u64,
+                xp: day_xp.get(&day).copied().unwrap_or(0),
+                frozen: frozen.contains(&day),
+                state: DayState::of(
+                    reviews,
+                    time_ms,
+                    needed_ms,
+                    frozen.contains(&day),
+                    skipped.contains(&day),
+                ),
+            }
         })
         .collect();
 
@@ -1890,7 +1965,9 @@ pub fn compute_with_rules(
         }),
         local_hour: clock.hour(now_ms),
         today: Today {
+            starts_at: today_start,
             reviews: now.reviews,
+            time_ms: now.time_ms,
             minutes: (now.time_ms / 60_000) as u64,
             streak_minutes,
             xp: day_xp.get(&today).copied().unwrap_or(0),
@@ -3934,6 +4011,73 @@ mod tests {
         let p = ruled(&reviews, at(3), &[(0, 2)]);
         assert_eq!(p.streak, 2);
         assert!(p.history.iter().any(|day| day.frozen && day.reviews == 1));
+        let cell = |day: i64| {
+            let cell = p
+                .heatmap
+                .iter()
+                .find(|c| c.date == date_string(day))
+                .unwrap();
+            serde_json::to_value(cell).unwrap()
+        };
+        let frozen = cell(2);
+        assert_eq!(
+            (
+                &frozen["state"],
+                &frozen["reviews"],
+                &frozen["streak_minutes"]
+            ),
+            (
+                &serde_json::json!("frozen"),
+                &serde_json::json!(1),
+                &serde_json::json!(2)
+            ),
+            "a frozen day reads as frozen although it had a review"
+        );
+        assert_eq!(cell(1)["state"], "met");
+        assert_eq!(cell(3)["state"], "met");
+        assert_eq!(cell(0)["state"], "none");
+    }
+
+    #[test]
+    fn heatmap_days_carry_the_servers_verdict() {
+        let rule = [(0, 10)];
+        // A short day without a freeze breaks the streak and stays short.
+        let p = ruled(&study(&[(10, 12), (11, 3), (12, 4)]), at(12), &rule);
+        let state = |day: i64| {
+            serde_json::to_value(
+                p.heatmap
+                    .iter()
+                    .find(|c| c.date == date_string(day))
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(state(10)["state"], "met");
+        assert_eq!(state(11)["state"], "short");
+        assert_eq!(
+            (&state(11)["minutes"], &state(11)["streak_minutes"]),
+            (&serde_json::json!(3), &serde_json::json!(10))
+        );
+        assert_eq!(
+            state(12)["state"],
+            "short",
+            "today is short until it is met"
+        );
+        assert_eq!(state(9)["state"], "none");
+        let day = p
+            .history
+            .iter()
+            .find(|d| d.date == date_string(11))
+            .unwrap();
+        assert_eq!(day.state, DayState::Short);
+        assert_eq!(p.today.time_ms, 4 * 60_000);
+        assert_eq!(p.today.starts_at, 12 * DAY_MS + 4 * 3_600_000);
+        assert_eq!(
+            DayState::of(2, 0, 0, true, true),
+            DayState::Met,
+            "a day that counted is met even when the clock skipped over its number"
+        );
+        assert_eq!(DayState::of(0, 0, 0, true, true), DayState::Skipped);
     }
 
     #[test]

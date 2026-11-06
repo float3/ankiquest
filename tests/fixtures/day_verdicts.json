@@ -1,0 +1,465 @@
+{
+  "_about": "Today's streak verdict with reviews not uploaded yet, worked out by the server. Written by src/day_verdicts.rs (UPDATE_FIXTURES=1 cargo test day_verdicts); the Android app keeps a copy in AnkiDroid/src/test/resources/ankiquest/day_verdicts.json and CI there fails when it drifts from this file.",
+  "cases": [
+    {
+      "expected": {
+        "met": true,
+        "minutes": 11,
+        "reviews": 2,
+        "streak": 2,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 660000,
+        "unsent": 1
+      },
+      "name": "unsent reviews reach the minimum",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762431000000,
+          "time_ms": 300000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 6,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 360000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": false,
+        "minutes": 9,
+        "reviews": 2,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "pending",
+        "time_ms": 540000,
+        "unsent": 1
+      },
+      "name": "unsent reviews stay short of the minimum",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762431000000,
+          "time_ms": 180000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 6,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 360000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 10,
+        "reviews": 2,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 600000,
+        "unsent": 1
+      },
+      "name": "one millisecond short, then exactly the minimum",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762431300000,
+          "time_ms": 1
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 0,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 9,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 599999
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": false,
+        "minutes": 9,
+        "reviews": 1,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "pending",
+        "time_ms": 599999,
+        "unsent": 0
+      },
+      "name": "one millisecond short with nothing unsent",
+      "now_ms": 1762431600000,
+      "pending": [],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 9,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 599999
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 10,
+        "reviews": 2,
+        "streak": 2,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 600000,
+        "unsent": 2
+      },
+      "name": "nothing uploaded today, unsent reviews meet the minimum",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430400000,
+          "time_ms": 300000
+        },
+        {
+          "id": 1762430460000,
+          "time_ms": 300000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762344000000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 0,
+          "reviews": 0,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 0
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 11,
+        "reviews": 2,
+        "streak": 2,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 690000,
+        "unsent": 1
+      },
+      "name": "already studied stays studied without a longer streak",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762431300000,
+          "time_ms": 30000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 2,
+        "streak_state": "studied",
+        "today": {
+          "minutes": 11,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 660000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": false,
+        "minutes": 4,
+        "reviews": 2,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "protected",
+        "time_ms": 240000,
+        "unsent": 1
+      },
+      "name": "a frozen yesterday stays protected while today is short",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430700000,
+          "time_ms": 120000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "protected",
+        "today": {
+          "minutes": 2,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 120000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 10,
+        "reviews": 2,
+        "streak": 2,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 600000,
+        "unsent": 1
+      },
+      "name": "a frozen yesterday and an unsent minimum today",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430700000,
+          "time_ms": 480000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "protected",
+        "today": {
+          "minutes": 2,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 120000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": false,
+        "minutes": 9,
+        "reviews": 2,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "pending",
+        "time_ms": 540000,
+        "unsent": 1
+      },
+      "name": "reviews sent again are not counted twice",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430400000,
+          "time_ms": 360000
+        },
+        {
+          "id": 1762431000000,
+          "time_ms": 180000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762430400000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 6,
+          "reviews": 1,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 360000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": false,
+        "minutes": 2,
+        "reviews": 1,
+        "streak": null,
+        "streak_minutes": 10,
+        "streak_state": null,
+        "time_ms": 120000,
+        "unsent": 1
+      },
+      "name": "an unsent review before the rollover belongs to yesterday",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762392600000,
+          "time_ms": 600000
+        },
+        {
+          "id": 1762430400000,
+          "time_ms": 120000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762480800000,
+        "last_review_id": 1762333200000,
+        "streak": 2,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 0,
+          "reviews": 0,
+          "starts_at": 1762394400000,
+          "streak_minutes": 10,
+          "time_ms": 0
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 5,
+        "reviews": 2,
+        "streak": 2,
+        "streak_minutes": 5,
+        "streak_state": "studied",
+        "time_ms": 300000,
+        "unsent": 1
+      },
+      "name": "the day turns over at the player's rollover, not midnight",
+      "now_ms": 1762430400000,
+      "pending": [
+        {
+          "id": 1762414800000,
+          "time_ms": 180000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762498800000,
+        "last_review_id": 1762414200000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 2,
+          "reviews": 1,
+          "starts_at": 1762412400000,
+          "streak_minutes": 5,
+          "time_ms": 120000
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 0,
+        "reviews": 1,
+        "streak": 2,
+        "streak_minutes": 0,
+        "streak_state": "studied",
+        "time_ms": 4000,
+        "unsent": 1
+      },
+      "name": "with no minimum any review counts",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430400000,
+          "time_ms": 4000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762344000000,
+        "streak": 1,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 0,
+          "reviews": 0,
+          "starts_at": 1762401600000,
+          "streak_minutes": 0,
+          "time_ms": 0
+        }
+      }
+    },
+    {
+      "expected": {
+        "met": true,
+        "minutes": 10,
+        "reviews": 1,
+        "streak": 1,
+        "streak_minutes": 10,
+        "streak_state": "studied",
+        "time_ms": 600000,
+        "unsent": 1
+      },
+      "name": "a new streak starts at one",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430400000,
+          "time_ms": 600000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762488000000,
+        "last_review_id": 1762171200000,
+        "streak": 0,
+        "streak_state": "pending",
+        "today": {
+          "minutes": 0,
+          "reviews": 0,
+          "starts_at": 1762401600000,
+          "streak_minutes": 10,
+          "time_ms": 0
+        }
+      }
+    },
+    {
+      "expected": null,
+      "name": "a profile from a day that has ended says nothing about today",
+      "now_ms": 1762431600000,
+      "pending": [
+        {
+          "id": 1762430400000,
+          "time_ms": 600000
+        }
+      ],
+      "server": {
+        "day_ends_at": 1762401600000,
+        "last_review_id": 1762344000000,
+        "streak": 1,
+        "streak_state": "studied",
+        "today": {
+          "minutes": 10,
+          "reviews": 1,
+          "starts_at": 1762315200000,
+          "streak_minutes": 10,
+          "time_ms": 600000
+        }
+      }
+    }
+  ]
+}
