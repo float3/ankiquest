@@ -34,9 +34,10 @@ Forecast = namedtuple("Forecast", "due backlog daily_due seconds_per_card")
 Projection = namedtuple("Projection", "cards seconds cleared_in")
 
 
-class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode goal served reached")):
+class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode goal served reached verdict", defaults=(None,))):
     """Today's targets and progress. `goal` is None when the daily goal is off; `served` is the
-    server's own count for a cards or minutes goal, `reached` whether it says the goal is met."""
+    server's own count for a cards or minutes goal, `reached` whether it says the goal is met.
+    `verdict` is today's streak verdict (day_verdict.verdict), None while the server's is unknown."""
 
     @property
     def progress(self):
@@ -45,8 +46,19 @@ class Status(namedtuple("Status", "day minutes streak_minutes studied_cards mode
 
     @property
     def minimum_done(self):
-        """Today counts toward the streak, by the same rule as the server."""
-        return self.studied_cards > 0 and self.minutes >= self.streak_minutes
+        """Today counts toward the streak: the server says so, or will once the unsent reviews
+        arrive. Never judged from the collection alone."""
+        return bool(self.verdict and self.verdict.get("met"))
+
+    @property
+    def minimum_waiting(self):
+        """Today counts toward the streak only once the reviews not uploaded yet arrive."""
+        return self.minimum_done and bool(self.verdict.get("waiting"))
+
+    @property
+    def minimum_minutes(self):
+        """Minutes toward the streak minimum: the server's with the unsent reviews, else the collection's."""
+        return self.verdict["minutes"] if self.verdict else self.minutes
 
     @property
     def goal_done(self):
@@ -162,12 +174,15 @@ def served(profile, found, today):
     return (_int(progress, None) if progress is not None else None), bool(view.get("reached"))
 
 
-def status(load, found, today, stored, streak_minutes, profile=None):
-    """Today's status, the record that keeps its goal fixed and whether the plan must restart."""
+def status(load, found, today, stored, streak_minutes, profile=None, verdict=None):
+    """Today's status, the record that keeps its goal fixed and whether the plan must restart.
+    `verdict` (day_verdict.verdict) decides the streak minimum and the minutes it needs."""
     fixed, record, restart = fixed_goal(load, found, today, stored)
     progress, reached = served(profile, found, today)
+    if verdict:
+        streak_minutes = verdict["streak_minutes"]
     return Status(
-        load.day, load.minutes, streak_minutes, load.studied_cards, found.mode, fixed, progress, reached,
+        load.day, load.minutes, streak_minutes, load.studied_cards, found.mode, fixed, progress, reached, verdict,
     ), record, restart
 
 
@@ -371,6 +386,10 @@ def backlog_text(current, translate=lambda value: value):
 
 
 def minimum_text(current, translate=lambda value: value):
+    if current.minimum_waiting and current.streak_minutes > 0:
+        return translate("Streak secured once your reviews upload: you reached today’s %d-minute minimum.") % current.streak_minutes
+    if current.minimum_waiting:
+        return translate("Streak secured once your reviews upload: today counts for your streak.")
     if current.minimum_done and current.streak_minutes > 0:
         return translate("Streak secured: you reached today’s %d-minute minimum.") % current.streak_minutes
     if current.minimum_done:

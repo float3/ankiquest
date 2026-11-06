@@ -35,6 +35,7 @@
 .personal-calendar button[data-level="3"]{background:var(--h3);color:#fff}
 .personal-calendar button[data-level="4"]{background:var(--h4);color:#fff}
 .personal-calendar button[data-frozen="true"]{box-shadow:inset 0 0 0 2px var(--ice)}
+.personal-calendar button[data-state="short"]{box-shadow:inset 0 0 0 2px var(--h2)}
 .personal-calendar button[aria-pressed="true"]{outline:3px solid var(--ink);outline-offset:1px}
 .personal-calendar span{min-height:37px}
 .personal-settings{display:grid;gap:18px}
