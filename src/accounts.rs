@@ -307,6 +307,9 @@ fn new_token() -> Result<String, Error> {
     Ok(hex(&random_bytes("token randomness unavailable")?))
 }
 
+/// What a device token moved over from the server configuration is called in the device list.
+pub(crate) const ADOPTED_DEVICE: &str = "Earlier sign-in";
+
 /// Saves a new account; an empty `hash` means it has no password and signs in another way.
 pub(crate) fn create(
     conn: &Connection,
@@ -1502,6 +1505,49 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn sign_in_methods_say_when_a_linked_provider_is_no_longer_offered() {
+        let (app, path) = fixture(true);
+        create(&app.store.lock().unwrap().conn, "ana", "Ana", "", now_ms()).unwrap();
+        app.accounts.insert("ana", "Ana");
+        let token = app.issue_token("ana", ADOPTED_DEVICE).unwrap();
+        let bearer = format!("Bearer {token}");
+        let methods = |app: Arc<App>| {
+            let bearer = bearer.clone();
+            async move {
+                call(
+                    &app,
+                    "GET",
+                    "/api/sign-in/ana",
+                    &[("authorization", bearer.as_str())],
+                    "",
+                    "192.0.2.1",
+                )
+                .await
+            }
+        };
+        let (status, never) = methods(app.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(never["password"], false);
+        assert_eq!(
+            never["linked_unavailable"], false,
+            "an account moved over from the configuration never linked one"
+        );
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into sign_in_links (provider, subject, user, created_at) values ('github', '1', 'ana', 0)",
+                [],
+            )
+            .unwrap();
+        let (_, gone) = methods(app.clone()).await;
+        assert_eq!(gone["providers"], serde_json::json!([]));
+        assert_eq!(gone["linked_unavailable"], true);
         cleanup(app, path);
     }
 

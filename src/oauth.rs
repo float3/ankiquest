@@ -1361,7 +1361,14 @@ fn methods_of(app: &App, user: &str) -> Result<serde_json::Value, Error> {
             })
         })
         .collect();
-    Ok(serde_json::json!({"account": account, "password": password, "providers": providers}))
+    // A linked provider this server no longer offers is not in `providers`; clients say so
+    // instead of offering to sign in with it.
+    let unavailable = linked
+        .iter()
+        .any(|provider| app.config.oauth.client(*provider).is_none());
+    Ok(
+        serde_json::json!({"account": account, "password": password, "providers": providers, "linked_unavailable": unavailable}),
+    )
 }
 
 fn internal(error: Error) -> Response {
@@ -3080,7 +3087,7 @@ mod tests {
             serde_json::json!({"account": false, "password": false, "providers": [
                 {"provider": "github", "name": "GitHub", "linked": true},
                 {"provider": "gitlab", "name": "GitLab", "linked": false}
-            ]})
+            ], "linked_unavailable": false})
         );
         assert_eq!(
             send(

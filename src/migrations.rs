@@ -15,6 +15,7 @@ const STEPS: &[Step] = &[
     notification_fetches,
     global_leaderboard,
     global_leaderboard_choice,
+    adopted_device_names,
 ];
 
 /// Brings the database up to the latest step, then turns foreign keys on for the connection.
@@ -175,6 +176,18 @@ fn global_leaderboard_choice(conn: &Connection) -> Result<(), Error> {
          update player_settings set global_leaderboard_choice = 1 where global_leaderboard = 1;
          alter table player_settings drop column global_leaderboard;
          alter table player_settings rename column global_leaderboard_choice to global_leaderboard;",
+    )?;
+    Ok(())
+}
+
+/// Device tokens moved over from the server configuration were listed as "Moved from the
+/// server configuration", which means nothing to the player; they get the plainer name
+/// `admin adopt` now gives them.
+fn adopted_device_names(conn: &Connection) -> Result<(), Error> {
+    conn.execute(
+        "update account_tokens set device = 'Earlier sign-in'
+         where device = 'Moved from the server configuration'",
+        [],
     )?;
     Ok(())
 }
@@ -386,6 +399,35 @@ mod tests {
         conn.execute("delete from accounts where user = 'hill'", [])
             .unwrap();
         assert_eq!(count(conn, "account_tokens"), 0);
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn adopted_devices_get_a_plain_name() {
+        let dir = temp_dir("adopted-names");
+        drop(Store::open(&dir).unwrap());
+        {
+            let conn = Connection::open(dir.join("ankiquest.db")).unwrap();
+            conn.execute_batch(
+                "insert into accounts (user, display, password_hash, created_at) values ('ana', 'Ana', '', 1);
+                 insert into account_tokens (token_hash, user, device, created_at) values
+                     ('a', 'ana', 'Moved from the server configuration', 1),
+                     ('b', 'ana', 'Pixel', 2);
+                 pragma user_version = 4;",
+            )
+            .unwrap();
+        }
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(version(&store.conn), STEPS.len());
+        let names: Vec<String> = store
+            .conn
+            .prepare("select device from account_tokens order by token_hash")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(names, [crate::accounts::ADOPTED_DEVICE, "Pixel"]);
         cleanup(store, dir);
     }
 }

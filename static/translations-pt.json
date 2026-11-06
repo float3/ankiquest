@@ -1302,6 +1302,7 @@
   "Current password": "Palavra-passe atual",
   "Change password": "Alterar palavra-passe",
   "Set a password": "Definir uma palavra-passe",
+  "Ask the person who runs your server to set a first password for you; you can change it here afterwards.": "Pede a quem gere o teu servidor que te defina uma primeira palavra-passe; depois podes alterá-la aqui.",
   "With a password you can also sign in with your username.": "Com uma palavra-passe também podes entrar com o teu nome de utilizador.",
   "New password (at least 10 characters)": "Nova palavra-passe (pelo menos 10 caracteres)",
   "Sign out my other devices": "Terminar sessão nos meus outros dispositivos",

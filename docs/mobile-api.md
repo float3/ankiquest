@@ -39,7 +39,7 @@ The Android app's account settings are native and use these endpoints with the d
 
 | request | answers |
 |---|---|
-| `GET /api/sign-in/{user}` | `account`, `password` and `providers` (`provider`, `name`, `linked`) |
+| `GET /api/sign-in/{user}` | `account`, `password`, `providers` (`provider`, `name`, `linked`; only those the server offers) and `linked_unavailable` (the account linked a provider the server no longer offers; absent from older servers) |
 | `POST /api/sign-in/{user}` `{"action": "unlink", "provider"}` | the same, after unlinking |
 | `POST /api/sign-in/{user}` `{"action": "password", "current", "password", "sign_out_others"}` | the same, after the change |
 | `POST /api/sign-in/{user}` `{"action": "browser", "provider", "purpose"}` | `url` to open in the browser, `expires_at` |
@@ -48,7 +48,7 @@ The Android app's account settings are native and use these endpoints with the d
 | `GET /api/export/{user}` | the data download, saved by the app as it came |
 | `DELETE /api/accounts/{user}` `{"password"}`, or no body for an account without a password that signed in again | `204` |
 
-The `403` with `"reauth": true` described under capabilities applies to the first password and to deleting an account without a password.
+The `403` with `"reauth": true` described under capabilities applies to the first password and to deleting an account without a password. An account without a password and without a linked provider the server offers cannot sign in again, so only the server operator can give it a first password (`set-password`); apps say so instead of asking it to sign in again.
 
 ## browser identity
 
