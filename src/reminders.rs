@@ -1099,6 +1099,8 @@ mod tests {
             new_cards: 0,
             streak: 1,
             frozen: true,
+            streak_minutes: 0,
+            state: game::DayState::Frozen,
         });
         run(&mut store, &p, &clock, at(33));
         assert_eq!(
@@ -1400,6 +1402,8 @@ mod tests {
             new_cards: 0,
             streak: 1,
             frozen: true,
+            streak_minutes: 0,
+            state: game::DayState::Frozen,
         });
         save_settings(
             &mut store,
@@ -1424,6 +1428,8 @@ mod tests {
             new_cards: 0,
             streak: 1,
             frozen: true,
+            streak_minutes: 0,
+            state: game::DayState::Frozen,
         });
         p.day += 1;
         run(&mut store, &p, &clock, at(28));
