@@ -2022,7 +2022,7 @@ pub fn conquests(reviews: &[Review], now_ms: i64) -> Vec<Conquest> {
     found
 }
 
-fn conquest_event(c: &Conquest) -> Event {
+pub(crate) fn conquest_event(c: &Conquest) -> Event {
     Event {
         key: format!("conquered:{}", c.at),
         title: if c.leech {

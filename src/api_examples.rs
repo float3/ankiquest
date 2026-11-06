@@ -714,6 +714,17 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+    // Within a day, and until a friend cheers it, telling friends can be taken back.
+    examples.push((
+        "conquest_untell",
+        f.call(
+            "DELETE",
+            &format!("/api/conquests/hill/{conquered}/tell"),
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
 
     // The global leaderboard: Ana, who has no friends yet, sees the public profiles and her own
     // row, which nobody else sees until she turns the global leaderboard on. Then Hill sees her

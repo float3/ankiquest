@@ -10,7 +10,8 @@ const AT = 1789000000456;
 
 async function visit(browser: Browser, owner: boolean, leech: boolean, shot = '') {
   const context = await browser.newContext({locale: 'en-US', viewport: {width: 390, height: 1000}});
-  const told: {csrf: string | null}[] = [];
+  const told: {csrf: string | null}[] = [], untold: {csrf: string | null}[] = [];
+  let isTold = false;
   await context.route('**/*', async route => {
     const request = route.request(), pathname = new URL(request.url()).pathname;
     if (pathname === `/conquered/hill/${AT}`) return route.fulfill({contentType: 'text/html', body: built('conquered')});
@@ -19,11 +20,18 @@ async function visit(browser: Browser, owner: boolean, leech: boolean, shot = ''
     if (pathname === '/auth/status') return route.fulfill({json: {private_site: false, authenticated: owner, member: owner ? {user: 'hill'} : null}});
     if (pathname === `/api/conquests/hill/${AT}`) {
       const conquest = {at: AT, lapses: leech ? 9 : 4, answers: 23, since: AT - 40 * 86_400_000, leech};
-      return route.fulfill({json: {user: 'hill', display: 'Hill', conquest, ...(owner ? {told: false, friends: 2} : {})}});
+      const sharing = isTold ? {told: true, friends: 2, undo_until: Date.now() + 86_400_000} : {told: false, friends: 2};
+      return route.fulfill({json: {user: 'hill', display: 'Hill', conquest, ...(owner ? sharing : {})}});
     }
     if (pathname === `/api/conquests/hill/${AT}/tell` && request.method() === 'POST') {
       told.push({csrf: request.headers()['x-ankiquest-csrf'] ?? null});
+      isTold = true;
       return route.fulfill({json: {told: 2}});
+    }
+    if (pathname === `/api/conquests/hill/${AT}/tell` && request.method() === 'DELETE') {
+      untold.push({csrf: request.headers()['x-ankiquest-csrf'] ?? null});
+      isTold = false;
+      return route.fulfill({json: {retracted: 2}});
     }
     return route.fulfill({status: 404, body: pathname});
   });
@@ -38,26 +46,32 @@ async function visit(browser: Browser, owner: boolean, leech: boolean, shot = ''
     pose: await page.locator('.conquest-hero .aki-art').getAttribute('data-companion-pose'),
     tell: await page.locator('#conquest-tell').count(),
     told,
+    untold,
     status: '',
+    undone: '',
     errors,
   };
   if (result.tell) {
     await page.locator('#conquest-tell').click();
     await page.locator('#conquest-status', {hasText: 'activity'}).waitFor();
     result.status = (await page.locator('#conquest-status').textContent()) ?? '';
+    await page.locator('#conquest-untell').click();
+    await page.locator('#conquest-status', {hasText: 'Taken back'}).waitFor();
+    await page.locator('#conquest-tell').waitFor();
+    result.undone = (await page.locator('#conquest-status').textContent()) ?? '';
   }
   await context.close();
   return result;
 }
 
-test('a conquered card is a big companion card; only its owner can tell friends', async () => {
+test('a conquered card is a big companion card; only its owner can tell friends, and take it back', async () => {
   const browser = await launch();
   const shots = process.env.CONQUERED_SCREENSHOTS;
   try {
     const mine = await visit(browser, true, false, shots ? path.join(shots, 'conquered.png') : '');
-    assert.deepEqual(mine, {heading: 'Card conquered!', tamed: 0, pose: 'celebrate', tell: 1, told: [{csrf: '1'}], status: '2 friends will see it in their activity.', errors: []});
+    assert.deepEqual(mine, {heading: 'Card conquered!', tamed: 0, pose: 'celebrate', tell: 1, told: [{csrf: '1'}], untold: [{csrf: '1'}], status: '2 friends will see it in their activity.', undone: 'Taken back from friends who had not seen it yet.', errors: []});
     const theirs = await visit(browser, false, true, shots ? path.join(shots, 'tamed.png') : '');
-    assert.deepEqual(theirs, {heading: 'Leech tamed!', tamed: 1, pose: 'winner', tell: 0, told: [], status: '', errors: []});
+    assert.deepEqual(theirs, {heading: 'Leech tamed!', tamed: 1, pose: 'winner', tell: 0, told: [], untold: [], status: '', undone: '', errors: []});
   } finally {
     await browser.close();
   }
