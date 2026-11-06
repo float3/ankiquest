@@ -332,6 +332,10 @@ fn record_upload(
     upload: Upload,
 ) -> Result<UploadResponse, StatusCode> {
     let reviews: Vec<Review> = upload.reviews.into_iter().filter(|r| r.kind < 4).collect();
+    let deleted = deletions(&reviews, upload.deleted);
+    if !deleted.is_empty() {
+        log_info!(user: user, "an upload removed {} undone reviews", deleted.len());
+    }
     let store_error = failed_for("upload for", user);
     let known = app
         .store
@@ -345,13 +349,7 @@ fn record_upload(
     let (announced, changed) = {
         let mut store = app.store.lock().unwrap();
         store
-            .upsert_stamped(
-                user,
-                &reviews,
-                &upload.offsets,
-                &upload.deleted,
-                upload.clock,
-            )
+            .upsert_stamped(user, &reviews, &upload.offsets, &deleted, upload.clock)
             .map_err(store_error)?;
         let mut announced = Vec::new();
         if let Some(decks) = &upload.decks {
@@ -370,7 +368,7 @@ fn record_upload(
             }
         }
         let changed = app
-            .apply_upload(&store, user, &reviews, &upload.deleted)
+            .apply_upload(&store, user, &reviews, &deleted)
             .map_err(store_error)?;
         challenges::refresh_member(&mut store, &app.participants(), now_ms(), user)
             .map_err(store_error)?;
@@ -398,6 +396,16 @@ fn record_upload(
         feedback,
     })
 }
+/// The ids an upload asks to remove, less any review the same upload sends: a review the client
+/// still has is never deleted, whatever its list of undone answers says.
+fn deletions(reviews: &[Review], deleted: Vec<i64>) -> Vec<i64> {
+    let sent: std::collections::HashSet<i64> = reviews.iter().map(|r| r.id).collect();
+    deleted
+        .into_iter()
+        .filter(|id| !sent.contains(id))
+        .collect()
+}
+
 pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/profile/{user}", get(profile))
@@ -659,6 +667,29 @@ mod tests {
                 .unwrap()
                 .0
                 .is_empty()
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn an_upload_never_deletes_a_review_it_also_sends() {
+        let (app, path) = fixture();
+        let start = now_ms() - 60_000;
+        let reviews = reviews_at(start, 3);
+        upload_as(&app, "hill", plain_upload(reviews.clone())).await;
+        let mut both = plain_upload(reviews.clone());
+        both.deleted = vec![reviews[0].id, reviews[1].id + 1, reviews[2].id];
+        let after = upload_as(&app, "hill", both).await;
+        assert_eq!(after.profile.today.reviews, 3);
+        let stored = app.store.lock().unwrap().reviews("hill").unwrap();
+        assert_eq!(stored.len(), 3, "the store keeps what was sent");
+
+        let mut undo = plain_upload(Vec::new());
+        undo.deleted = vec![reviews[2].id];
+        let undone = upload_as(&app, "hill", undo).await;
+        assert_eq!(
+            undone.profile.today.reviews, 2,
+            "a review only removed is still deleted"
         );
         cleanup(app, path);
     }
