@@ -163,11 +163,23 @@ def refresh(show_feedback, resync=False):
     mw.taskman.run_in_background(work, done, uses_collection=True)
 
 
+# What an upload's answer says about today, kept over the last poll's: the goal's progress and
+# the day's verdict, so reviews it just took in are not counted again as unsent.
+FRESH_KEYS = ("goal", "today", "streak", "streak_state", "day_ends_at", "last_review_id", "at_risk", "streak_warning")
+
+
 def keep_goal(answer):
-    """An upload answers with the profile; its goal progress is fresher than the last poll's."""
-    fresh = (answer or {}).get("profile") if isinstance(answer, dict) else None
-    if isinstance(state["profile"], dict) and isinstance(fresh, dict) and isinstance(fresh.get("goal"), dict):
-        state["profile"]["goal"] = fresh["goal"]
+    """An upload answers with the profile; its goal progress and today are fresher than the last poll's."""
+    if not isinstance(answer, dict):
+        return
+    fresh = answer.get("profile") if isinstance(answer.get("profile"), dict) else answer
+    if not isinstance(state["profile"], dict) or state["profile"].get("user") != fresh.get("user"):
+        return
+    for key in FRESH_KEYS:
+        if key == "goal" and not isinstance(fresh.get(key), dict):
+            continue
+        if key in fresh:
+            state["profile"][key] = fresh[key]
 
 
 def refresh_shared_decks():

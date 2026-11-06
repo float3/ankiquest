@@ -41,7 +41,9 @@ interface WeekInfo { ends_at: number; timezone: string; }
 interface PersonalBest { xp: number; reviews: number; at: number; until: number; }
 interface Quest { title: string; progress: number; target: number; done: boolean; reward: number; }
 interface Achievement { id: string; title: string; description: string; reward: number; progress: number; target: number; unlocked: string | null; }
-interface HeatCell { date: string; reviews: number; xp: number; frozen: boolean; }
+/** The server's verdict on a day (`DayState` in src/game.rs); older servers leave it out. */
+type DayState = "met" | "short" | "frozen" | "skipped" | "none";
+interface HeatCell { date: string; reviews: number; xp: number; frozen: boolean; minutes?: number; streak_minutes?: number; state?: DayState; }
 
 /** `/api/profile/{user}` (`Profile` in src/game.rs). */
 interface Profile extends Person {
@@ -282,7 +284,8 @@ function streakBadge(row: Standing) {
   const expired = row.day_ends_at && row.day_ends_at <= Date.now();
   const known = typeof row.today_reviews === "number";
   const needed = row.streak_minutes ?? 0;
-  const counted = needed > 0 ? row.streak_state === "studied" : (row.today_reviews ?? 0) > 0;
+  // The server's verdict; only a server too old to send one leaves it to today's reviews.
+  const counted = row.streak_state ? row.streak_state === "studied" : (row.today_reviews ?? 0) > 0;
   const state = expired || !known ? "unknown" : counted ? "studied" : row.streak_state === "protected" ? "protected" : "pending";
   const progress = aqText`${num(Math.min(row.today_minutes ?? 0, needed))} of ${num(needed)} minutes today`;
   const status = state === "studied" ? aqText("Studied today") : needed > 0 && state !== "unknown" ? progress : state === "protected" ? aqText("Streak protected · Not studied yet") : state === "pending" ? aqText("Not studied yet") : aqText("Refresh to see today's study status");
@@ -386,8 +389,15 @@ function heat(cells: HeatCell[]) {
   const first = new Date(cells[0].date + "T00:00:00Z");
   const pad = (first.getUTCDay() + 6) % 7;
   const level = (n: number) => n === 0 ? 0 : Math.min(4, 1 + Math.floor(n / max * 3.999));
-  return aqHtml`<i class='pad'></i>`.repeat(pad) + cells.map(c =>
-    aqHtml`<i class="${c.frozen ? "frozen" : "l" + level(c.reviews)}" title="${c.date}: ${c.frozen ? aqText("streak freeze") : num(c.reviews) + " reviews, " + num(c.xp) + " XP"}"></i>`).join("");
+  const studied = (c: HeatCell) => num(c.reviews) + " reviews, " + num(c.xp) + " XP";
+  return aqHtml`<i class='pad'></i>`.repeat(pad) + cells.map(c => {
+    // The server's verdict colours the day; an older server's cells only say frozen or not.
+    const state = c.state ?? (c.frozen ? "frozen" : "met");
+    if (state === "frozen" || state === "skipped") return aqHtml`<i class="frozen" title="${c.date}: ${aqText("streak freeze")}"></i>`;
+    if (state === "short") return aqHtml`<i class="short" title="${c.date}: ${aqText`${num(c.minutes ?? 0)} of ${num(c.streak_minutes ?? 0)} minutes`} · ${aqText("Short of the streak minimum")}"></i>`;
+    if (state === "none") return aqHtml`<i class="l0" title="${c.date}: ${studied(c)}"></i>`;
+    return aqHtml`<i class="${"l" + level(c.reviews)}" title="${c.date}: ${studied(c)}"></i>`;
+  }).join("");
 }
 
 const freezeCount = (value: unknown) => Math.max(0, Math.min(3, Math.floor(Number(value) || 0)));
