@@ -1,4 +1,5 @@
-//! Who sees and reaches whom: groups joined by invite, mutual friends, and opt-in public profiles.
+//! Who sees and reaches whom: groups joined by invite, mutual friends, and public profiles,
+//! which every player has until they make theirs private.
 //! Everyone who is not a self-service account (configured and sync-folder players) keeps
 //! sharing the original community, so existing deployments behave as before.
 
@@ -120,6 +121,13 @@ fn public_flag(conn: &Connection, user: &str) -> rusqlite::Result<Option<bool>> 
     .optional()
 }
 
+/// Players who turned the global leaderboard off themselves.
+pub(crate) fn global_opt_outs(conn: &Connection) -> rusqlite::Result<BTreeSet<String>> {
+    conn.prepare("select user from player_settings where global_leaderboard = 0")?
+        .query_map([], |r| r.get(0))?
+        .collect()
+}
+
 /// Who is asking: a signed-in player, the shared community password, or nobody.
 pub struct Viewer {
     pub member: Option<String>,
@@ -187,7 +195,15 @@ impl App {
             .collect()
     }
 
+    /// Profiles are public until their player makes them private.
     pub fn is_public(&self, conn: &Connection, user: &str) -> rusqlite::Result<bool> {
+        Ok(public_flag(conn, user)?.unwrap_or(true))
+    }
+
+    /// Whether the profile was public before profiles became public by default: chosen so, or
+    /// a player from before accounts who never chose. What a player wrote about their cards
+    /// (conquest labels) reaches strangers only then, as it did when they wrote it.
+    pub(crate) fn chose_public(&self, conn: &Connection, user: &str) -> rusqlite::Result<bool> {
         Ok(public_flag(conn, user)?.unwrap_or_else(|| self.legacy(user)))
     }
 
@@ -205,21 +221,17 @@ impl App {
         Ok(a == b || self.circle(conn, a)?.contains(b))
     }
 
-    /// Everyone who chose, or by default has, a public profile.
+    /// Everyone with a public profile who did not take themselves off the global board.
     pub fn global(&self, conn: &Connection) -> rusqlite::Result<BTreeSet<String>> {
-        let chosen: std::collections::HashMap<String, bool> = conn
-            .prepare("select user, public from visibility")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let private: BTreeSet<String> = conn
+            .prepare("select user from visibility where public = 0")?
+            .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
+        let unlisted = global_opt_outs(conn)?;
         Ok(self
             .known_users()
             .into_iter()
-            .filter(|user| {
-                chosen
-                    .get(user)
-                    .copied()
-                    .unwrap_or_else(|| self.legacy(user))
-            })
+            .filter(|user| !private.contains(user) && !unlisted.contains(user))
             .collect())
     }
 
@@ -229,7 +241,29 @@ impl App {
         viewer: &Viewer,
         target: &str,
     ) -> rusqlite::Result<bool> {
-        if viewer.member.as_deref() == Some(target) || self.is_public(conn, target)? {
+        let public = self.is_public(conn, target)?;
+        self.visible_if(conn, viewer, target, public)
+    }
+
+    /// [`App::visible`] under the rule from before profiles became public by default.
+    pub(crate) fn visible_by_choice(
+        &self,
+        conn: &Connection,
+        viewer: &Viewer,
+        target: &str,
+    ) -> rusqlite::Result<bool> {
+        let public = self.chose_public(conn, target)?;
+        self.visible_if(conn, viewer, target, public)
+    }
+
+    fn visible_if(
+        &self,
+        conn: &Connection,
+        viewer: &Viewer,
+        target: &str,
+        public: bool,
+    ) -> rusqlite::Result<bool> {
+        if viewer.member.as_deref() == Some(target) || public {
             return Ok(true);
         }
         if viewer.community && self.legacy(target) {
@@ -257,7 +291,12 @@ impl App {
             (Scope::Global, _) => {
                 let mut users = self.global(conn)?;
                 if viewer.community {
-                    users.extend(self.known_users().into_iter().filter(|u| self.legacy(u)));
+                    let unlisted = global_opt_outs(conn)?;
+                    users.extend(
+                        self.known_users()
+                            .into_iter()
+                            .filter(|u| self.legacy(u) && !unlisted.contains(u)),
+                    );
                 }
                 Some(users)
             }
@@ -834,13 +873,37 @@ mod tests {
             "legacy profiles stay as public as before"
         );
         assert!(
-            !app.is_public(conn, "ana").unwrap(),
-            "accounts start private"
+            app.is_public(conn, "ana").unwrap(),
+            "accounts start public too"
+        );
+        assert!(app.chose_public(conn, "alice").unwrap());
+        assert!(
+            !app.chose_public(conn, "ana").unwrap(),
+            "but never chose it, which keeps conquest labels for friends"
         );
         let anonymous = Viewer {
             member: None,
             community: false,
         };
+        assert!(app.visible(conn, &anonymous, "ana").unwrap());
+        assert!(!app.visible_by_choice(conn, &anonymous, "ana").unwrap());
+        assert_eq!(
+            app.board(conn, &anonymous, None)
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["alice", "ana", "bob"]
+        );
+        conn.execute(
+            "insert into visibility (user, public) values ('ana', 0)",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !app.is_public(conn, "ana").unwrap(),
+            "a private profile stays private"
+        );
         assert!(!app.visible(conn, &anonymous, "ana").unwrap());
         assert!(
             app.visible(
@@ -861,6 +924,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["alice", "bob"]
         );
+        conn.execute(
+            "insert into player_settings (user, global_leaderboard) values ('bob', 0)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            app.board(conn, &anonymous, None)
+                .unwrap()
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["alice"],
+            "a public profile that left the global board is not listed there"
+        );
+        assert!(app.visible(conn, &anonymous, "bob").unwrap());
         drop(store);
         cleanup(app, path);
     }
@@ -935,7 +1013,12 @@ mod tests {
                     .is_none(),
                 "other groups' boards stay private"
             );
-            assert!(!app.visible(conn, &outsider, "ana").unwrap());
+            assert!(
+                app.visible(conn, &outsider, "ana").unwrap(),
+                "a profile nobody made private is public"
+            );
+            assert!(!app.visible_by_choice(conn, &outsider, "ana").unwrap());
+            assert!(app.visible_by_choice(conn, &viewer, "ana").unwrap());
         }
 
         let (status, _) = call(
@@ -1233,6 +1316,39 @@ mod tests {
         study(&app, "ana", &ana).await;
         study(&app, "bobby", &bo).await;
         study(&app, "alice", "alice-token").await;
+        let global = || {
+            call(
+                &app,
+                "GET",
+                "/api/leaderboard?scope=global",
+                &ana,
+                serde_json::Value::Null,
+            )
+        };
+        let (_, board) = global().await;
+        assert_eq!(
+            users(&board),
+            ["alice", "ana", "bobby"],
+            "profiles start public"
+        );
+        let (status, _) = call(
+            &app,
+            "GET",
+            "/api/profile/bobby",
+            &ana,
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, overview) = call(
+            &app,
+            "POST",
+            "/api/social/bobby",
+            &bo,
+            serde_json::json!({"action": "visibility", "public": false}),
+        )
+        .await;
+        assert_eq!(overview["public"], false);
 
         let (_, board) = call(
             &app,
@@ -1243,18 +1359,11 @@ mod tests {
         )
         .await;
         assert_eq!(users(&board), ["ana"]);
-        let (_, board) = call(
-            &app,
-            "GET",
-            "/api/leaderboard?scope=global",
-            &ana,
-            serde_json::Value::Null,
-        )
-        .await;
+        let (_, board) = global().await;
         assert_eq!(
             users(&board),
             ["alice", "ana"],
-            "the global board lists public profiles and the viewer, not Bobby who did not opt in"
+            "the global board lists public profiles and the viewer, not Bobby who went private"
         );
         let (_, board) = call(
             &app,

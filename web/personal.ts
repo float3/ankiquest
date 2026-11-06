@@ -72,7 +72,7 @@ import {failure, refused, request as call, send} from "./http";
       today:tr("Your progress, one day at a time."),
       history:tr("Every day you showed up adds to your story."),
       settings:tr("Choose how AnkiQuest encourages you and what you share."),
-      friends:tr("Study with the people you choose. Only they see your progress unless you make your profile public."),
+      friends:tr("Study with the people you choose. Your profile is public until you make it private; then only they see your progress."),
       join:tr("You were invited to study together."),
     };
     reminders = [
@@ -473,7 +473,7 @@ import {failure, refused, request as call, send} from "./http";
     const mute = (person: Person) => person.user === me ? ""
       : muted.has(person.user) ? action(tr("Unmute"),{action:"unmute",user:person.user})
       : action(tr("Mute"),{action:"mute",user:person.user},`data-confirm="${esc(tr`Mute ${person.display}? You won't hear from them. They are not told.`)}"`);
-    const visibility = html`<article class="card"><div class="card-head"><div><h2>${tr("Your profile")}</h2><p>${social.public ? tr("Anyone can see your profile.") : tr("Only your friends and groups can see your profile.")}</p></div></div>${check("",tr("Public profile"),social.public,tr("Show my profile and standings on the global leaderboard."),"data-social-public")}</article>`;
+    const visibility = html`<article class="card"><div class="card-head"><div><h2>${tr("Your profile")}</h2><p>${social.public ? tr("Anyone can see your profile.") : tr("Only your friends and groups can see your profile.")}</p></div></div>${check("",tr("Public profile"),social.public,tr("On by default. Anyone can open your profile and you are listed on the global leaderboard. Turn it off to keep both to your friends and groups."),"data-social-public")}</article>`;
     const requests = social.incoming.length ? html`<h3>${tr("Friend requests")}</h3><div class="stack">${social.incoming.map(person=>personRow(person,action(tr("Accept"),{action:"befriend",user:person.user},'class="primary"')+action(tr("Decline"),{action:"unfriend",user:person.user}))).join("")}</div>` : "";
     const waiting = social.outgoing.length ? html`<h3>${tr("Waiting for an answer")}</h3><div class="stack">${social.outgoing.map(person=>personRow(person,action(tr("Cancel request"),{action:"unfriend",user:person.user}))).join("")}</div>` : "";
     const friendList = social.friends.length

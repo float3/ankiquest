@@ -189,7 +189,7 @@ function welcome() {
     <h2 id="welcome-title">Turn your Anki reviews into a friendly game.</h2>
     <p class="section-intro">AnkiQuest gives every review XP, keeps your streak, sets three small quests a day and lets you study alongside friends. You keep using Anki exactly as before.</p>
     <ol class="welcome-steps">
-      <li><strong>Create an account</strong><span>A username and a password. Your profile stays private unless you make it public.</span></li>
+      <li><strong>Create an account</strong><span>A username and a password. Your profile is public and on the global leaderboard until you make it private.</span></li>
       <li><strong>Connect Anki</strong><span>Install the add-on for Anki on your computer, or AnkiQuest for Android, and sign in there.</span></li>
       <li><strong>Study as usual</strong><span>Reviews sync on their own. Add friends or start a group with an invite link.</span></li>
     </ol>
