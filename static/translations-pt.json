@@ -1375,5 +1375,6 @@
   "The weekly competition closes for you in 1 hour, at {0}. You have {1} XP this week.": "A competição semanal fecha para ti dentro de 1 hora, às {0}. Tens {1} XP esta semana.",
   "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.": "A competição semanal fecha para ti dentro de {0} horas, às {1}. Tens {2} XP esta semana.",
   "Last week still counting: {0} XP · closes at {1}": "A semana passada ainda conta: {0} XP · fecha às {1}",
-  "{0} XP still counting for last week": "{0} XP ainda contam para a semana passada"
+  "{0} XP still counting for last week": "{0} XP ainda contam para a semana passada",
+  "Short of the streak minimum": "Abaixo do mínimo da sequência"
 }

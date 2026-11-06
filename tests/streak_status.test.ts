@@ -69,6 +69,15 @@ const scaffold = html.match(/<body\b[^>]*>([\s\S]*?)<script>/)![1];
       assert.equal(await short.count(),1);
       assert((await short.getAttribute('aria-label'))!.includes(locale==='es-ES'?'6 de 10 minutos hoy':'6 of 10 minutes today'));
       assert.equal(await page.locator('.streak[data-streak-state="studied"]').count(),1);
+      // The heatmap colours each day by the server's verdict, and an older server's cells as before.
+      await page.evaluate(() => {
+        const day = (date: string, extra: object) => ({date,reviews:12,xp:120,frozen:false,minutes:12,streak_minutes:10,...extra});
+        app.innerHTML = `<div class="heat">${heat([day('2026-11-02',{state:'met'}),day('2026-11-03',{state:'short',minutes:6}),day('2026-11-04',{state:'frozen',frozen:true}),day('2026-11-05',{state:'skipped',frozen:true}),day('2026-11-06',{state:'none',reviews:0,minutes:0}),{date:'2026-11-07',reviews:3,xp:30,frozen:false},{date:'2026-11-08',reviews:3,xp:30,frozen:true}])}</div>`;
+      });
+      const cells = await page.locator('.heat i:not(.pad)').evaluateAll((elements: HTMLElement[]) => elements.map(element => [element.className, element.title, getComputedStyle(element).boxShadow]));
+      assert.deepEqual(cells.map(cell => cell[0]), ['l4','short','frozen','frozen','l0','l1','frozen']);
+      assert.match(cells[1]![1]!, locale==='es-ES' ? /6 de 10 minutos · Por debajo del mínimo para la racha/ : /6 of 10 minutes · Short of the streak minimum/);
+      assert.notEqual(cells[1]![2], 'none');
       checks++;
       await page.close();
     }

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from aqt import gui_hooks, mw
 
-from . import address, goal_ui, goals, moods, today, today_ui
+from . import address, day_verdict, goal_ui, goals, moods, today, today_ui
 from .board import PAGES
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
@@ -128,8 +128,12 @@ def goal_status(tree=None):
     day = server_day()
     found = current_plan(day)
     load = goals.load(mw.col, tree)
-    profile = moods.current(addon().state["profile"], now_ms())
-    status, record, restart = goals.status(load, found, day, mw.pm.profile.get(GOAL_KEY), minutes, profile)
+    moment = now_ms()
+    profile = moods.current(addon().state["profile"], moment)
+    verdict = day_verdict.verdict(profile, day_verdict.unsent(mw.col, profile), moment) if profile else None
+    status, record, restart = goals.status(
+        load, found, day, mw.pm.profile.get(GOAL_KEY), minutes, profile, verdict,
+    )
     mw.pm.profile[GOAL_KEY] = record
     if restart:
         restart_plan(api, found, day)
@@ -264,7 +268,7 @@ def goal_view(status):
         "action": tr("Set a daily goal") if status.goal is None else tr("Change goal"),
     }
     if status.streak_minutes > 0 and not status.minimum_done:
-        view["minimum_meter"] = (status.minutes, status.streak_minutes)
+        view["minimum_meter"] = (status.minimum_minutes, status.streak_minutes)
     if status.goal is None:
         return view
     if status.goal_done:

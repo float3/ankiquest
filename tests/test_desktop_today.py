@@ -47,6 +47,15 @@ def collection(db, tree, today_number=100, cutoff=1_000_000):
     )
 
 
+def verdict(met, minutes=10, streak_minutes=5, waiting=False):
+    """A day_verdict.verdict answer for today."""
+    return {
+        "met": met, "streak_state": "studied" if met else "pending", "streak": 1, "reviews": 1,
+        "time_ms": minutes * 60_000, "minutes": minutes, "streak_minutes": streak_minutes,
+        "unsent": 1 if waiting else 0, "waiting": waiting,
+    }
+
+
 def backlog_plan(days=30, since=1000, chosen=True):
     return goals.Plan("backlog", days, since, chosen)
 
@@ -120,14 +129,29 @@ class GoalTests(unittest.TestCase):
         other = {"goal": dict(profile["goal"], mode="minutes")}
         self.assertIsNone(goals.status(goals.Load(5, 30, 9, 0, 0), chosen, 9, None, 0, other)[0].served)
 
-    def test_minimum_and_goal_follow_the_servers_rule(self):
+    def test_minimum_follows_the_servers_verdict_and_goal_its_rule(self):
         status = goals.Status(5, 4, 5, 10, "cards", goals.Goal(10, 0, 0, None), None, False)
-        self.assertFalse(status.minimum_done)
+        self.assertFalse(status.minimum_done, "the collection alone never secures the streak")
         self.assertTrue(status.goal_done)
-        self.assertTrue(status._replace(minutes=5).minimum_done)
-        self.assertFalse(status._replace(studied_cards=0, minutes=9, streak_minutes=0).minimum_done)
+        self.assertFalse(status._replace(minutes=9).minimum_done)
+        self.assertEqual(4, status.minimum_minutes)
+        short = status._replace(verdict=verdict(False, minutes=3))
+        self.assertFalse(short.minimum_done)
+        self.assertEqual(3, short.minimum_minutes)
+        self.assertTrue(status._replace(verdict=verdict(True)).minimum_done)
+        self.assertFalse(status._replace(verdict=verdict(True)).minimum_waiting)
+        waiting = status._replace(verdict=verdict(True, waiting=True))
+        self.assertTrue(waiting.minimum_done and waiting.minimum_waiting)
+        self.assertIn("once your reviews upload", goals.minimum_text(waiting))
+        self.assertIn("once your reviews upload", goals.minimum_text(waiting._replace(streak_minutes=0)))
+        self.assertTrue(goals.minimum_text(status._replace(verdict=verdict(True))).startswith("Streak secured:"))
         self.assertEqual(4, status._replace(mode="minutes").progress)
         self.assertFalse(status._replace(goal=None).goal_done)
+
+    def test_the_verdict_brings_the_servers_minimum(self):
+        found, _, _ = goals.status(goals.Load(5, 3, 2, 0, 0), goals.Plan("off", None, 1, True), 9, None, 5, None, verdict(False, streak_minutes=15))
+        self.assertEqual(15, found.streak_minutes)
+        self.assertEqual(5, goals.status(goals.Load(5, 3, 2, 0, 0), goals.Plan("off", None, 1, True), 9, None, 5)[0].streak_minutes)
 
     def test_each_celebration_shows_once_a_day(self):
         chosen = backlog_plan(30, since=1000)
@@ -135,7 +159,8 @@ class GoalTests(unittest.TestCase):
 
         def claim(load):
             nonlocal stored, shown
-            status, stored, _ = goals.status(load, chosen, 1000 + load.day, stored, 5)
+            met = load.studied_cards > 0 and load.minutes >= 5
+            status, stored, _ = goals.status(load, chosen, 1000 + load.day, stored, 5, None, verdict(met, minutes=load.minutes))
             earned, shown = goals.claim(status, shown)
             return earned
 
@@ -149,7 +174,7 @@ class GoalTests(unittest.TestCase):
         self.assertEqual(goals.BOTH, claim(goals.Load(6, 5, 6, 0, 0)))
 
     def test_a_server_with_wins_celebrates_the_goal_instead(self):
-        status = goals.Status(5, 9, 0, 20, "backlog", goals.Goal(20, 4, 1, 4), None, False)
+        status = goals.Status(5, 9, 0, 20, "backlog", goals.Goal(20, 4, 1, 4), None, False, verdict(True, streak_minutes=0))
         self.assertTrue(status.minimum_done and status.goal_done)
         earned, stored = goals.claim(status, None, server_goal=True)
         self.assertEqual(goals.MINIMUM, earned)
@@ -697,11 +722,22 @@ class HomeTests(unittest.TestCase):
         for hook in self.hooks.state_did_change:
             hook("overview", "review")
 
+    def served_today(self, streak_minutes=0, **today):
+        """The last profile, from before this test's reviews: today began at the day's cutoff."""
+        self.addon.state["profile"] = {
+            "user": "hill", "streak": 1, "streak_state": "pending", "day_ends_at": self.cutoff * 1000,
+            "last_review_id": 0,
+            "today": dict({"starts_at": (self.cutoff - 86_400) * 1000, "reviews": 0, "time_ms": 0, "minutes": 0,
+                           "streak_minutes": streak_minutes}, **today),
+        }
+
     def test_the_first_session_of_the_day_celebrates_then_later_ones_recap(self):
         self.remember("cards", 100)
+        self.served_today()
         self.session(2)
         dialog = self.home.today_ui.session_dialog
         self.assertEqual("Streak secured! 🔥", dialog.call_args.args[1])
+        self.assertIn("once your reviews upload", dialog.call_args.args[2])
         self.assertIn("2 reviews · 1 minute", dialog.call_args.args[2])
         self.assertTrue(dialog.call_args.args[3].endswith("aki_streak.png"))
         self.session(1)
@@ -712,8 +748,25 @@ class HomeTests(unittest.TestCase):
         self.assertEqual(2, dialog.call_count)
         self.assertEqual(3, self.mw.pm.profile[self.home.SESSION_KEY]["remaining"])
 
+    def test_the_streak_is_not_celebrated_without_the_servers_word(self):
+        self.remember("cards", 100)
+        self.session(2)
+        self.assertEqual("Your study session", self.home.today_ui.session_dialog.call_args.args[1])
+
+    def test_unsent_reviews_short_of_the_servers_minimum_do_not_secure_the_streak(self):
+        self.remember("cards", 100)
+        self.served_today(streak_minutes=5, reviews=1, time_ms=180_000, minutes=3)
+        self.session(2)
+        self.assertEqual("Your study session", self.home.today_ui.session_dialog.call_args.args[1])
+        self.served_today(streak_minutes=5, reviews=1, time_ms=240_000, minutes=4)
+        self.home.local["days"] = None
+        goal = self.home.goal_status()
+        self.assertTrue(goal.minimum_done and goal.minimum_waiting)
+        self.assertEqual(5, goal.minimum_minutes)
+
     def test_the_goal_popup_is_left_to_a_server_with_wins(self):
         self.remember("cards", 1)
+        self.served_today()
         self.api.server_info = Mock(return_value=(frozenset({"wins"}), None))
         self.session(2)
         dialog = self.home.today_ui.session_dialog
