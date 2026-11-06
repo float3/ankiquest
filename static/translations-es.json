@@ -1302,6 +1302,7 @@
   "Current password": "Contraseña actual",
   "Change password": "Cambiar contraseña",
   "Set a password": "Crear una contraseña",
+  "Ask the person who runs your server to set a first password for you; you can change it here afterwards.": "Pide a quien gestiona tu servidor que te ponga una primera contraseña; después podrás cambiarla aquí.",
   "With a password you can also sign in with your username.": "Con una contraseña también puedes iniciar sesión con tu nombre de usuario.",
   "New password (at least 10 characters)": "Contraseña nueva (al menos 10 caracteres)",
   "Sign out my other devices": "Cerrar sesión en mis otros dispositivos",

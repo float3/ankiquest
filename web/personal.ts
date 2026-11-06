@@ -620,6 +620,8 @@ import {failure, refused, request as call, send} from "./http";
   /** Asks a passwordless account to sign in again with a provider it linked. */
   function reauthBlock() {
     const linked = (state.signIn?.providers ?? []).filter(item => item.linked);
+    // Without a linked sign-in to confirm with, only the operator can give it a first password.
+    if (!linked.length) return html`<div class="reauth"><p class="settings-hint">${tr("Ask the person who runs your server to set a first password for you; you can change it here afterwards.")}</p></div>`;
     const links = linked.map(item => html`<a class="button-link" data-reauth="${esc(item.provider)}" href="/auth/oauth/${esc(item.provider)}?reauth=1">${esc(tr`Sign in again with ${item.name}`)}</a>`).join("");
     return html`<div class="reauth"><p class="settings-hint">${tr("To set a password, link another sign-in or delete your account, first sign in again with a sign-in you linked. It counts for ten minutes in this browser.")}</p>${links ? html`<div class="setting-actions">${links}</div>` : ""}</div>`;
   }

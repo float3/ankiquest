@@ -700,7 +700,7 @@ pub fn adopt(state_dir: &Path, players: &[Configured], now_ms: i64) -> Result<St
         }
         tx.execute(
             "insert or ignore into account_tokens (token_hash, user, device, created_at) values (?1, ?2, ?3, ?4)",
-            params![crate::accounts::token_hash(token), player.user, "Moved from the server configuration", now_ms],
+            params![crate::accounts::token_hash(token), player.user, crate::accounts::ADOPTED_DEVICE, now_ms],
         )?;
         admin_log(
             &tx,
@@ -1255,6 +1255,15 @@ mod tests {
             "the phone stays signed in"
         );
         assert_eq!(directory.account("ana").unwrap().display, "Ana María");
+        let device: String = store
+            .conn
+            .query_row(
+                "select device from account_tokens where user = 'ana'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(device, crate::accounts::ADOPTED_DEVICE);
         assert_eq!(
             directory.token_owner("bo-token"),
             None,

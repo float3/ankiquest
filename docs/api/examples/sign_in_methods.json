@@ -1,5 +1,6 @@
 {
   "account": true,
+  "linked_unavailable": false,
   "password": true,
   "providers": [
     {
