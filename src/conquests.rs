@@ -159,7 +159,18 @@ pub(crate) async fn show(
         return Err(StatusCode::NOT_FOUND);
     }
     let conquest = find(&app, &user, at).ok_or(StatusCode::NOT_FOUND)?;
-    let label = label_of(&app.store.lock().unwrap().conn, &user, at).map_err(store_error)?;
+    let label = {
+        let conn = &app.store.lock().unwrap().conn;
+        // Profiles became public by default after some labels were written for friends only.
+        if app
+            .visible_by_choice(conn, &viewer, &user)
+            .map_err(store_error)?
+        {
+            label_of(conn, &user, at).map_err(store_error)?
+        } else {
+            None
+        }
+    };
     let (told, friends, win, undo) = if authorized(&app, &user, &headers) {
         let store = app.store.lock().unwrap();
         let told = store.is_seen(&user, &told_key(at)).map_err(store_error)?;

@@ -1139,6 +1139,12 @@ mod tests {
         assert!(page.contains("Ada &lt;Operator&gt;"));
         assert!(page.contains("mailto:privacy@example.org"));
         assert!(!page.contains("{{"), "every placeholder is filled");
+        assert!(
+            page.contains("Your profile is also public by default")
+                && page.contains("listed on the global leaderboard")
+                && page.contains("untick <strong>Public profile</strong>"),
+            "the notice says what is on by default and how to turn it off"
+        );
         let anonymous = notice_page(&Notice::default(), false, 0, &[]);
         assert!(
             anonymous.contains("the person who runs this AnkiQuest server")

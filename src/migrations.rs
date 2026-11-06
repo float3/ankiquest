@@ -10,7 +10,12 @@ use rusqlite::Connection;
 
 type Step = fn(&Connection) -> Result<(), Error>;
 
-const STEPS: &[Step] = &[baseline, notification_fetches, global_leaderboard];
+const STEPS: &[Step] = &[
+    baseline,
+    notification_fetches,
+    global_leaderboard,
+    global_leaderboard_choice,
+];
 
 /// Brings the database up to the latest step, then turns foreign keys on for the connection.
 pub fn run(conn: &Connection) -> Result<(), Error> {
@@ -151,6 +156,7 @@ fn notification_fetches(conn: &Connection) -> Result<(), Error> {
 }
 
 /// Whether the player chose to appear on the global leaderboard; off until they turn it on.
+/// [`global_leaderboard_choice`] later made it null until they choose.
 fn global_leaderboard(conn: &Connection) -> Result<(), Error> {
     add_column(
         conn,
@@ -158,6 +164,19 @@ fn global_leaderboard(conn: &Connection) -> Result<(), Error> {
         "global_leaderboard",
         "integer not null default 0",
     )
+}
+
+/// The global leaderboard became opt-out: `global_leaderboard` is now null until the player
+/// chooses. A stored 0 was the old default, not a choice anyone can be told apart by, so it
+/// becomes null; a 1 was always turned on by its player and stays.
+fn global_leaderboard_choice(conn: &Connection) -> Result<(), Error> {
+    conn.execute_batch(
+        "alter table player_settings add column global_leaderboard_choice integer;
+         update player_settings set global_leaderboard_choice = 1 where global_leaderboard = 1;
+         alter table player_settings drop column global_leaderboard;
+         alter table player_settings rename column global_leaderboard_choice to global_leaderboard;",
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -257,6 +276,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!((since, friend_nudges), (7, 0));
+        cleanup(store, dir);
+    }
+
+    #[test]
+    fn the_global_leaderboard_keeps_only_choices_anyone_could_have_made() {
+        let dir = temp_dir("global-choice");
+        drop(Store::open(&dir).unwrap());
+        {
+            // A version 3 database: every row got 0 unless its player turned the board on.
+            let conn = Connection::open(dir.join("ankiquest.db")).unwrap();
+            conn.execute_batch(
+                "alter table player_settings drop column global_leaderboard;
+                 alter table player_settings add column global_leaderboard integer not null default 0;
+                 insert into player_settings (user, nudges) values ('hill', 1);
+                 insert into player_settings (user, global_leaderboard) values ('cerro', 1), ('ana', 0), ('bo', 0);
+                 insert into visibility (user, public) values ('bo', 0), ('cerro', 0);
+                 pragma user_version = 3;",
+            )
+            .unwrap();
+        }
+        let mut store = Store::open(&dir).unwrap();
+        assert_eq!(version(&store.conn), STEPS.len());
+        let stored: Vec<(String, Option<i64>, i64)> = store
+            .conn
+            .prepare("select user, global_leaderboard, nudges from player_settings order by user")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            stored,
+            [
+                ("ana".into(), None, 0),
+                ("bo".into(), None, 0),
+                ("cerro".into(), Some(1), 0),
+                ("hill".into(), None, 1),
+            ]
+        );
+        let listed = |store: &Store, user: &str| store.global_leaderboard(user).unwrap();
+        assert!(listed(&store, "ana") && listed(&store, "hill") && listed(&store, "nobody"));
+        assert!(
+            listed(&store, "cerro"),
+            "turned on, though the profile is private"
+        );
+        assert!(
+            !listed(&store, "bo"),
+            "a private profile is not listed by default"
+        );
+        store.set_global_leaderboard("ana", false).unwrap();
+        store.set_global_leaderboard("bo", true).unwrap();
+        assert!(!listed(&store, "ana"), "an explicit opt-out is kept");
+        assert!(listed(&store, "bo"));
         cleanup(store, dir);
     }
 

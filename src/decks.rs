@@ -98,8 +98,8 @@ pub struct Settings {
     pub recipients: Vec<Recipient>,
     pub nudges: bool,
     pub celebrations: bool,
-    /// Whether other signed-in players see this player on the global leaderboard. Off until
-    /// the player turns it on; a public profile is listed there either way.
+    /// Whether other players see this player on the global leaderboard. On until the player
+    /// turns it off, or makes their profile private without turning it on.
     pub global_leaderboard: bool,
 }
 
@@ -625,8 +625,17 @@ impl Store {
         Ok(())
     }
 
+    /// Whether the player is on the global leaderboard: their own choice, or, until they make
+    /// one, whether their profile is public (which it is unless they made it private).
     pub fn global_leaderboard(&self, user: &str) -> Result<bool, Error> {
-        self.player_setting(user, "global_leaderboard", false)
+        Ok(self.conn.query_row(
+            "select coalesce(
+                 (select global_leaderboard from player_settings where user = ?1),
+                 (select public from visibility where user = ?1),
+                 1)",
+            [user],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn set_global_leaderboard(&mut self, user: &str, shown: bool) -> Result<(), Error> {
@@ -638,7 +647,8 @@ impl Store {
         Ok(())
     }
 
-    /// Everyone who turned on the global leaderboard.
+    /// Everyone who turned on the global leaderboard themselves. Players who never chose are
+    /// listed through their public profile ([`crate::app::App::global`]).
     pub fn global_leaderboard_players(&self) -> Result<BTreeSet<String>, Error> {
         Ok(self
             .conn

@@ -14,7 +14,7 @@
       "recipients": []
     }
   ],
-  "global_leaderboard": false,
+  "global_leaderboard": true,
   "nudges": false,
   "recipients": [
     {

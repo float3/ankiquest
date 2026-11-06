@@ -97,7 +97,7 @@ struct GlobalRow {
 enum GlobalStanding {
     /// The viewer, someone in their circle, or a public profile: as on the circle board.
     Full(Standing),
-    /// A stranger who only turned on the global leaderboard.
+    /// A stranger with a private profile who turned on the global leaderboard.
     Stranger(Stranger),
 }
 
@@ -126,8 +126,9 @@ impl From<Standing> for Stranger {
 }
 
 /// Everyone on the global board for this viewer, and those of them the viewer may see in
-/// full. Signed-in players also see everyone who turned on the global leaderboard, and
-/// themselves, but not the people they muted.
+/// full. Public profiles are listed unless their player turned the global leaderboard off.
+/// Signed-in players also see private profiles that turned it on, and themselves, but not
+/// the people they muted.
 fn global_users(
     app: &App,
     viewer: &social::Viewer,
@@ -168,7 +169,7 @@ fn global_board(
     let shown = match me {
         Some(me) => {
             let store = app.store.lock().unwrap();
-            store.global_leaderboard(me)? || app.is_public(&store.conn, me)?
+            store.global_leaderboard(me)?
         }
         None => false,
     };
@@ -821,6 +822,18 @@ mod tests {
         store.set_global_leaderboard(user, true).unwrap();
     }
 
+    fn make_private(app: &App, user: &str) {
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into visibility (user, public) values (?1, 0)",
+                [user],
+            )
+            .unwrap();
+    }
+
     async fn get(
         app: &Arc<App>,
         uri: &str,
@@ -926,22 +939,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_global_board_lists_who_opted_in_and_the_viewer() {
+    async fn the_global_board_lists_everyone_but_who_opted_out_or_went_private() {
         let (app, path) = app_with(serde_json::json!({"registration": true}));
         let ana = account(&app, "ana", 4);
         account(&app, "bobby", 6);
         let carla = account(&app, "carla", 8);
-        opt_in(&app, "bobby");
         let (status, board) =
             get(&app, "/api/leaderboard?scope=global&period=day", Some(&ana)).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(users(&board), ["bobby", "ana"], "Carla did not opt in");
+        assert_eq!(
+            users(&board),
+            ["carla", "bobby", "ana"],
+            "profiles are public and listed until their player says otherwise"
+        );
+        assert!(
+            row(&board, "bobby")["today_reviews"].is_u64(),
+            "a public profile has its full row"
+        );
+        assert_eq!(row(&board, "ana")["shown"], true);
+        assert_eq!(
+            get(&app, "/api/decks/ana", Some(&ana)).await.1["global_leaderboard"],
+            true
+        );
+
+        // Bobby makes his profile private, which takes him off the board until he turns it on.
+        make_private(&app, "bobby");
+        let (_, board) = get(&app, "/api/leaderboard?scope=global&period=day", Some(&ana)).await;
+        assert_eq!(users(&board), ["carla", "ana"]);
+        opt_in(&app, "bobby");
+        let (_, board) = get(&app, "/api/leaderboard?scope=global&period=day", Some(&ana)).await;
+        assert_eq!(users(&board), ["carla", "bobby", "ana"]);
         let mine = row(&board, "ana");
         assert_eq!(
             (mine["me"].as_bool(), mine["shown"].as_bool()),
-            (Some(true), Some(false))
+            (Some(true), Some(true))
         );
-        assert_eq!(mine["rank"], 2);
+        assert_eq!(mine["rank"], 3);
         assert!(
             mine["today_reviews"].is_u64(),
             "the viewer sees their own row in full"
@@ -957,7 +990,7 @@ mod tests {
         assert_eq!(
             fields,
             ["display", "level", "period", "rank", "streak", "user", "xp"],
-            "nothing about today, the week or decks for strangers"
+            "nothing about today, the week or decks for strangers with private profiles"
         );
         assert_eq!(stranger["display"], "Bobby");
         assert_eq!(stranger["period"], "day");
@@ -966,21 +999,26 @@ mod tests {
             StatusCode::NOT_FOUND,
             "the profile stays private"
         );
+        assert_eq!(
+            get(&app, "/api/profile/carla", Some(&ana)).await.0,
+            StatusCode::OK,
+            "a profile nobody made private is public"
+        );
 
-        // Turning it on through the settings the app reads.
+        // Carla turns it off through the settings the app reads.
         let set = axum::http::Request::builder()
             .method("POST")
-            .uri("/api/decks/ana")
-            .header("authorization", format!("Bearer {ana}"))
+            .uri("/api/decks/carla")
+            .header("authorization", format!("Bearer {carla}"))
             .header("content-type", "application/json")
             .body(axum::body::Body::from(
-                r#"{"decks": [], "global_leaderboard": true}"#,
+                r#"{"decks": [], "global_leaderboard": false}"#,
             ))
             .unwrap();
         let (status, settings) = json_response(route(&app, set).await).await;
         assert_eq!(
             (status, settings["global_leaderboard"].as_bool()),
-            (StatusCode::OK, Some(true))
+            (StatusCode::OK, Some(false))
         );
         assert_eq!(
             get(&app, "/api/decks/carla", Some(&carla)).await.1["global_leaderboard"],
@@ -990,8 +1028,7 @@ mod tests {
         assert_eq!(users(&board), ["carla", "bobby", "ana"]);
         assert_eq!(row(&board, "carla")["shown"], false);
         let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
-        assert_eq!(row(&board, "ana")["shown"], true);
-        assert!(!users(&board).contains(&"carla"));
+        assert!(!users(&board).contains(&"carla"), "an opt-out stays out");
 
         // Friends see each other in full there too.
         app.store
@@ -1008,9 +1045,14 @@ mod tests {
         assert!(row(&board, "bobby")["today_reviews"].is_u64());
         assert!(row(&board, "bobby").get("me").is_none());
 
-        // Without signing in, only public profiles are there.
+        // Without signing in, only the listed public profiles are there.
         let (status, board) = get(&app, "/api/leaderboard?scope=global", None).await;
-        assert_eq!((status, users(&board)), (StatusCode::OK, vec![]));
+        assert_eq!((status, users(&board)), (StatusCode::OK, vec!["ana"]));
+        let (_, records) = get(&app, "/api/records?scope=global", None).await;
+        assert!(
+            !records.to_string().contains("carla") && !records.to_string().contains("bobby"),
+            "{records}"
+        );
         cleanup(app, path);
     }
 

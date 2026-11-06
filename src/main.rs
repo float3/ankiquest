@@ -780,6 +780,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn labels_reach_strangers_only_from_profiles_chosen_public() {
+        let (app, path) = fixture();
+        crate::accounts::create(&app.store.lock().unwrap().conn, "ana", "Ana", "", 0).unwrap();
+        app.accounts.insert("ana", "Ana");
+        let token = app.issue_token("ana", "Phone").unwrap();
+        let mut ana = HeaderMap::new();
+        ana.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        let rows = hard_card(79);
+        let at = rows.last().unwrap().id;
+        let _ = upload(
+            State(app.clone()),
+            UrlPath("ana".into()),
+            ana.clone(),
+            Json(plain_upload(rows)),
+        )
+        .await
+        .unwrap();
+        conquests::set_label(
+            State(app.clone()),
+            UrlPath(("ana".into(), at)),
+            ana.clone(),
+            Json(conquests::LabelUpdate {
+                label: "la ardilla".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        let label = |viewer: HeaderMap| async {
+            conquests::show(State(app.clone()), UrlPath(("ana".into(), at)), viewer)
+                .await
+                .unwrap()
+                .0
+                .label
+        };
+        assert_eq!(
+            label(HeaderMap::new()).await,
+            None,
+            "the conquest is public by default, what the card was is not"
+        );
+        assert_eq!(label(headers("hill")).await, None);
+        assert_eq!(label(ana.clone()).await.as_deref(), Some("la ardilla"));
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute("insert into friendships (a, b, requested_by, accepted, created_at) values ('ana', 'hill', 'ana', 1, 0)", [])
+            .unwrap();
+        assert_eq!(label(headers("hill")).await.as_deref(), Some("la ardilla"));
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute(
+                "insert into visibility (user, public) values ('ana', 1)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            label(HeaderMap::new()).await.as_deref(),
+            Some("la ardilla"),
+            "a profile its player made public shares labels as before"
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
     async fn a_conquered_card_is_announced_shared_and_told_to_friends_once() {
         let (app, path) = fixture();
         upload_as(

@@ -726,11 +726,19 @@ async fn examples_match_the_handlers() {
         .await,
     ));
 
-    // The global leaderboard: Ana, who has no friends yet, sees the public profiles and her own
-    // row, which nobody else sees until she turns the global leaderboard on. Then Hill sees her
-    // there as a stranger: name, level, XP and streak only.
+    // The global leaderboard: profiles are public and listed by default, but Ana made hers
+    // private. With no friends yet she sees the public profiles and her own row, which nobody
+    // else sees until she turns the global leaderboard on. Then Hill sees her there as a
+    // stranger: name, level, XP and streak only.
     f.call("POST", "/api/reviews/ana", Some(&ana), f.reviews(2))
         .await;
+    f.call(
+        "POST",
+        "/api/social/ana",
+        Some(&ana),
+        json!({"action": "visibility", "public": false}),
+    )
+    .await;
     examples.push((
         "leaderboard_global_hidden",
         f.call(
