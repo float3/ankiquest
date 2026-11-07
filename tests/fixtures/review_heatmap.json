@@ -1,0 +1,703 @@
+{
+  "_about": "The review heatmap's rules: each case gives the collection's reviews and scheduled cards per study day as of today, and optionally the last profile, read in UTC; expected is the heatmap after both. The desktop add-on (addon/heatmap.py, tests/test_review_heatmap.py) checks it; the Android app keeps a copy in AnkiDroid/src/test/resources/ankiquest/review_heatmap.json and CI there fails when it drifts from this file.",
+  "zone": "UTC",
+  "cases": [
+    {
+      "name": "an empty collection has no invented history or streak",
+      "today": "2024-03-01",
+      "reviews": {},
+      "scheduled": {},
+      "expected": {
+        "reviews": {},
+        "scheduled": {},
+        "current_streak": 0,
+        "longest_streak": 0,
+        "total_reviews": 0,
+        "days_studied": 0,
+        "first_review_date": null,
+        "daily_average": 0.0,
+        "protected_days": [],
+        "verdicts": {},
+        "searches": {
+          "2024-03-01": null
+        }
+      }
+    },
+    {
+      "name": "yesterday's streak survives until today is over, across a leap day",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 10,
+        "2024-02-28": 10,
+        "2024-02-27": 10
+      },
+      "scheduled": {},
+      "expected": {
+        "reviews": {
+          "2024-02-27": 10,
+          "2024-02-28": 10,
+          "2024-02-29": 10
+        },
+        "scheduled": {},
+        "current_streak": 3,
+        "longest_streak": 3,
+        "total_reviews": 30,
+        "days_studied": 3,
+        "first_review_date": "2024-02-27",
+        "daily_average": 10.0,
+        "protected_days": [],
+        "verdicts": {},
+        "searches": {
+          "2024-02-29": "prop:rated=-1"
+        }
+      }
+    },
+    {
+      "name": "reviewing today lengthens the streak",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 10,
+        "2024-02-28": 10,
+        "2024-02-27": 10,
+        "2024-03-01": 2
+      },
+      "scheduled": {},
+      "expected": {
+        "reviews": {
+          "2024-02-27": 10,
+          "2024-02-28": 10,
+          "2024-02-29": 10,
+          "2024-03-01": 2
+        },
+        "scheduled": {},
+        "current_streak": 4,
+        "longest_streak": 4,
+        "total_reviews": 32,
+        "days_studied": 4,
+        "first_review_date": "2024-02-27",
+        "daily_average": 8.0,
+        "protected_days": [],
+        "verdicts": {},
+        "searches": {
+          "2024-03-01": "prop:rated=0"
+        }
+      }
+    },
+    {
+      "name": "a gap breaks the current streak; the longest one spans the new year",
+      "today": "2025-01-04",
+      "reviews": {
+        "2024-12-30": 2,
+        "2024-12-31": 2,
+        "2025-01-01": 2,
+        "2025-01-02": 2
+      },
+      "scheduled": {},
+      "expected": {
+        "reviews": {
+          "2024-12-30": 2,
+          "2024-12-31": 2,
+          "2025-01-01": 2,
+          "2025-01-02": 2
+        },
+        "scheduled": {},
+        "current_streak": 0,
+        "longest_streak": 4,
+        "total_reviews": 8,
+        "days_studied": 4,
+        "first_review_date": "2024-12-30",
+        "daily_average": 2.0,
+        "protected_days": [],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "totals do not overflow a daily integer and the forecast never counts as study",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-03-01": 2147483647,
+        "2024-02-29": 2147483647,
+        "2024-03-02": 99
+      },
+      "scheduled": {
+        "2024-03-01": 2,
+        "2024-03-02": 3,
+        "2024-05-30": 4,
+        "2024-05-31": 5
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-29": 2147483647,
+          "2024-03-01": 2147483647
+        },
+        "scheduled": {
+          "2024-03-02": 3,
+          "2024-05-30": 4
+        },
+        "current_streak": 2,
+        "longest_streak": 2,
+        "total_reviews": 4294967294,
+        "days_studied": 2,
+        "first_review_date": "2024-02-29",
+        "daily_average": 2147483647.0,
+        "protected_days": [],
+        "verdicts": {},
+        "searches": {
+          "2024-03-02": "prop:due=1 -is:new",
+          "2024-05-30": "prop:due=90 -is:new",
+          "2024-05-31": null
+        }
+      }
+    },
+    {
+      "name": "the collection alone numbers reviews by today's clock",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-03-01": 5,
+        "2024-02-29": 0,
+        "2024-02-28": 30,
+        "2024-02-27": 8
+      },
+      "scheduled": {},
+      "expected": {
+        "reviews": {
+          "2024-02-27": 8,
+          "2024-02-28": 30,
+          "2024-03-01": 5
+        },
+        "scheduled": {},
+        "current_streak": 1,
+        "longest_streak": 2,
+        "total_reviews": 43,
+        "days_studied": 3,
+        "first_review_date": "2024-02-27",
+        "daily_average": 14.333333333333334,
+        "protected_days": [],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "reviews studied on a flight count on the day AnkiQuest numbered them by",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-03-01": 5,
+        "2024-02-29": 0,
+        "2024-02-28": 30,
+        "2024-02-27": 8
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": [
+          {
+            "date": "2024-02-27",
+            "reviews": 8,
+            "xp": 8,
+            "frozen": false
+          },
+          {
+            "date": "2024-02-28",
+            "reviews": 10,
+            "xp": 10,
+            "frozen": false
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 20,
+            "xp": 20,
+            "frozen": false
+          },
+          {
+            "date": "2024-03-01",
+            "reviews": 2,
+            "xp": 2,
+            "frozen": false
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-27": 8,
+          "2024-02-28": 10,
+          "2024-02-29": 20,
+          "2024-03-01": 5
+        },
+        "scheduled": {},
+        "current_streak": 4,
+        "longest_streak": 4,
+        "total_reviews": 43,
+        "days_studied": 4,
+        "first_review_date": "2024-02-27",
+        "daily_average": 10.75,
+        "protected_days": [],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "days the server has not been sent, or never covered, stay the collection's",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 9,
+        "2024-02-28": 7,
+        "2024-01-21": 3
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709208000000,
+        "heatmap": [
+          {
+            "date": "2024-02-28",
+            "reviews": 7,
+            "xp": 7,
+            "frozen": false
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": false
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-01-21": 3,
+          "2024-02-28": 7,
+          "2024-02-29": 9
+        },
+        "scheduled": {},
+        "current_streak": 2,
+        "longest_streak": 2,
+        "total_reviews": 19,
+        "days_studied": 3,
+        "first_review_date": "2024-01-21",
+        "daily_average": 6.333333333333333,
+        "protected_days": [],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "a profile without heatmap days changes nothing",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 9,
+        "2024-02-28": 7,
+        "2024-01-21": 3
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": []
+      },
+      "expected": {
+        "reviews": {
+          "2024-01-21": 3,
+          "2024-02-28": 7,
+          "2024-02-29": 9
+        },
+        "scheduled": {},
+        "current_streak": 2,
+        "longest_streak": 2,
+        "total_reviews": 19,
+        "days_studied": 3,
+        "first_review_date": "2024-01-21",
+        "daily_average": 6.333333333333333,
+        "protected_days": [],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "a day AnkiQuest protected keeps the streak without lengthening it",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-03-01": 5,
+        "2024-02-29": 5,
+        "2024-02-27": 5,
+        "2024-02-26": 5
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": [
+          {
+            "date": "2024-02-26",
+            "reviews": 5,
+            "xp": 5,
+            "frozen": false
+          },
+          {
+            "date": "2024-02-27",
+            "reviews": 5,
+            "xp": 5,
+            "frozen": false
+          },
+          {
+            "date": "2024-02-28",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": true
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 5,
+            "xp": 5,
+            "frozen": false
+          },
+          {
+            "date": "2024-03-01",
+            "reviews": 5,
+            "xp": 5,
+            "frozen": false
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-26": 5,
+          "2024-02-27": 5,
+          "2024-02-29": 5,
+          "2024-03-01": 5
+        },
+        "scheduled": {},
+        "current_streak": 4,
+        "longest_streak": 4,
+        "total_reviews": 20,
+        "days_studied": 4,
+        "first_review_date": "2024-02-26",
+        "daily_average": 5.0,
+        "protected_days": [
+          "2024-02-28"
+        ],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "a protected day starts nothing, reviews on it do not count, and today is not protected",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 5,
+        "2024-02-28": 5
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": [
+          {
+            "date": "2024-02-25",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": true
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": true
+          },
+          {
+            "date": "2024-03-01",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": true
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-28": 5,
+          "2024-02-29": 5
+        },
+        "scheduled": {},
+        "current_streak": 1,
+        "longest_streak": 1,
+        "total_reviews": 10,
+        "days_studied": 2,
+        "first_review_date": "2024-02-28",
+        "daily_average": 5.0,
+        "protected_days": [
+          "2024-02-25",
+          "2024-02-29"
+        ],
+        "verdicts": {}
+      }
+    },
+    {
+      "name": "a frozen day with reviews keeps the streak as frozen and does not lengthen it",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-02-29": 40,
+        "2024-02-28": 3,
+        "2024-02-27": 40
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": [
+          {
+            "date": "2024-02-27",
+            "reviews": 40,
+            "xp": 40,
+            "frozen": false,
+            "state": "met",
+            "minutes": 12,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-02-28",
+            "reviews": 3,
+            "xp": 3,
+            "frozen": true,
+            "state": "frozen",
+            "minutes": 1,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 40,
+            "xp": 40,
+            "frozen": false,
+            "state": "met",
+            "minutes": 11,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-03-01",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": false,
+            "state": "none",
+            "minutes": 0,
+            "streak_minutes": 10
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-27": 40,
+          "2024-02-28": 3,
+          "2024-02-29": 40
+        },
+        "scheduled": {},
+        "current_streak": 2,
+        "longest_streak": 2,
+        "total_reviews": 83,
+        "days_studied": 3,
+        "first_review_date": "2024-02-27",
+        "daily_average": 27.666666666666668,
+        "protected_days": [
+          "2024-02-28"
+        ],
+        "verdicts": {
+          "2024-02-27": {
+            "state": "met",
+            "minutes": 12,
+            "streak_minutes": 10
+          },
+          "2024-02-28": {
+            "state": "frozen",
+            "minutes": 1,
+            "streak_minutes": 10
+          },
+          "2024-02-29": {
+            "state": "met",
+            "minutes": 11,
+            "streak_minutes": 10
+          },
+          "2024-03-01": {
+            "state": "none",
+            "minutes": 0,
+            "streak_minutes": 10
+          }
+        }
+      }
+    },
+    {
+      "name": "a day short of the minimum breaks the streak although it had reviews, and today stays open",
+      "today": "2024-03-01",
+      "reviews": {
+        "2024-03-01": 2,
+        "2024-02-29": 30,
+        "2024-02-28": 4,
+        "2024-02-27": 30
+      },
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1709294400000,
+        "heatmap": [
+          {
+            "date": "2024-02-27",
+            "reviews": 30,
+            "xp": 30,
+            "frozen": false,
+            "state": "met",
+            "minutes": 10,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-02-28",
+            "reviews": 4,
+            "xp": 4,
+            "frozen": false,
+            "state": "short",
+            "minutes": 3,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-02-29",
+            "reviews": 30,
+            "xp": 30,
+            "frozen": false,
+            "state": "met",
+            "minutes": 15,
+            "streak_minutes": 10
+          },
+          {
+            "date": "2024-03-01",
+            "reviews": 2,
+            "xp": 2,
+            "frozen": false,
+            "state": "short",
+            "minutes": 1,
+            "streak_minutes": 10
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2024-02-27": 30,
+          "2024-02-28": 4,
+          "2024-02-29": 30,
+          "2024-03-01": 2
+        },
+        "scheduled": {},
+        "current_streak": 1,
+        "longest_streak": 1,
+        "total_reviews": 66,
+        "days_studied": 4,
+        "first_review_date": "2024-02-27",
+        "daily_average": 16.5,
+        "protected_days": [],
+        "verdicts": {
+          "2024-02-27": {
+            "state": "met",
+            "minutes": 10,
+            "streak_minutes": 10
+          },
+          "2024-02-28": {
+            "state": "short",
+            "minutes": 3,
+            "streak_minutes": 10
+          },
+          "2024-02-29": {
+            "state": "met",
+            "minutes": 15,
+            "streak_minutes": 10
+          },
+          "2024-03-01": {
+            "state": "short",
+            "minutes": 1,
+            "streak_minutes": 10
+          }
+        }
+      }
+    },
+    {
+      "name": "the profile's heatmap gives each day's verdict; a cell without a state or a date gives none",
+      "today": "2026-10-30",
+      "reviews": {},
+      "scheduled": {},
+      "profile": {
+        "last_review_id": 1793270000000,
+        "heatmap": [
+          {
+            "date": "2026-10-26",
+            "reviews": 5,
+            "time_ms": 185000,
+            "streak_minutes": 10,
+            "xp": 20,
+            "frozen": false,
+            "state": "short"
+          },
+          {
+            "date": "2026-10-27",
+            "reviews": 120,
+            "minutes": 31,
+            "streak_minutes": 10,
+            "xp": 300,
+            "frozen": false,
+            "state": "met"
+          },
+          {
+            "date": "2026-10-28",
+            "reviews": 2,
+            "minutes": 1,
+            "streak_minutes": 10,
+            "xp": 9,
+            "frozen": true,
+            "state": "frozen"
+          },
+          {
+            "date": "2026-10-29",
+            "reviews": 3,
+            "minutes": 2,
+            "streak_minutes": 10,
+            "xp": 12,
+            "frozen": false,
+            "state": "short"
+          },
+          {
+            "date": "2026-10-30",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": false
+          },
+          {
+            "date": "not a date",
+            "reviews": 0,
+            "xp": 0,
+            "frozen": true
+          }
+        ]
+      },
+      "expected": {
+        "reviews": {
+          "2026-10-26": 5,
+          "2026-10-27": 120,
+          "2026-10-28": 2
+        },
+        "scheduled": {},
+        "current_streak": 0,
+        "longest_streak": 1,
+        "total_reviews": 127,
+        "days_studied": 3,
+        "first_review_date": "2026-10-26",
+        "daily_average": 42.333333333333336,
+        "protected_days": [
+          "2026-10-28"
+        ],
+        "verdicts": {
+          "2026-10-26": {
+            "state": "short",
+            "minutes": 3,
+            "streak_minutes": 10
+          },
+          "2026-10-27": {
+            "state": "met",
+            "minutes": 31,
+            "streak_minutes": 10
+          },
+          "2026-10-28": {
+            "state": "frozen",
+            "minutes": 1,
+            "streak_minutes": 10
+          },
+          "2026-10-29": {
+            "state": "short",
+            "minutes": 2,
+            "streak_minutes": 10
+          }
+        }
+      }
+    }
+  ]
+}
