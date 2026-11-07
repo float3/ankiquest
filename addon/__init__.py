@@ -74,7 +74,8 @@ class Uploading:
 state = {
     # None while no upload runs, else Uploading.
     "upload": None,
-    "polling": False,
+    # The account a poll runs for, or None. A poll for another account no longer counts.
+    "polling": None,
     "timer": None,
     "place": None,
     "profile": None,
@@ -233,9 +234,10 @@ def poll(quiet=False):
     """Keeps the deck list board, the inbox and the streak warning up to date."""
     copies_ui.poll(quiet)
     api = client()
-    if not api.configured or state["polling"]:
+    account = [api.base, api.user, api.token]
+    if not api.configured or state["polling"] == account:
         return
-    state["polling"] = True
+    state["polling"] = account
 
     previous = mw.pm.profile.get(ORDER_KEY) or []
     week = mw.pm.profile.get(ORDER_WEEK_KEY)
@@ -249,7 +251,11 @@ def poll(quiet=False):
         return rank, profile, notifications, companion
 
     def done(future):
-        state["polling"] = False
+        if state["polling"] == account:
+            state["polling"] = None
+        current = client()
+        if [current.base, current.user, current.token] != account:
+            return
         try:
             rank, profile, inbox, companion = future.result()
         except Exception as e:
@@ -258,7 +264,7 @@ def poll(quiet=False):
         order = rank.get("order") or []
         state["place"] = order.index(api.name) + 1 if api.name in order else None
         state["profile"], state["inbox"] = profile, inbox
-        state["companion"], state["companion_account"] = companion, [api.base, api.user, api.token]
+        state["companion"], state["companion_account"] = companion, account
         announce(rank, profile, inbox, quiet)
         redraw()
 

@@ -9,7 +9,7 @@ import test_desktop_today as today
 DAY_MS = 86_400_000
 
 
-class UploadQueue(unittest.TestCase):
+class HeldTasks(unittest.TestCase):
     """The add-on with Anki replaced by stand-ins, whose background tasks wait until finished."""
 
     setUp_home = today.HomeTests.setUp
@@ -37,6 +37,8 @@ class UploadQueue(unittest.TestCase):
             future.set_result(work())
         done(future)
 
+
+class UploadQueue(HeldTasks):
     def test_a_refresh_asked_for_during_a_failed_upload_still_runs(self):
         self.addon.refresh(False)
         self.addon.refresh(False)
