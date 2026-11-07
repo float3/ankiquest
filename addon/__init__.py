@@ -12,7 +12,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QKeySequence
 from aqt.utils import openLink, tooltip
 
-from . import board, home, notify, ui, updates, web
+from . import board, heatmap_ui, home, notify, ui, updates, web
 from . import inbox_ui, share, share_ui, sharing
 from .inbox import answerable, shareable
 from .language import tr
@@ -742,4 +742,5 @@ def celebrate(api, win):
     mw.taskman.run_in_background(lambda: api.deck_settings(), done)
 
 
+heatmap_ui.install(sys.modules[__name__])
 home.install(sys.modules[__name__])
