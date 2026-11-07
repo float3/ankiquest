@@ -3,6 +3,7 @@ import platform
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import anki.lang
@@ -44,9 +45,35 @@ RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
 WEBSITE_SHORTCUT = "Ctrl+Shift+K"
 
+
+@dataclass(frozen=True)
+class Refresh:
+    """What a refresh was asked for: an XP tooltip, and resending the last week."""
+
+    show_feedback: bool
+    resync: bool
+
+    def merged(self, other):
+        if other is None:
+            return self
+        return Refresh(self.show_feedback or other.show_feedback, self.resync or other.resync)
+
+
+@dataclass
+class Uploading:
+    """An upload runs; `queued` is every refresh asked for meanwhile, merged into one.
+
+        idle (None) ──refresh──▶ Uploading ──done──▶ idle, then the queued refresh
+                                  │    ▲
+                                  └────┘ refresh: queue it
+    """
+
+    queued: Refresh = None
+
+
 state = {
-    "busy": False,
-    "again": False,
+    # None while no upload runs, else Uploading.
+    "upload": None,
     "polling": False,
     "timer": None,
     "place": None,
@@ -86,14 +113,15 @@ def client():
 def refresh(show_feedback, resync=False):
     if mw.col is None:
         return
-    if state["busy"]:
-        state["again"] = True
+    upload = state["upload"]
+    if upload is not None:
+        upload.queued = Refresh(show_feedback, resync).merged(upload.queued)
         return
     api = client()
     if not api.configured:
         preview.refresh(mw, api, show_feedback, tooltip)
         return
-    state["busy"] = True
+    state["upload"] = Uploading()
     rollover = int(mw.col.get_config("rollover", 4))
     mark = int(mw.pm.profile.get(MARK_KEY, 0))
     account = [api.base, api.user]
@@ -138,7 +166,15 @@ def refresh(show_feedback, resync=False):
                 return max(known, mark), sorted(present), profile
 
     def done(future):
-        state["busy"] = False
+        queued, state["upload"] = state["upload"].queued, None
+        try:
+            uploaded(future)
+        finally:
+            # A failed upload still leaves the queued refresh to do.
+            if queued is not None:
+                refresh(queued.show_feedback, queued.resync)
+
+    def uploaded(future):
         try:
             mw.pm.profile[MARK_KEY], mw.pm.profile[RECENT_KEY], profile = future.result()
             mw.pm.profile[BASELINE_KEY] = account
@@ -156,9 +192,6 @@ def refresh(show_feedback, resync=False):
             state["conquest"] = conquest
             if mw.state != "review":
                 show_conquest()
-        if state["again"]:
-            state["again"] = False
-            refresh(True)
 
     mw.taskman.run_in_background(work, done, uses_collection=True)
 
