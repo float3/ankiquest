@@ -42,8 +42,8 @@ const errorMessage = (error:unknown) => error instanceof Error ? error.message :
 let translated = false;
 const now = new Date();
 const initialPeriod = new URLSearchParams(location.search).get("period");
-const state = { data:null as CommunityData|null, view:"challenges", challengeId:null as string|null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:initialPeriod&&["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day" as WinMetric, recordScope:"all", matchupA:"", matchupB:"", request:0, session:null as OwnerSession|null, nativeSession:false, nativeDisconnected:false, reminders:null as ReminderSettings|null, reminderDraft:null as ReminderSettings|null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null as ChallengeList|null, activity:null as ActivityPage|null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox" as "inbox"|"sent", activityCategory:"all", activityUnreadOnly:false, friendAchievements:null as ActivityPage|null, achievementError:"", achievementLoading:false, achievementEpoch:0, sent:null as SentPage|null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null as string|null, challengeStatus:"", challengeError:false, connectionError:"", connecting:false, disconnecting:false, challengeBodyKey:null as string|null };
-let nativeAccountCleared = false;
+type NativeMode = "allowed" | "removed" | "disconnected";
+const state = { data:null as CommunityData|null, view:"challenges", challengeId:null as string|null, year:now.getFullYear(), month:now.getMonth()+1, player:"", calendarMode:initialPeriod&&["day","week","month"].includes(initialPeriod)?initialPeriod:"day", winnerScope:"shared", winnerMetric:"day" as WinMetric, recordScope:"all", matchupA:"", matchupB:"", request:0, session:null as OwnerSession|null, nativeSession:false, nativeMode:"allowed" as NativeMode, reminders:null as ReminderSettings|null, reminderDraft:null as ReminderSettings|null, reminderSaving:false, reminderEpoch:0, reminderStatus:"", reminderError:false, challenges:null as ChallengeList|null, activity:null as ActivityPage|null, activityError:"", activityLoading:false, activityEpoch:0, activityDays:90, activityBox:"inbox" as "inbox"|"sent", activityCategory:"all", activityUnreadOnly:false, friendAchievements:null as ActivityPage|null, achievementError:"", achievementLoading:false, achievementEpoch:0, sent:null as SentPage|null, sentError:"", sentLoading:false, sentEpoch:0, privateEpoch:0, authEpoch:0, privateLoading:false, privateError:"", challengeSaving:false, challengeRequest:null as string|null, challengeStatus:"", challengeError:false, connectionError:"", connecting:false, disconnecting:false, challengeBodyKey:null as string|null };
 // Translated once, on first use; rendering waits for translations.
 let monthNames:string[]|undefined, categoryLabels:[string,string][]|undefined, reminderLabels:[ReminderKey,string,string][]|undefined;
 const months = () => monthNames ??= Array.from({length:12}, (_, i) => new Intl.DateTimeFormat(AnkiQuestI18n.language,{month:"long",timeZone:"UTC"}).format(new Date(Date.UTC(2024,i,1))));
@@ -196,7 +196,7 @@ function renderAll() {
   if(!state.data) return;
   renderOverview();renderCalendar();renderTrophies();renderRecords();renderYear();renderPrivate();showView(state.challengeId?"challenge-"+state.challengeId:state.view);
 }
-function accountBanner() { return aqHtml`<div class="auth-status"><span>${avatar(state.session!.user,name(state.session!.user))} <strong>${esc(name(state.session!.user))}</strong></span><div><button type="button" data-avatar-edit>Profile picture</button> <button type="button" data-disconnect>Disconnect</button></div></div>`; }
+function accountBanner() { return aqHtml`<div class="auth-status"><span>${avatar(state.session!.user,name(state.session!.user))} <strong>${esc(name(state.session!.user))}</strong></span><div><button type="button" data-avatar-edit>Profile picture</button> <button type="button" data-disconnect ${state.disconnecting ? "disabled" : ""}>Disconnect</button></div>${state.connectionError ? aqHtml`<p class="notice error" role="alert">${esc(state.connectionError)}</p>` : ""}</div>`; }
 function renderPrivate() {
   const panels=["challenges","reminders","activity"];
   $("connect-button").hidden=!!state.session;
@@ -280,7 +280,7 @@ function renderChallenge(challenge:Challenge, detail = false) {
   return aqHtml`<article class="card challenge" data-goal="${esc(challenge.id)}"><div class="toolbar"><h3>${esc(title)}</h3>${chip(status, invited ? "blue" : challenge.status === "complete" ? "green" : "")}</div><p class="challenge-meta">${challenge.cooperative ? aqText("One shared total") : aqText("Individual targets")} · ${esc(timing)}</p><p class="settings-hint">${esc(explanation)}</p>${invited ? aqHtml`<p>${esc(name(challenge.creator))} invited you. Only studying after you accept counts.</p>` : ""}${!waiting && (challenge.cooperative || me?.status === "accepted") ? aqHtml`${progressBar(progress, challenge.target)}<p class="settings-hint">${number(progress)} / ${number(challenge.target)} ${unit}${challenge.cooperative ? aqText(" together") : aqText(" for you")}</p>` : ""}<div class="members">${challenge.members.map(member => aqHtml`<div class="member">${avatar(member.user, member.display)}<span>${esc(member.display)}${member.user === state.session!.user ? aqText(" · you") : ""}</span><small>${waiting ? member.status === "accepted" ? aqText("Ready when you are") : esc(aqText(member.status)) : member.status === "accepted" ? `${number(member.progress)} ${unit}` : esc(member.status)}</small></div>`).join("")}</div>${detail ? aqHtml`<p class="settings-hint">${waiting ? challenge.weekly ? aqText("Studying before you both agree does not count toward this goal.") : aqText("Studying before everyone accepts does not count toward this goal.") : `${esc(dateTime(challenge.start_at))} – ${esc(dateTime(challenge.end_at))}.`} ${challenge.kind === "study_days" ? aqText("A studied Anki day counts once per person; streak freezes do not count.") : aqText("Reviews after accepting count toward your goal. Your deck's review schedule stays unchanged.")}</p>` : ""}<div class="actions">${actions.map(([action, label, style]) => aqHtml`<button type="button" class="${style}" data-challenge-action="${action}" data-challenge-id="${esc(challenge.id)}">${label}</button>`).join("")}${!detail ? aqHtml`<a class="button-link" href="#challenge-${encodeURIComponent(challenge.id)}">Details</a>` : ""}</div></article>`;
 }
 function openChallengeCreator() {
-  if (!state.session || !state.challenges || $<HTMLDialogElement>("challenge-dialog").open) return;
+  if (!state.session || !state.challenges || state.challengeSaving || $<HTMLDialogElement>("challenge-dialog").open) return;
   const recipients = (state.challenges.recipients || []).filter(person => person.user !== state.session!.user);
   state.challengeBodyKey = null;
   state.challengeRequest = globalThis.crypto?.randomUUID?.() || `goal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -367,7 +367,7 @@ async function request<T>(url:string,options:SendOptions={},owner:OwnerSession|n
   if(owner&&state.session===owner&&(response.status===401||((!options.method||options.method==="GET")&&response.status===403))) {
     const saved=nativeAccount();
     if(saved?.user===owner.user&&saved.token===owner.token)delete window.ankiquestSession;
-    state.nativeDisconnected=true;clearPrivate();state.connectionError=aqText("Your personal connection could not be verified. Reconnect to continue.");renderPrivate();
+    state.nativeMode="disconnected";clearPrivate();state.connectionError=aqText("Your personal connection could not be verified. Reconnect to continue.");renderPrivate();
   }
   if(!response.ok) { const error=await failure(response);if(response.status===401)error.message=aqText("Your account could not be verified. Connect again with your own token.");else if(response.status===403)error.message=aqText("This account does not have access to that action.");throw error; }
   return response.status===204?null as T:response.json();
@@ -384,7 +384,7 @@ async function loadPrivate() {
 function connect() {
   if(!state.data) return;
   if(state.session) { showView("reminders");return; }
-  state.nativeDisconnected=false;nativeAccountCleared=false;
+  state.nativeMode="allowed";
   if(connectNativeSession())return;
   state.authEpoch++;
   $<HTMLSelectElement>("auth-user").innerHTML=playerOptions(state.player||state.data.players[0]?.user||"");
@@ -392,7 +392,11 @@ function connect() {
   if(!state.data.players.length) $("auth-message").textContent=aqText("No player accounts are available yet.");
   $<HTMLDialogElement>("auth-dialog").showModal();
 }
-addEventListener("ankiquest:locked",()=>{state.nativeDisconnected=true;if(!state.disconnecting)delete window.ankiquestSession;clearPrivate();});
+addEventListener("ankiquest:locked",()=>{
+  state.nativeMode="disconnected";
+  if(!state.disconnecting) { delete window.ankiquestSession; }
+  clearPrivate();
+});
 function clearPrivate() {
   AnkiQuestAvatars!.close();
   state.authEpoch++;state.privateEpoch++;state.reminderEpoch++;state.activityEpoch++;state.achievementEpoch++;
@@ -406,9 +410,27 @@ function clearPrivate() {
   // Nothing private has rendered before translations are ready; the first render reflects this state.
   if(translated)renderPrivate();
 }
-async function disconnect() { state.nativeDisconnected=true;delete window.ankiquestSession;state.disconnecting=true;try { await AnkiQuestSite.disconnectMember();clearPrivate(); } catch(error) { const banner=document.querySelector(".auth-status");if(banner){let status=banner.querySelector('[role="alert"]');if(!status){status=document.createElement("p");status.setAttribute("role","alert");banner.append(status);}status.textContent=errorMessage(error);} } finally { state.disconnecting=false; } }
+async function disconnect() {
+  if(state.disconnecting||!state.session) { return; }
+  const session=state.session,native=window.ankiquestSession;
+  state.disconnecting=true;
+  state.connectionError="";
+  renderPrivate();
+
+  // A failed logout keeps the active session. The lock event clears it on success.
+  try {
+    await AnkiQuestSite.disconnectMember();
+    if(window.ankiquestSession===native) { delete window.ankiquestSession; }
+  } catch(error) {
+    if(state.session===session) { state.connectionError=errorMessage(error); }
+  } finally {
+    state.disconnecting=false;
+    connectNativeSession();
+    renderPrivate();
+  }
+}
 function connectNativeSession() {
-  if(!state.data||state.nativeDisconnected)return false;
+  if(!state.data||state.disconnecting||state.nativeMode!=="allowed") { return false; }
   const candidate=nativeAccount();
   if(!candidate) {
     if(state.nativeSession)clearPrivate();
@@ -420,12 +442,20 @@ function connectNativeSession() {
   loadPrivate();loadActivity();loadFriendAchievements();
   return true;
 }
-addEventListener("ankiquest-auth",()=>{nativeAccountCleared=!nativeAccount();if(nativeAccountCleared)clearPrivate();else connectNativeSession();});
+addEventListener("ankiquest-auth",()=>{
+  if(!nativeAccount()) {
+    if(state.nativeMode!=="disconnected") { state.nativeMode="removed"; }
+    clearPrivate();
+    return;
+  }
+  if(state.nativeMode==="removed") { state.nativeMode="allowed"; }
+  connectNativeSession();
+});
 async function restoreMember() {
-  if(state.connecting||nativeAccountCleared||connectNativeSession())return;
+  if(state.connecting||state.disconnecting||state.nativeMode!=="allowed"||connectNativeSession()) { return; }
   if(nativeAccount())return;
   const epoch=state.authEpoch,session=await AnkiQuestSite.member();
-  if(state.connecting||epoch!==state.authEpoch)return;
+  if(state.connecting||state.disconnecting||epoch!==state.authEpoch) { return; }
   if(!session){if(state.session&&!state.session.token)clearPrivate();return;}
   if(state.session?.user===session.user)return;
   clearPrivate();state.session=session;$("connect-button").textContent=name(session.user);
@@ -645,8 +675,19 @@ document.addEventListener("submit",async event=>{
     const key=JSON.stringify(body);if(state.challengeBodyKey&&state.challengeBodyKey!==key)state.challengeRequest=globalThis.crypto?.randomUUID?.()||`goal-${Date.now()}-${Math.random().toString(36).slice(2)}`;state.challengeBodyKey=key;body.request_id=state.challengeRequest;
     const controls=[...form.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>("input,select,button")];controls.forEach(control=>control.disabled=true);state.challengeSaving=true;status.textContent=aqText("Sending your invitation…");
     try{const payload=await privateRequest<ChallengeList>("challenges",body,session);if(state.session!==session)return;const created=payload.challenges.find(item=>!(state.challenges?.challenges||[]).some(old=>old.id===item.id));state.challenges=payload;state.challengeStatus=aqText("Invitation sent. Your friends can choose whether to join.");state.challengeError=false;if($<HTMLDialogElement>("challenge-dialog").open){$<HTMLDialogElement>("challenge-dialog").close();if(created)showView("challenge-"+created.id);}renderPrivate();loadActivity();}
-    catch(error){if(state.session===session){status.className="status error";status.textContent=errorMessage(error);}}
-    finally{state.challengeSaving=false;controls.forEach(control=>control.disabled=false);}
+    catch(error) {
+      if(state.session!==session) { return; }
+      state.challengeError=true;
+      state.challengeStatus=errorMessage(error);
+      status.className="status error";
+      status.textContent=state.challengeStatus;
+    } finally {
+      if(state.session===session) {
+        state.challengeSaving=false;
+        controls.forEach(control=>control.disabled=false);
+        renderChallenges(accountBanner());
+      }
+    }
   }
 });
 async function actOnChallenge(button:HTMLButtonElement) {
