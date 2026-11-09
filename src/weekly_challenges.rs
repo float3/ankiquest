@@ -407,7 +407,7 @@ mod tests {
         let waiting = challenges::list(&store, "owner", &players, NOW + 50)
             .unwrap()
             .remove(0);
-        assert_eq!(waiting.status, "waiting");
+        assert_eq!(waiting.status, challenges::ChallengeState::Waiting);
         assert_eq!(waiting.progress, 0);
         assert!(!waiting.started);
         assert!(matches!(
@@ -431,7 +431,7 @@ mod tests {
         ];
         assert_eq!(
             challenges::list(&store, "owner", &players, NOW + 3 * 86_400_000).unwrap()[0].status,
-            "complete"
+            challenges::ChallengeState::Complete
         );
         assert!(
             store
@@ -472,7 +472,7 @@ mod tests {
             .unwrap()
             .remove(0);
         assert!(!goal.started);
-        assert_eq!(goal.status, "declined");
+        assert_eq!(goal.status, challenges::ChallengeState::Declined);
         assert!(challenges::act(&mut store, &draft.friend.user, id, "accept", NOW + 102).is_err());
         let next = suggestion(&store, "owner", &roster, &week, draft.expires_at)
             .unwrap()
@@ -537,7 +537,8 @@ mod tests {
         assert!(
             goal.members
                 .iter()
-                .any(|m| m.user == draft.friend.user && m.status == "invited")
+                .any(|m| m.user == draft.friend.user
+                    && m.status == challenges::MemberStatus::Invited)
         );
         store
             .conn
@@ -580,7 +581,7 @@ mod tests {
         assert_ne!(
             challenges::list(&store, "owner", &players, NOW + 3 * 86_400_000 + 3).unwrap()[0]
                 .status,
-            "complete"
+            challenges::ChallengeState::Complete
         );
     }
 
