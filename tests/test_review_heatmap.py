@@ -54,13 +54,13 @@ class SharedCases(unittest.TestCase):
 
 
 class Levels(unittest.TestCase):
-    def test_levels_follow_the_daily_average(self):
-        # Half the average, the average, twice it, more.
-        found = [heatmap.intensity(count, 10.0) for count in (0, 5, 6, 10, 20, 21)]
-        self.assertEqual([0, 1, 2, 2, 3, 4], found)
-
-    def test_a_tiny_average_counts_as_one(self):
-        self.assertEqual([0, 2, 3, 4], [heatmap.intensity(count, 0.2) for count in (0, 1, 2, 3)])
+    def test_shared_color_levels(self):
+        cases = json.loads(FIXTURE.read_text("utf-8"))["intensity_cases"]
+        self.assertTrue(cases)
+        for case in cases:
+            average = case["daily_average"]
+            with self.subTest(average=average):
+                self.assertEqual(case["levels"], [heatmap.intensity(count, average) for count in case["counts"]])
 
 
 class StudyDate(unittest.TestCase):
