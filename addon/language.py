@@ -974,3 +974,43 @@ PORTUGUESE.update({
     "%s days": "%s dias",
     "Review history could not be loaded.": "Não foi possível carregar o histórico de revisões.",
 })
+
+SPANISH.update({
+    "%s of %s reviews uploaded": "%s de %s repasos subidos",
+    "Uploaded %s reviews.": "Se subieron %s repasos.",
+    "Could not upload review history (%s).": "No se pudo subir el historial de repasos (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Vuelve a iniciar sesión en AnkiQuest para reanudar las subidas.",
+    "Offline, will retry": "Sin conexión. Se volverá a intentar",
+    "Last upload failed (%s), will retry": "Falló la última subida (%s). Se volverá a intentar",
+    "Last upload failed (%s)": "Falló la última subida (%s)",
+})
+
+GERMAN.update({
+    "%s of %s reviews uploaded": "%s von %s Wiederholungen hochgeladen",
+    "Uploaded %s reviews.": "%s Wiederholungen hochgeladen.",
+    "Could not upload review history (%s).": "Der Wiederholungsverlauf konnte nicht hochgeladen werden (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Melde dich erneut bei AnkiQuest an, um Uploads fortzusetzen.",
+    "Offline, will retry": "Offline. Erneuter Versuch folgt",
+    "Last upload failed (%s), will retry": "Letzter Upload fehlgeschlagen (%s). Erneuter Versuch folgt",
+    "Last upload failed (%s)": "Letzter Upload fehlgeschlagen (%s)",
+})
+
+FRENCH.update({
+    "%s of %s reviews uploaded": "%s révisions sur %s envoyées",
+    "Uploaded %s reviews.": "%s révisions envoyées.",
+    "Could not upload review history (%s).": "Impossible d’envoyer l’historique des révisions (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Reconnecte-toi à AnkiQuest pour reprendre les envois.",
+    "Offline, will retry": "Hors ligne. Nouvel essai prévu",
+    "Last upload failed (%s), will retry": "Échec du dernier envoi (%s). Nouvel essai prévu",
+    "Last upload failed (%s)": "Échec du dernier envoi (%s)",
+})
+
+PORTUGUESE.update({
+    "%s of %s reviews uploaded": "%s de %s revisões enviadas",
+    "Uploaded %s reviews.": "%s revisões enviadas.",
+    "Could not upload review history (%s).": "Não foi possível enviar o histórico de revisões (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Volta a iniciar sessão no AnkiQuest para retomar os envios.",
+    "Offline, will retry": "Sem ligação. Nova tentativa em breve",
+    "Last upload failed (%s), will retry": "O último envio falhou (%s). Nova tentativa em breve",
+    "Last upload failed (%s)": "O último envio falhou (%s)",
+})

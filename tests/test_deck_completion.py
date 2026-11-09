@@ -418,7 +418,8 @@ class RefreshTests(unittest.TestCase):
 
     def test_rollover_during_snapshot_omits_inconsistent_progress(self):
         start = 20000 * progress.DAY_MS + 2 * 3_600_000
-        with patch.object(self.addon.time, "time", side_effect=[start / 1000 - 1, start / 1000 - 1, start / 1000]):
+        before, after = start / 1000 - 1, start / 1000
+        with patch.object(self.addon.time, "time", side_effect=[before, before, after, after]):
             self.addon.refresh(False)
         self.assertIsNone(self.api.upload.call_args.kwargs["decks"])
 
