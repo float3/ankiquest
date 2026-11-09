@@ -990,3 +990,19 @@ FRENCH.update({
 PORTUGUESE.update({
     "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar uma palavra-passe fora da tua rede local.",
 })
+
+SPANISH.update({
+    "Sign in to AnkiQuest again": "Vuelve a iniciar sesión en AnkiQuest",
+})
+
+GERMAN.update({
+    "Sign in to AnkiQuest again": "Melde dich erneut bei AnkiQuest an",
+})
+
+FRENCH.update({
+    "Sign in to AnkiQuest again": "Reconnecte-toi à AnkiQuest",
+})
+
+PORTUGUESE.update({
+    "Sign in to AnkiQuest again": "Volta a iniciar sessão no AnkiQuest",
+})

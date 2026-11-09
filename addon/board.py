@@ -113,12 +113,12 @@ def link(page, text, extra=""):
     )
 
 
-def welcome(translate=lambda value: value):
+def welcome(translate=lambda value: value, *, text=None):
     """Shown under the deck list until the add-on is connected to a server."""
     return (
         "<div id=ankiquest style='max-width:600px;margin:2em auto 0;font-size:13px;text-align:center'>"
         "<b>ankiquest</b> <a href=# onclick=\"pycmd('ankiquest:account');return false\">%s</a></div>"
-        % escape(translate("Sign in or create an account"))
+        % escape(text or translate("Sign in or create an account"))
     )
 
 

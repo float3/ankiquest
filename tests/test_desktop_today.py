@@ -7,6 +7,7 @@ import sys
 import time
 import unittest
 from concurrent.futures import Future
+from http import HTTPStatus
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -835,6 +836,18 @@ class HomeTests(unittest.TestCase):
         self.mw.pm.profile = {}
         self.addon.on_profile_open()
         self.assertEqual(2, self.addon.ask_account.call_count)
+
+    def test_a_revoked_poll_token_offers_sign_in_without_retrying_on_render(self):
+        self.api.rank.side_effect = self.addon.ServerError(HTTPStatus.UNAUTHORIZED, "revoked")
+        self.addon.poll(quiet=True)
+
+        self.assertIn("Sign in to AnkiQuest again", self.render().stats)
+        self.api.rank.assert_called_once()
+
+        self.api.token = "new-token"
+        self.api.rank.side_effect = None
+        self.assertNotIn("Sign in to AnkiQuest again", self.render().stats)
+        self.assertEqual(2, self.api.rank.call_count)
 
     def remember(self, mode="cards", value=100, since=None, chosen=True):
         since = self.home.server_day() if since is None else since

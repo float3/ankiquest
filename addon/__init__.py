@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 
 import anki.lang
@@ -76,8 +77,9 @@ class Uploading:
 state = {
     # None while no upload runs, else Uploading.
     "upload": None,
-    # The account a poll runs for, or None. A poll for another account no longer counts.
+    # A poll belongs to one open profile and credential.
     "polling": None,
+    "reauth": None,
     "timer": None,
     "place": None,
     "profile": None,
@@ -237,12 +239,17 @@ def poll(quiet=False):
     copies_ui.poll(quiet)
     api = client()
     account = [api.base, api.user, api.token]
-    if not api.configured or state["polling"] == account:
+    prefs = mw.pm.profile
+    if not api.configured or prefs is None:
         return
-    state["polling"] = account
+    active = state["polling"]
+    if active is not None and active[0] is prefs and active[1] == account:
+        return
+    request = (prefs, account)
+    state["polling"] = request
 
-    previous = mw.pm.profile.get(ORDER_KEY) or []
-    week = mw.pm.profile.get(ORDER_WEEK_KEY)
+    previous = prefs.get(ORDER_KEY) or []
+    week = prefs.get(ORDER_WEEK_KEY)
 
     def work():
         rank, profile, notifications = api.rank(previous, week), api.profile(), api.notifications()
@@ -253,16 +260,23 @@ def poll(quiet=False):
         return rank, profile, notifications, companion
 
     def done(future):
-        if state["polling"] == account:
-            state["polling"] = None
+        if state["polling"] is not request:
+            return
+        state["polling"] = None
         current = client()
-        if [current.base, current.user, current.token] != account:
+        if mw.pm.profile is not prefs or [current.base, current.user, current.token] != account:
             return
         try:
             rank, profile, inbox, companion = future.result()
         except Exception as e:
+            # Keep a direct sign-in link on the deck list for a revoked credential.
+            if isinstance(e, ServerError) and e.status == HTTPStatus.UNAUTHORIZED:
+                state.update(reauth=account, profile=None, place=None, inbox=[])
+                redraw()
+                return
             print("ankiquest poll:", e)
             return
+        state["reauth"] = None
         order = rank.get("order") or []
         state["place"] = order.index(api.name) + 1 if api.name in order else None
         state["profile"], state["inbox"] = profile, inbox
@@ -318,6 +332,9 @@ def on_deck_browser(deck_browser, content):
     api = client()
     if not api.configured:
         content.stats += board.welcome(tr)
+        return
+    if state["reauth"] == [api.base, api.user, api.token]:
+        content.stats += board.welcome(tr, text=tr("Sign in to AnkiQuest again"))
         return
     if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
