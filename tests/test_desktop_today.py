@@ -821,6 +821,21 @@ class HomeTests(unittest.TestCase):
     def write_config(self, _, values):
         self.settings = dict(values)
 
+    def test_an_unconnected_profile_gets_one_sign_in_offer(self):
+        self.settings.update(url="", user="", token="")
+        self.addon.QTimer = SimpleNamespace(singleShot=lambda delay, callback: callback())
+        self.addon.ask_account = Mock(return_value=None)
+        for name in ("refresh_shared_decks", "refresh", "poll", "maybe_check_updates"):
+            setattr(self.addon, name, Mock())
+
+        self.addon.on_profile_open()
+        self.addon.on_profile_open()
+        self.addon.ask_account.assert_called_once_with("", dismiss="Not now")
+
+        self.mw.pm.profile = {}
+        self.addon.on_profile_open()
+        self.assertEqual(2, self.addon.ask_account.call_count)
+
     def remember(self, mode="cards", value=100, since=None, chosen=True):
         since = self.home.server_day() if since is None else since
         self.mw.pm.profile[self.home.PLAN_KEY] = {

@@ -80,7 +80,7 @@ def _brand(dialog, layout, companion="aki"):
     layout.addWidget(_row(image, QLabel(tr("Your study companion."))))
 
 
-def account_dialog(parent, url, on_submit, companion="aki"):
+def account_dialog(parent, url, on_submit, companion="aki", dismiss=None):
     """Signs in or creates an account. `on_submit(values, finish)` talks to the server and calls
     `finish(account, error)`; the dialog stays open with the error until it succeeds."""
     dialog = QDialog(parent)
@@ -111,7 +111,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
 
     row = QHBoxLayout()
     row.addStretch(1)
-    cancel = QPushButton(tr("Cancel"))
+    cancel = QPushButton(dismiss or tr("Cancel"))
     cancel.clicked.connect(dialog.reject)
     submit = QPushButton()
     submit.setDefault(True)

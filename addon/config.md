@@ -1,6 +1,8 @@
 AnkiQuest needs Anki 23.10 or newer with Qt 6.
 
-Choose **Tools → AnkiQuest: sign in or create account…** or use the link under the deck list. The sign-in dialog starts with the main AnkiQuest server. If you self-host, enter your server address. Use HTTPS for a server outside your local network. After sign-in the add-on keeps a token for this computer.
+An unconnected profile offers sign-in when it opens. **Not now** dismisses the offer for that profile. You can sign in later from **Tools → AnkiQuest: sign in or create account…** or the link under the deck list.
+
+The sign-in dialog starts with the main AnkiQuest server. If you self-host, enter your server address. Use HTTPS for a server outside your local network. After sign-in the add-on keeps a token for this computer.
 
 Open **Tools → AnkiQuest settings…** to change your preferences.
 

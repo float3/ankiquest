@@ -9,7 +9,7 @@ from pathlib import Path
 import anki.lang
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction, QKeySequence
+from aqt.qt import QAction, QKeySequence, QTimer
 from aqt.utils import openLink, tooltip
 
 from . import board, heatmap_ui, home, notify, ui, updates, web
@@ -41,6 +41,7 @@ ORDER_WEEK_KEY = "ankiquestLastOrderWeek"
 INBOX_KEY = "ankiquestInboxCursor"
 STREAK_DAY_KEY = "ankiquestStreakDay"
 UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
+SIGN_IN_OFFER_KEY = "ankiquestSignInOffered"
 ADDON_DIR = Path(__file__).resolve().parent
 RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
@@ -413,14 +414,17 @@ def submit_account(values, finish):
     mw.taskman.run_in_background(work, done)
 
 
-def ask_account(url):
-    return ui.account_dialog(mw, url, submit_account, state["companion"])
+def ask_account(url, dismiss=None):
+    return ui.account_dialog(mw, url, submit_account, state["companion"], dismiss=dismiss)
 
 
 def open_account():
     answer = ask_account(config().get("url", ""))
-    if not answer:
-        return
+    if answer:
+        _finish_sign_in(answer)
+
+
+def _finish_sign_in(answer):
     save_config(dict(config(), **answer))
     state["profile"] = None
     state["place"] = None
@@ -430,6 +434,25 @@ def open_account():
     poll(quiet=True)
     tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
     home.sync_goal(prompt=True)
+
+
+def _offer_sign_in():
+    profile = mw.pm.profile
+    if profile is None:
+        return
+
+    def show():
+        # Profile open -> ready deck browser -> one sign-in offer for this profile.
+        settings = config()
+        if (mw.pm.profile is not profile or profile.get(SIGN_IN_OFFER_KEY)
+                or settings.get("user") or mw.state == "review"):
+            return
+        profile[SIGN_IN_OFFER_KEY] = True
+        answer = ask_account(settings.get("url", ""), dismiss=tr("Not now"))
+        if answer and mw.pm.profile is profile:
+            _finish_sign_in(answer)
+
+    QTimer.singleShot(0, show)
 
 
 def open_settings():
@@ -590,6 +613,7 @@ def on_profile_open():
     refresh(False, resync=True)
     poll(quiet=True)
     maybe_check_updates()
+    _offer_sign_in()
 
 
 def check_updates(quiet=True):
