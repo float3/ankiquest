@@ -1,6 +1,10 @@
 {
   "_about": "The review heatmap's rules: each case gives the collection's reviews and scheduled cards per study day as of today, and optionally the last profile, read in UTC; expected is the heatmap after both. The desktop add-on (addon/heatmap.py, tests/test_review_heatmap.py) checks it; the Android app keeps a copy in AnkiDroid/src/test/resources/ankiquest/review_heatmap.json and CI there fails when it drifts from this file.",
   "zone": "UTC",
+  "intensity_cases": [
+    { "daily_average": 10.0, "counts": [0, 5, 6, 10, 20, 21], "levels": [0, 1, 2, 2, 3, 4] },
+    { "daily_average": 0.2, "counts": [0, 1, 2, 3], "levels": [0, 2, 3, 4] }
+  ],
   "cases": [
     {
       "name": "an empty collection has no invented history or streak",
