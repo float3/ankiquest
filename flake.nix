@@ -15,7 +15,6 @@
     # build.rs bundles web/ with esbuild and builds the translation module for
     # wasm32-unknown-unknown, which nixpkgs' rustc supports; wasm-ld links it.
     webBuild = pkgs: {
-      nativeBuildInputs = [pkgs.esbuild];
       CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "${pkgs.buildPackages.lld}/bin/wasm-ld";
     };
   in {
@@ -27,6 +26,10 @@
           version = "0.1.0";
           src = lib.cleanSource self;
           cargoLock.lockFile = ./Cargo.lock;
+          nativeBuildInputs = [pkgs.esbuild pkgs.pkg-config];
+          buildInputs = [pkgs.sqlite];
+          # Resolve SQLite from the same Nix closure that runs the package.
+          env.LIBSQLITE3_SYS_USE_PKG_CONFIG = "1";
           doCheck = false;
           meta.mainProgram = "ankiquest";
         }
