@@ -12,8 +12,8 @@ type WinScope = "shared" | "lifetime";
 interface Person { user: string; display: string; }
 
 /**
- * A row of `/api/leaderboard` (`Standing` in src/boards.rs). On the global board, a stranger who
- * only opted in has just `user`, `display`, `level`, `xp`, `period`, `streak` and `rank`.
+ * A row of `/api/leaderboard` (`Standing` in src/boards.rs). On the global board, players outside
+ * the viewer's circle have `user`, `display`, `level`, `xp`, `period`, `streak` and `rank`.
  */
 interface Standing extends Person {
   level: number;
