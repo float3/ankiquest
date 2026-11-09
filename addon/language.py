@@ -974,3 +974,19 @@ PORTUGUESE.update({
     "%s days": "%s dias",
     "Review history could not be loaded.": "Não foi possível carregar o histórico de revisões.",
 })
+
+SPANISH.update({
+    "Retry leaderboard": "Volver a cargar la clasificación",
+})
+
+GERMAN.update({
+    "Retry leaderboard": "Rangliste erneut laden",
+})
+
+FRENCH.update({
+    "Retry leaderboard": "Recharger le classement",
+})
+
+PORTUGUESE.update({
+    "Retry leaderboard": "Voltar a carregar a classificação",
+})
