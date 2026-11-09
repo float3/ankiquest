@@ -3,8 +3,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from ipaddress import ip_address, ip_network
 
 DEFAULT_SERVER = "https://ankiquest.rationality-munich.com"
+
+_LOCAL_NETWORKS = tuple(
+    ip_network(cidr)
+    for cidr in ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7")
+)
 
 MAX_PENDING = 5000
 UNDO_WINDOW_MS = 2 * 86_400_000
@@ -35,6 +41,10 @@ class ServerError(Exception):
         self.message = message
 
 
+class InsecureServer(ValueError):
+    """The server cannot receive an account password securely."""
+
+
 def _error_text(error):
     try:
         return json.load(error).get("error") or ""
@@ -60,8 +70,24 @@ def request_json(url, body=None, headers=None, timeout=20, method=None):
         return json.load(response)
 
 
+def _local_host(host):
+    name = host.removesuffix(".")
+    if name == "localhost" or name.endswith(".local"):
+        return True
+    try:
+        address = ip_address(name)
+    except ValueError:
+        return False
+    return any(address in network for network in _LOCAL_NETWORKS)
+
+
 def _account(base, path, body):
-    return request_json(base.strip().rstrip("/") + path, body)
+    base = base.strip().rstrip("/")
+    url = urllib.parse.urlsplit(base)
+    # Match the app's loopback and LAN exceptions for development and self-hosting.
+    if not url.hostname or (url.scheme != "https" and not (url.scheme == "http" and _local_host(url.hostname))):
+        raise InsecureServer("Use HTTPS to send a password outside your local network.")
+    return request_json(base + path, body)
 
 
 def sign_in(base, user, password, device):

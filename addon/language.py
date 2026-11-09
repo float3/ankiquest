@@ -974,3 +974,19 @@ PORTUGUESE.update({
     "%s days": "%s dias",
     "Review history could not be loaded.": "Não foi possível carregar o histórico de revisões.",
 })
+
+SPANISH.update({
+    "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar una contraseña fuera de tu red local.",
+})
+
+GERMAN.update({
+    "Use HTTPS to send a password outside your local network.": "Verwende HTTPS, um ein Passwort außerhalb deines lokalen Netzwerks zu senden.",
+})
+
+FRENCH.update({
+    "Use HTTPS to send a password outside your local network.": "Utilise HTTPS pour envoyer un mot de passe en dehors de ton réseau local.",
+})
+
+PORTUGUESE.update({
+    "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar uma palavra-passe fora da tua rede local.",
+})

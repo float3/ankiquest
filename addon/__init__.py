@@ -20,6 +20,7 @@ from .client import (
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
+    InsecureServer,
     ServerError,
     Client,
     offset_west_min,
@@ -376,6 +377,8 @@ def open_inbox():
 
 
 def account_error(error):
+    if isinstance(error, InsecureServer):
+        return tr("Use HTTPS to send a password outside your local network.")
     if isinstance(error, ServerError):
         if error.status == 401:
             return tr("Username or password not recognized.")
