@@ -7,11 +7,16 @@ from datetime import datetime
 DEFAULT_SERVER = "https://ankiquest.rationality-munich.com"
 
 MAX_PENDING = 5000
+MAX_DELETES = 100
+DELETE_QUERY_SIZE = 500
 UNDO_WINDOW_MS = 2 * 86_400_000
-PENDING_SQL = (
+REVIEW_FILTER = "where id > ? and ease > 0 and type < 4"
+WINDOW_SQL = (
     "select id, cid, lastIvl, ivl, time, type from revlog "
-    "where id > ? and ease > 0 and type < 4 order by id limit %d" % MAX_PENDING
+    + REVIEW_FILTER + " order by id"
 )
+PENDING_SQL = WINDOW_SQL + " limit %d" % MAX_PENDING
+COUNT_SQL = "select count(*) from revlog " + REVIEW_FILTER
 
 
 def offset_west_min():
@@ -196,3 +201,18 @@ def reconcile(window_rows, recent, known, mark):
     deleted = sorted(recent - present) if mark else []
     restored = [r for r in window_rows if r[0] <= known and r[0] not in recent]
     return present, deleted, restored
+
+
+def check_deletes(db, present, candidates):
+    """Check the raw revlog before deleting, including rows ineligible for upload."""
+    deleted = []
+    for start in range(0, len(candidates), DELETE_QUERY_SIZE):
+        ids = candidates[start:start + DELETE_QUERY_SIZE]
+        placeholders = ",".join("?" for _ in ids)
+        found = {row[0] for row in db.all("select id from revlog where id in (%s)" % placeholders, *ids)}
+        present.update(found)
+        deleted.extend(review for review in ids if review not in found)
+    if len(deleted) > MAX_DELETES:
+        print("ankiquest: suppressed a bulk deletion of %d reviews" % len(deleted))
+        return []
+    return deleted
