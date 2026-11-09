@@ -77,7 +77,7 @@ def session_cookie(base, token):
         jar.load(header)
         if COOKIE in jar:
             return jar[COOKIE].value
-    raise ValueError("The ankiquest server did not return a session")
+    raise ValueError("The AnkiQuest server did not return a session")
 
 
 def _build(parent, base, user, token, cookie, open_link, language="en"):
@@ -100,7 +100,7 @@ def _build(parent, base, user, token, cookie, open_link, language="en"):
             return False
 
     dialog = QDialog(parent)
-    dialog.setWindowTitle("ankiquest")
+    dialog.setWindowTitle("AnkiQuest")
     dialog.resize(1000, 760)
     view = QWebEngineView(dialog)
     profile = QWebEngineProfile(dialog)
@@ -142,7 +142,7 @@ def open_page(mw, api, path, open_link, say):
             cookie = future.result()
         except Exception as error:
             from .language import tr
-            say(tr("ankiquest: could not sign in to the website (%s)", language) % html.escape(str(error)))
+            say(tr("AnkiQuest: could not sign in to the website (%s)", language) % html.escape(str(error)))
             return
         if state["window"] is not None:
             state["window"].close()

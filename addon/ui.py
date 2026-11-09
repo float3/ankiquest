@@ -84,7 +84,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     """Signs in or creates an account. `on_submit(values, finish)` talks to the server and calls
     `finish(account, error)`; the dialog stays open with the error until it succeeds."""
     dialog = QDialog(parent)
-    dialog.setWindowTitle("ankiquest")
+    dialog.setWindowTitle("AnkiQuest")
     layout = QVBoxLayout(dialog)
     _brand(dialog, layout, companion)
 
@@ -162,7 +162,7 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
     a section and return what to run once the dialog is saved; `on_goal()` opens the daily goal dialog."""
     dialog = QDialog(parent)
-    dialog.setWindowTitle("ankiquest")
+    dialog.setWindowTitle("AnkiQuest")
     layout = QVBoxLayout(dialog)
     _brand(dialog, layout, companion)
 

@@ -176,7 +176,7 @@ def describe(data, day, tr):
 
     reviews = _reviews(tr, data.reviews.get(day, 0))
     if day in data.protected:
-        return tr("%s · ankiquest kept your streak") % reviews
+        return tr("%s · AnkiQuest kept your streak") % reviews
     verdict = data.verdicts.get(day)
     if verdict is None or verdict.state != heatmap.SHORT:
         return reviews
@@ -265,7 +265,7 @@ def html(data, tr, language="en", expanded=True, art=None):
         + "<div class=hm-cal><div class=hm-wd></div><div class=hm-scroll><div class=hm-months></div><div class=hm-grid></div></div></div>"
         + "<div class=hm-day><b class=hm-date></b><span class=hm-count></span><button class=hm-view></button></div>"
         + "<div class=hm-note>%s</div>" % escape(tr("Click a day for details. Gray squares show estimated review cards due over the next 90 days."))
-        + "<div class=hm-note>%s</div>" % escape(tr("Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by ankiquest · Sand = under the streak minimum"))
+        + "<div class=hm-note>%s</div>" % escape(tr("Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by AnkiQuest · Sand = under the streak minimum"))
         + "</div>"
         + script
         + "</div>"

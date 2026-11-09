@@ -321,7 +321,7 @@ def inbox_dialog(parent, api, companion, current_client, run, open_path, on_repl
 
 def _build(parent, api, companion, current_client, run, open_path, on_replied):
     dialog = QDialog(parent)
-    dialog.setWindowTitle(tr("ankiquest inbox"))
+    dialog.setWindowTitle(tr("AnkiQuest inbox"))
     dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.resize(680, 640)
     context = Context(dialog, api, companion, current_client, run, open_path, on_replied)
