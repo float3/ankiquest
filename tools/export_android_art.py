@@ -44,8 +44,11 @@ ART = [
     ("aki_minimum", "static/aki/minimum.png", 336),
     ("aki_goal", "static/aki/goal.png", 336),
     ("aki_achievement", "static/aki/achievement.png", 336),
+    ("aki_level_up", "static/aki/level_up.png", 336),
     ("aki_deck_conquered", "static/aki/deck_conquered.png", 336),
+    ("aki_leech", "static/aki/leech.png", 336),
     ("aki_sleeping", "static/aki/sleeping.png", 336),
+    ("aki_at_risk", "static/aki/at_risk.png", 336),
     ("duo_friends", "static/duo/friends.png", 336),
 ]
 
