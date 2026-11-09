@@ -1006,3 +1006,31 @@ FRENCH.update({
 PORTUGUESE.update({
     "Sign in to AnkiQuest again": "Volta a iniciar sessão no AnkiQuest",
 })
+
+SPANISH.update({
+    "Signed in as %s on %s": "Sesión iniciada como %s en %s",
+    "Switch account…": "Cambiar de cuenta…",
+    "Manage account on the website…": "Gestionar la cuenta en la web…",
+    "Manual connection": "Conexión manual",
+})
+
+GERMAN.update({
+    "Signed in as %s on %s": "Angemeldet als %s auf %s",
+    "Switch account…": "Konto wechseln…",
+    "Manage account on the website…": "Konto auf der Website verwalten…",
+    "Manual connection": "Manuelle Verbindung",
+})
+
+FRENCH.update({
+    "Signed in as %s on %s": "Connecté en tant que %s sur %s",
+    "Switch account…": "Changer de compte…",
+    "Manage account on the website…": "Gérer le compte sur le site…",
+    "Manual connection": "Connexion manuelle",
+})
+
+PORTUGUESE.update({
+    "Signed in as %s on %s": "Sessão iniciada como %s em %s",
+    "Switch account…": "Mudar de conta…",
+    "Manage account on the website…": "Gerir a conta no site…",
+    "Manual connection": "Ligação manual",
+})

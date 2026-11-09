@@ -4,7 +4,7 @@ An unconnected profile offers sign-in when it opens. **Not now** dismisses the o
 
 The sign-in dialog starts with the main AnkiQuest server. If you self-host, enter your server address. Use HTTPS for a server outside your local network. After sign-in the add-on keeps a token for this computer.
 
-Open **Tools → AnkiQuest settings…** to change your preferences.
+Open **Tools → AnkiQuest settings…** to change your preferences. **Manage account on the website…** opens the account settings for your server, including devices, sign-in methods and your data. **Manual connection** contains the server, player and token fields and the connection check.
 
 - `notify_rank`: say something when your place on the leaderboard changes
 - `streak_hours`: warn you this many hours before your streak ends (0 turns it off)

@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import anki.lang
 
@@ -475,7 +476,7 @@ def _offer_sign_in():
 def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
-        extra=settings_sections, on_goal=home.open_goal_dialog,
+        extra=settings_sections, on_goal=home.open_goal_dialog, on_manage=_manage_account,
     )
     if values is None:
         return
@@ -489,6 +490,18 @@ def open_settings():
     poll(quiet=True)
     home.sync_goal()
     tooltip(tr("ankiquest settings saved."))
+
+
+def _manage_account():
+    api = client()
+    if not api.configured:
+        return
+    try:
+        server = urlsplit(api.base)
+    except ValueError:
+        return
+    if server.scheme in ("https", "http") and server.hostname and server.username is None and not (server.query or server.fragment):
+        openLink(web.page_url(api.base, "/settings"))
 
 
 def settings_sections(dialog, layout):

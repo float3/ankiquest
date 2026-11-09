@@ -849,6 +849,17 @@ class HomeTests(unittest.TestCase):
         self.assertNotIn("Sign in to AnkiQuest again", self.render().stats)
         self.assertEqual(2, self.api.rank.call_count)
 
+    def test_account_management_opens_the_saved_server_without_credentials(self):
+        self.addon.ui.settings_dialog = Mock(return_value=None)
+        self.addon.open_settings()
+        manage = self.addon.ui.settings_dialog.call_args.kwargs["on_manage"]
+        manage()
+        self.addon.openLink.assert_called_once_with("https://example.test/settings")
+
+        self.api.base = "https://member:password@example.test"
+        manage()
+        self.addon.openLink.assert_called_once()
+
     def remember(self, mode="cards", value=100, since=None, chosen=True):
         since = self.home.server_day() if since is None else since
         self.mw.pm.profile[self.home.PLAN_KEY] = {
