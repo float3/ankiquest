@@ -977,37 +977,7 @@ PORTUGUESE.update({
 
 SPANISH.update({
     "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar una contraseña fuera de tu red local.",
-})
-
-GERMAN.update({
-    "Use HTTPS to send a password outside your local network.": "Verwende HTTPS, um ein Passwort außerhalb deines lokalen Netzwerks zu senden.",
-})
-
-FRENCH.update({
-    "Use HTTPS to send a password outside your local network.": "Utilise HTTPS pour envoyer un mot de passe en dehors de ton réseau local.",
-})
-
-PORTUGUESE.update({
-    "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar uma palavra-passe fora da tua rede local.",
-})
-
-SPANISH.update({
     "Sign in to AnkiQuest again": "Vuelve a iniciar sesión en AnkiQuest",
-})
-
-GERMAN.update({
-    "Sign in to AnkiQuest again": "Melde dich erneut bei AnkiQuest an",
-})
-
-FRENCH.update({
-    "Sign in to AnkiQuest again": "Reconnecte-toi à AnkiQuest",
-})
-
-PORTUGUESE.update({
-    "Sign in to AnkiQuest again": "Volta a iniciar sessão no AnkiQuest",
-})
-
-SPANISH.update({
     "Signed in as %s on %s": "Sesión iniciada como %s en %s",
     "Switch account…": "Cambiar de cuenta…",
     "Manage account on the website…": "Gestionar la cuenta en la web…",
@@ -1015,6 +985,8 @@ SPANISH.update({
 })
 
 GERMAN.update({
+    "Use HTTPS to send a password outside your local network.": "Verwende HTTPS, um ein Passwort außerhalb deines lokalen Netzwerks zu senden.",
+    "Sign in to AnkiQuest again": "Melde dich erneut bei AnkiQuest an",
     "Signed in as %s on %s": "Angemeldet als %s auf %s",
     "Switch account…": "Konto wechseln…",
     "Manage account on the website…": "Konto auf der Website verwalten…",
@@ -1022,6 +994,8 @@ GERMAN.update({
 })
 
 FRENCH.update({
+    "Use HTTPS to send a password outside your local network.": "Utilise HTTPS pour envoyer un mot de passe en dehors de ton réseau local.",
+    "Sign in to AnkiQuest again": "Reconnecte-toi à AnkiQuest",
     "Signed in as %s on %s": "Connecté en tant que %s sur %s",
     "Switch account…": "Changer de compte…",
     "Manage account on the website…": "Gérer le compte sur le site…",
@@ -1029,6 +1003,8 @@ FRENCH.update({
 })
 
 PORTUGUESE.update({
+    "Use HTTPS to send a password outside your local network.": "Usa HTTPS para enviar uma palavra-passe fora da tua rede local.",
+    "Sign in to AnkiQuest again": "Volta a iniciar sessão no AnkiQuest",
     "Signed in as %s on %s": "Sessão iniciada como %s em %s",
     "Switch account…": "Mudar de conta…",
     "Manage account on the website…": "Gerir a conta no site…",

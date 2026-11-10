@@ -492,16 +492,18 @@ def open_settings():
     tooltip(tr("ankiquest settings saved."))
 
 
-def _manage_account():
-    api = client()
-    if not api.configured:
-        return
+def _manage_account(base=None):
+    if base is None:
+        api = client()
+        if not api.configured:
+            return
+        base = api.base
     try:
-        server = urlsplit(api.base)
+        server = urlsplit(base)
     except ValueError:
         return
     if server.scheme in ("https", "http") and server.hostname and server.username is None and not (server.query or server.fragment):
-        openLink(web.page_url(api.base, "/settings"))
+        openLink(web.page_url(base, "/settings"))
 
 
 def settings_sections(dialog, layout):

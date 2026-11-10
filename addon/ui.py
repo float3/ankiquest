@@ -177,26 +177,36 @@ def settings_dialog(
 
     # Keep account actions first. Manual fields still support existing token-only setups.
     signed_in = all(field.text().strip() for field in (url, user, token))
-    if signed_in:
-        identity = QLabel(tr("Signed in as %s on %s") % (user.text(), url.text()))
-        identity.setTextFormat(Qt.TextFormat.PlainText)
-        identity.setWordWrap(True)
-        layout.addWidget(identity)
+    signed_server = url.text().strip() if signed_in else None
+    identity = QLabel(tr("Signed in as %s on %s") % (user.text(), signed_server) if signed_in else "")
+    identity.setTextFormat(Qt.TextFormat.PlainText)
+    identity.setWordWrap(True)
+    identity.setVisible(signed_in)
+    layout.addWidget(identity)
+    manage = QPushButton(tr("Manage account on the website…")) if on_manage is not None else None
     if on_account is not None:
         account = QPushButton(tr("Switch account…") if signed_in else tr("Sign in or create account…"))
 
         def change_account():
+            nonlocal signed_server
             answer = on_account(url.text().strip())
-            if answer:
-                url.setText(answer["url"])
-                user.setText(answer["user"])
-                token.setText(answer["token"])
+            if not answer:
+                return
+            url.setText(answer["url"])
+            user.setText(answer["user"])
+            token.setText(answer["token"])
+            signed_server = answer["url"]
+            identity.setText(tr("Signed in as %s on %s") % (answer["user"], signed_server))
+            identity.show()
+            account.setText(tr("Switch account…"))
+            if manage is not None:
+                manage.show()
 
         account.clicked.connect(change_account)
         layout.addWidget(account)
-    if signed_in and on_manage is not None:
-        manage = QPushButton(tr("Manage account on the website…"))
-        manage.clicked.connect(on_manage)
+    if manage is not None:
+        manage.clicked.connect(lambda: on_manage(signed_server))
+        manage.setVisible(signed_in)
         layout.addWidget(manage)
 
     manual = QWidget()
