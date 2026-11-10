@@ -60,11 +60,10 @@ const GLOBAL_ROWS: usize = 100;
 /// The players a board shows this viewer, or why it cannot.
 fn board_users(
     app: &App,
-    headers: &HeaderMap,
+    viewer: &social::Viewer,
     scope: Option<social::Scope>,
 ) -> Result<BTreeSet<String>, StatusCode> {
-    let viewer = access::viewer(app, headers);
-    app.board(&app.store.lock().unwrap().conn, &viewer, scope)
+    app.board(&app.store.lock().unwrap().conn, viewer, scope)
         .map_err(store_error)?
         .ok_or(StatusCode::FORBIDDEN)
 }
@@ -95,13 +94,13 @@ struct GlobalRow {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum GlobalStanding {
-    /// The viewer, someone in their circle, or a public profile: as on the circle board.
+    /// The viewer or someone in their circle: as on the circle board.
     Full(Standing),
-    /// A stranger with a private profile who turned on the global leaderboard.
+    /// Someone outside the viewer's circle, regardless of profile visibility.
     Stranger(Stranger),
 }
 
-/// What the global board shows of a player the viewer does not otherwise see.
+/// What the global board shows of someone outside the viewer's circle.
 #[derive(Serialize)]
 struct Stranger {
     user: String,
@@ -135,26 +134,26 @@ fn global_users(
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), crate::Error> {
     let store = app.store.lock().unwrap();
     let conn = &store.conn;
-    let mut full = app
+    let mut users = app
         .board(conn, viewer, Some(social::Scope::Global))?
         .unwrap_or_default();
-    let mut users = full.clone();
-    if let Some(me) = &viewer.member {
+    let full = if let Some(me) = &viewer.member {
         users.extend(
             store
                 .global_leaderboard_players()?
                 .into_iter()
                 .filter(|user| app.is_user(user)),
         );
-        full.extend(app.circle(conn, me)?);
         let muted: BTreeSet<String> = conn
             .prepare("select sender from muted_people where recipient = ?1")?
             .query_map([me], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         users.retain(|user| !muted.contains(user));
         users.insert(me.clone());
-    }
-    full.retain(|user| users.contains(user));
+        app.circle(conn, me)?
+    } else {
+        BTreeSet::new()
+    };
     Ok((users, full))
 }
 
@@ -199,13 +198,15 @@ async fn leaderboard(
     headers: HeaderMap,
 ) -> Result<Json<Board>, StatusCode> {
     let scope = query.scope()?;
-    if scope == Some(social::Scope::Global) {
-        let viewer = access::viewer(&app, &headers);
+    let viewer = access::viewer(&app, &headers);
+    // Preserve the full default board for shared-password sessions.
+    let public_default = scope.is_none() && viewer.member.is_none() && !viewer.community;
+    if scope == Some(social::Scope::Global) || public_default {
         return global_board(&app, &viewer, query.period)
             .map(|rows| Json(Board::Global(rows)))
             .map_err(store_error);
     }
-    let users = board_users(&app, &headers, scope)?;
+    let users = board_users(&app, &viewer, scope)?;
     Ok(Json(Board::Standings(standings(
         &app,
         &users,
@@ -325,7 +326,7 @@ async fn rank(
         app.circle(&app.store.lock().unwrap().conn, &user)
             .map_err(store_error)?
     } else {
-        board_users(&app, &headers, None)?
+        board_users(&app, &access::viewer(&app, &headers), None)?
     };
     let week = app.week.start_of(now_ms());
     let board = standings(&app, &users, None);
@@ -413,7 +414,9 @@ async fn records(
     Query(query): Query<BoardQuery>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RecordBoard>>, StatusCode> {
-    let profiles = app.standings_among(&board_users(&app, &headers, query.scope()?)?);
+    let scope = query.scope()?;
+    let viewer = access::viewer(&app, &headers);
+    let profiles = app.standings_among(&board_users(&app, &viewer, scope)?);
     let mut board: Vec<RecordBoard> = Records::NAMES
         .iter()
         .map(|window| {
@@ -487,7 +490,7 @@ mod tests {
             },
         );
         let expected = app.profile("cerro").unwrap();
-        let Json(board) = leaderboard(State(app), Query(BoardQuery::default()), HeaderMap::new())
+        let Json(board) = leaderboard(State(app), Query(BoardQuery::default()), headers("hill"))
             .await
             .unwrap();
         let value = serde_json::to_value(&board).unwrap();
@@ -944,6 +947,19 @@ mod tests {
         let ana = account(&app, "ana", 4);
         account(&app, "bobby", 6);
         let carla = account(&app, "carla", 8);
+        let assert_summary = |stranger: &serde_json::Value| {
+            let fields: BTreeSet<&str> = stranger
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(
+                fields,
+                BTreeSet::from(["display", "level", "period", "rank", "streak", "user", "xp"]),
+                "strangers see a standing without study details"
+            );
+        };
         let (status, board) =
             get(&app, "/api/leaderboard?scope=global&period=day", Some(&ana)).await;
         assert_eq!(status, StatusCode::OK);
@@ -952,10 +968,7 @@ mod tests {
             ["carla", "bobby", "ana"],
             "profiles are public and listed until their player says otherwise"
         );
-        assert!(
-            row(&board, "bobby")["today_reviews"].is_u64(),
-            "a public profile has its full row"
-        );
+        assert_summary(row(&board, "bobby"));
         assert_eq!(row(&board, "ana")["shown"], true);
         assert_eq!(
             get(&app, "/api/decks/ana", Some(&ana)).await.1["global_leaderboard"],
@@ -980,18 +993,7 @@ mod tests {
             "the viewer sees their own row in full"
         );
         let stranger = row(&board, "bobby");
-        let mut fields: Vec<&str> = stranger
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        fields.sort();
-        assert_eq!(
-            fields,
-            ["display", "level", "period", "rank", "streak", "user", "xp"],
-            "nothing about today, the week or decks for strangers with private profiles"
-        );
+        assert_summary(stranger);
         assert_eq!(stranger["display"], "Bobby");
         assert_eq!(stranger["period"], "day");
         assert_eq!(
@@ -1045,9 +1047,26 @@ mod tests {
         assert!(row(&board, "bobby")["today_reviews"].is_u64());
         assert!(row(&board, "bobby").get("me").is_none());
 
+        // Group membership grants the same full row as friendship.
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute_batch(
+                "delete from friendships;
+                 insert into groups values (1, 'Spanish club', 'invite', 'ana', 0);
+                 insert into group_members values (1, 'ana', 1, 0), (1, 'bobby', 0, 0);",
+            )
+            .unwrap();
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
+        assert!(row(&board, "bobby")["today_reviews"].is_u64());
+
         // Without signing in, only the listed public profiles are there.
-        let (status, board) = get(&app, "/api/leaderboard?scope=global", None).await;
-        assert_eq!((status, users(&board)), (StatusCode::OK, vec!["ana"]));
+        for route in ["/api/leaderboard?scope=global", "/api/leaderboard"] {
+            let (status, board) = get(&app, route, None).await;
+            assert_eq!((status, users(&board)), (StatusCode::OK, vec!["ana"]));
+            assert_summary(row(&board, "ana"));
+        }
         let (_, records) = get(&app, "/api/records?scope=global", None).await;
         assert!(
             !records.to_string().contains("carla") && !records.to_string().contains("bobby"),
