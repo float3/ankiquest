@@ -5,6 +5,7 @@ import json
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
 
 from addon_loader import ADDON, load_module
 
@@ -109,6 +110,40 @@ class AccountTests(unittest.TestCase):
         self.client.sign_up(self.base, "bo", "long enough pw", "Bo", "Anki desktop")
         self.assertNotIn("display", Server.received[0][1])
         self.assertEqual(Server.received[1][1]["display"], "Bo")
+
+    def test_account_passwords_never_leave_over_public_http(self):
+        for base in (
+            "http://anki.example.test",
+            "http://home.local.example.test",
+            "http://localhost@anki.example.test",
+            "http://172.32.0.1",
+            "http://[2606:4700::1111]",
+        ):
+            with self.subTest(base=base), patch.object(self.client, "request_json") as request:
+                with self.assertRaises(ValueError):
+                    self.client.sign_in(base, "ana", "password", "Anki desktop")
+                with self.assertRaises(ValueError):
+                    self.client.sign_up(base, "ana", "password", "", "Anki desktop")
+                request.assert_not_called()
+
+    def test_account_passwords_can_use_https_or_local_addresses(self):
+        for base in (
+            "https://anki.example.test/ankiquest",
+            "http://localhost.:8080",
+            "http://anki.local:8080",
+            "http://127.3.2.1",
+            "http://10.0.2.2",
+            "http://172.16.0.2",
+            "http://192.168.0.2",
+            "http://[::1]",
+            "http://[fd00::2]",
+        ):
+            with self.subTest(base=base), patch.object(self.client, "request_json") as request:
+                self.client.sign_in(base, "ana", "password", "Anki desktop")
+                request.assert_called_once_with(
+                    base + "/api/accounts/tokens",
+                    {"user": "ana", "password": "password", "device": "Anki desktop"},
+                )
 
     def test_the_deck_list_invites_unconnected_players_to_sign_in(self):
         board = load("board")
