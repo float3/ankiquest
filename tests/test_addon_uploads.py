@@ -2,6 +2,7 @@
 
 import time
 import unittest
+from copy import deepcopy
 from http import HTTPStatus
 from unittest.mock import Mock
 
@@ -117,7 +118,7 @@ class UploadBatches(HeldTasks):
         batches = [call.args[0] for call in self.api.upload.call_args_list]
         self.assertEqual([self.addon.MAX_PENDING, 2], [len(batch) for batch in batches])
         self.assertEqual([restored, *pending], [row["id"] for batch in batches for row in batch])
-        self.assertEqual(pending[-1], self.profile[self.addon.MARK_KEY])
+        self.assertEqual(pending[-1], self.addon._upload_prefs(self.api)["through"])
 
     def test_a_failed_batch_leaves_the_previous_mark(self):
         self.add_reviews(range(self.now + 1, self.now + self.addon.MAX_PENDING + 2))
@@ -127,7 +128,7 @@ class UploadBatches(HeldTasks):
         self.finish()
 
         self.assertEqual(2, self.api.upload.call_count)
-        self.assertEqual(self.now, self.profile[self.addon.MARK_KEY])
+        self.assertEqual(self.now, self.addon._upload_prefs(self.api)["through"])
 
     def test_upload_all_is_silent_and_never_resets_the_mark(self):
         old = self.now - 10 * DAY_MS
@@ -135,14 +136,14 @@ class UploadBatches(HeldTasks):
 
         self.addon.upload_everything()
         self.addon.upload_everything()
-        self.assertEqual(self.now, self.profile[self.addon.MARK_KEY])
+        self.assertEqual(self.now, self.addon._upload_prefs(self.api)["through"])
         self.finish()
 
         self.assertEqual([], self.tasks)
         reviews, _, silent, _ = self.api.upload.call_args.args
         self.assertTrue(silent)
         self.assertEqual([old, self.now], [row["id"] for row in reviews])
-        self.assertEqual(self.now, self.profile[self.addon.MARK_KEY])
+        self.assertEqual(self.now, self.addon._upload_prefs(self.api)["through"])
         self.assertIn("2", self.addon.tooltip.call_args.args[0])
 
     def test_a_finished_upload_cannot_move_another_profiles_mark(self):
@@ -154,6 +155,51 @@ class UploadBatches(HeldTasks):
 
         self.assertEqual(1, self.mw.pm.profile[self.addon.MARK_KEY])
         self.api.upload.assert_not_called()
+
+    def test_switching_back_keeps_history_and_undo_for_each_account(self):
+        historic = self.now - 10 * DAY_MS
+        undone = self.now - 1
+        self.profile[self.addon.RECENT_KEY] = [undone]
+        self.add_reviews([historic, undone])
+
+        self.api.user = "other"
+        self.addon.refresh(False)
+        self.finish()
+        self.assertEqual([historic, undone], [row["id"] for row in self.api.upload.call_args.args[0]])
+        self.db.execute("delete from revlog where id = ?", (undone,))
+
+        self.api.user = "hill"
+        self.api.token = "rotated"
+        self.addon.refresh(False)
+        self.finish()
+        self.assertEqual([], self.api.upload.call_args.args[0])
+        self.assertEqual([undone], list(self.api.upload.call_args.args[3]))
+
+    def test_held_upload_completion_cannot_change_the_new_accounts_marks(self):
+        self.add_reviews([self.now + 1])
+        self.addon.refresh(False)
+        work, done = self.tasks.pop()
+        answer = today.Future()
+        answer.set_result(work())
+        original = deepcopy(self.profile)
+
+        self.api.user = "other"
+        self.api.token = "other-token"
+        done(answer)
+
+        self.assertEqual(original, self.profile)
+        self.addon.tooltip.assert_not_called()
+
+    def test_held_shared_deck_lookup_cannot_cross_accounts(self):
+        self.api.shared_decks = Mock(return_value=[5])
+        self.addon.refresh_shared_decks()
+        original = deepcopy(self.profile)
+
+        self.api.user = "other"
+        self.api.token = "other-token"
+        self.finish()
+
+        self.assertEqual(original, self.profile)
 
     def test_reopening_only_resends_the_week_once_but_sync_still_resends(self):
         old = self.now - DAY_MS

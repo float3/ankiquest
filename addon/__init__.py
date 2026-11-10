@@ -4,7 +4,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
-from enum import Enum, IntEnum, auto
+from enum import IntEnum
 from http import HTTPStatus
 from pathlib import Path
 
@@ -41,6 +41,7 @@ RECENT_KEY = "ankiquestRecentUploads"
 BASELINE_KEY = "ankiquestBaselineAccount"
 RESYNC_DAY_KEY = "ankiquestResyncedDays"
 SHARED_KEY = "ankiquestSharedDecks"
+UPLOADS_KEY = "ankiquestUploadsByAccount"
 ORDER_KEY = "ankiquestLastOrder"
 ORDER_WEEK_KEY = "ankiquestLastOrderWeek"
 INBOX_KEY = "ankiquestInboxCursor"
@@ -102,35 +103,29 @@ class Uploading:
     queued: Refresh = None
 
 
-class UploadIssue(Enum):
-    OFFLINE = auto()
-    RETRY = auto()
-    SIGN_IN = auto()
-    FAILED = auto()
-
-
 @dataclass
-class UploadFailure:
+class _Waiting:
     target: UploadTarget
-    issue: UploadIssue
+    request: Refresh
     attempts: int
-    detail: str
-    retry: Refresh = None
+    message: str
 
-    def text(self):
-        if self.issue == UploadIssue.SIGN_IN:
-            return tr("Sign in to AnkiQuest again to resume uploads.")
-        if self.issue == UploadIssue.OFFLINE:
-            return tr("Offline, will retry")
-        if self.issue == UploadIssue.RETRY:
-            return tr("Last upload failed (%s), will retry") % self.detail
-        return tr("Last upload failed (%s)") % self.detail
+
+@dataclass(frozen=True)
+class _NeedsSignIn:
+    target: UploadTarget
+    message: str
+
+
+@dataclass(frozen=True)
+class _Failed:
+    target: UploadTarget
+    message: str
 
 
 state = {
-    # None while no upload runs, else Uploading.
+    # Idle, uploading, waiting for a retry, or holding the last failure.
     "upload": None,
-    "upload_failure": None,
     # The account a poll runs for, or None. A poll for another account no longer counts.
     "polling": None,
     "timer": None,
@@ -172,110 +167,139 @@ def refresh(show_feedback, resync=False):
     _request_upload(Refresh(show_feedback, UploadMode.RESYNC if resync else UploadMode.PENDING))
 
 
-def _current_failure(api):
-    failure = state["upload_failure"]
-    return failure if failure is not None and failure.target.current(api) else None
+def _upload_prefs(api):
+    prefs = mw.pm.profile
+    accounts = prefs.setdefault(UPLOADS_KEY, {})
+
+    # Move the old single cursor to its recorded account. Builds before account
+    # tracking used the profile's configured account. Deck sharing is refetched.
+    keys = {MARK_KEY: "through", RECENT_KEY: "recent", preferences.LAST_UPLOAD_KEY: "last_upload"}
+    if any(key in prefs for key in keys):
+        baseline = prefs.pop(BASELINE_KEY, None)
+        base, user = baseline or (api.base, api.user)
+        record = accounts.setdefault(base, {}).setdefault(user, {})
+        for key, field in keys.items():
+            if key in prefs:
+                value = prefs.pop(key)
+                if key != MARK_KEY or value or baseline:
+                    record.setdefault(field, value)
+    for base, user, day in prefs.pop(RESYNC_DAY_KEY, []):
+        accounts.setdefault(base, {}).setdefault(user, {}).setdefault("resynced_day", day)
+    prefs.pop(SHARED_KEY, None)
+    return accounts.setdefault(api.base, {}).setdefault(api.user, {})
+
+
+def _current_upload(api):
+    upload = state["upload"]
+    return upload if upload is not None and upload.target.current(api) else None
 
 
 def _upload_status(api):
-    prefs = mw.pm.profile
-    baseline = prefs.get(BASELINE_KEY)
-    at = prefs.get(preferences.LAST_UPLOAD_KEY) if baseline in (None, [api.base, api.user]) else None
+    at = _upload_prefs(api).get("last_upload") if api.configured else None
     last = preferences.last_upload_text(at)
-    failure = _current_failure(api)
-    return f"{last} · {failure.text()}" if failure else last
+    upload = _current_upload(api)
+    return f"{last} · {upload.message}" if isinstance(upload, (_Waiting, _NeedsSignIn, _Failed)) else last
 
 
-def _retry_upload(failure):
-    if failure is not _current_failure(client()) or failure.retry is None:
+def _retry_upload(waiting):
+    if waiting is not _current_upload(client()):
         return
-    request, failure.retry = failure.retry, None
-    _request_upload(request)
+    state["upload"] = None
+    _request_upload(waiting.request, attempts=waiting.attempts)
 
 
 def _upload_failed(upload, error):
     # Recover from transient failures without re-sending on every answer.
-    if isinstance(error, ServerError) and error.status == HTTPStatus.UNAUTHORIZED:
-        issue = UploadIssue.SIGN_IN
-    elif isinstance(error, ServerError) and (error.status == HTTPStatus.TOO_MANY_REQUESTS or error.status >= HTTPStatus.INTERNAL_SERVER_ERROR):
-        issue = UploadIssue.RETRY
-    elif isinstance(error, OSError):
-        issue = UploadIssue.OFFLINE
-    else:
-        issue = UploadIssue.FAILED
-    failure = UploadFailure(upload.target, issue, upload.attempts + 1, str(error))
-    state["upload_failure"] = failure
     print("ankiquest:", error)
-    redraw()
-
-    if issue == UploadIssue.SIGN_IN:
-        tooltip(failure.text())
+    if isinstance(error, ServerError) and error.status == HTTPStatus.UNAUTHORIZED:
+        message = tr("Sign in to AnkiQuest again to resume uploads.")
+        state["upload"] = _NeedsSignIn(upload.target, message)
+        redraw()
+        tooltip(message)
         return
-    if upload.request.mode == UploadMode.HISTORY:
-        failed(tr("Could not upload review history (%s)."), error)
-    if issue == UploadIssue.FAILED:
+    elif isinstance(error, ServerError) and (error.status == HTTPStatus.TOO_MANY_REQUESTS or error.status >= HTTPStatus.INTERNAL_SERVER_ERROR):
+        message = tr("Last upload failed (%s), will retry") % error
+    elif isinstance(error, OSError):
+        message = tr("Offline, will retry")
+    else:
+        state["upload"] = _Failed(upload.target, tr("Last upload failed (%s)") % error)
+        redraw()
+        if upload.request.mode == UploadMode.HISTORY:
+            failed(tr("Could not upload review history (%s)."), error)
         if upload.queued is not None:
             _request_upload(upload.queued)
         return
 
     request = upload.request.merged(upload.queued)
+    # Give a refresh already queued during the first batch one immediate attempt.
+    # This keeps its live review feedback timely, then backoff takes over.
     if upload.queued is not None and upload.attempts == 0 and upload.request.mode != UploadMode.HISTORY:
-        _request_upload(request)
+        _request_upload(request, attempts=1)
         return
-    failure.retry = request
+
+    waiting = _Waiting(upload.target, request, upload.attempts + 1, message)
+    state["upload"] = waiting
     delay = RETRY_START_MS * 2 ** min(upload.attempts, RETRY_MAX_STEPS)
-    mw.progress.timer(delay, lambda: _retry_upload(failure), False)
+    mw.progress.timer(delay, lambda: _retry_upload(waiting), False)
+    redraw()
+    if request.mode == UploadMode.HISTORY:
+        tooltip(html.escape(message))
 
 
-def _request_upload(request):
+def _request_upload(request, *, attempts=0):
     if mw.col is None:
         return
     api = client()
-    active = state["upload"]
-    if active is not None and active.target.current(api):
-        if request.mode != UploadMode.HISTORY or active.request.mode != UploadMode.HISTORY:
-            active.queued = request.merged(active.queued)
-        return
+    history = request.mode == UploadMode.HISTORY
     if not api.configured:
-        if request.mode != UploadMode.HISTORY:
+        if history:
+            tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        else:
             preview.refresh(mw, api, request.show_feedback, tooltip)
         return
-    failure = _current_failure(api)
-    if failure is not None:
-        if failure.issue == UploadIssue.SIGN_IN:
+
+    active = _current_upload(api)
+    if isinstance(active, Uploading):
+        if history and active.request.mode == UploadMode.HISTORY:
+            tooltip(tr("Uploading your whole review history…"))
             return
-        if failure.retry is not None:
-            request = request.merged(failure.retry)
-            if request.mode != UploadMode.HISTORY or failure.retry.mode == UploadMode.HISTORY:
-                failure.retry = request
-                return
-            failure.retry = None
+        active.queued = request.merged(active.queued)
+        if history:
+            tooltip(tr("Full history upload is queued."))
+        return
+    if isinstance(active, _NeedsSignIn):
+        if history:
+            tooltip(active.message)
+        return
+    if isinstance(active, _Waiting):
+        if not history or active.request.mode == UploadMode.HISTORY:
+            active.request = request.merged(active.request)
+            if history:
+                tooltip(html.escape(active.message))
+            return
+        request = request.merged(active.request)
+        attempts = active.attempts
 
     # Capture the collection and profile before scheduling any work.
     col, prefs = mw.col, mw.pm.profile
     target = UploadTarget(col, prefs, (api.base, api.user, api.token))
-    upload = state["upload"] = Uploading(target, request, failure.attempts if failure else 0)
-    account = [api.base, api.user]
-    baseline = prefs.get(BASELINE_KEY)
-    same_player = baseline is None or baseline == account
-    mark = int(prefs.get(MARK_KEY, 0)) if same_player else 0
-    initial_sync = mark == 0 and baseline != account
+    upload = state["upload"] = Uploading(target, request, attempts)
+    saved = _upload_prefs(api)
+    mark = int(saved.get("through", 0))
+    initial_sync = "through" not in saved
     rollover = int(col.get_config("rollover", 4))
     now_ms = int(time.time() * 1000)
     day = study_day(now_ms, offset_west_min(), rollover)
-    day_key = account + [day]
-    resynced = prefs.get(RESYNC_DAY_KEY, [])
-    history = request.mode == UploadMode.HISTORY
-    resync = request.mode >= UploadMode.RESYNC or request.mode == UploadMode.PROFILE_OPEN and day_key not in resynced
+    resync = request.mode >= UploadMode.RESYNC or request.mode == UploadMode.PROFILE_OPEN and saved.get("resynced_day") != day
     start = 0 if history else max(0, mark - RESYNC_WINDOW_MS) if resync else mark
     window_start = now_ms - UNDO_WINDOW_MS
-    recent = {i for i in prefs.get(RECENT_KEY, []) if i > window_start} if same_player else set()
-    shared = set(prefs.get(SHARED_KEY, [])) if same_player and not history else set()
+    recent = {i for i in saved.get("recent", []) if i > window_start}
+    shared = set(saved.get("shared", [])) if not history else set()
     stamps = review_offsets.journal(prefs)
 
     def progress(sent, total):
         if state["upload"] is upload and target.current(client()):
-            tooltip(tr("%s of %s reviews uploaded") % (f"{sent:,}", f"{total:,}"))
+            tooltip(tr("%s of %s reviews uploaded") % (sent, total))
 
     def work():
         if mw.col is not col or mw.pm.profile is not prefs:
@@ -344,17 +368,15 @@ def _request_upload(request):
         # Advance the mark only after the whole upload was accepted.
         through, present, profile, sent = result
         uploaded_at = int(time.time() * 1000)
-        prefs[MARK_KEY], prefs[RECENT_KEY] = through, present
-        prefs[BASELINE_KEY] = account
-        prefs[preferences.LAST_UPLOAD_KEY] = uploaded_at
+        saved["through"], saved["recent"] = through, present
+        saved["last_upload"] = uploaded_at
         if resync:
-            prefs[RESYNC_DAY_KEY] = [key for key in resynced if key[-1] == day and key != day_key] + [day_key]
+            saved["resynced_day"] = day
         review_offsets.prune(prefs, through, uploaded_at)
         keep_goal(profile)
-        state["upload_failure"] = None
         redraw()
         if history:
-            tooltip(tr("Uploaded %s reviews.") % f"{sent:,}")
+            tooltip(tr("Uploaded %s reviews.") % sent)
             return
         message = notify.feedback(profile, request.show_feedback)
         if message:
@@ -393,10 +415,14 @@ def refresh_shared_decks():
     api = client()
     if not api.configured:
         return
+    target = UploadTarget(mw.col, mw.pm.profile, (api.base, api.user, api.token))
 
     def done(future):
+        if not target.current(client()):
+            return
         try:
-            mw.pm.profile[SHARED_KEY] = future.result()
+            decks = future.result()
+            _upload_prefs(api)["shared"] = decks
         except Exception as e:
             print("ankiquest shared decks:", e)
 
@@ -695,22 +721,26 @@ def open_deck_notifications():
     if mw.col is None or not api.configured:
         tooltip(tr("Set the server, player and token in ankiquest settings first."))
         return
-    rollover = int(mw.col.get_config("rollover", 4))
+    col = mw.col
+    target = UploadTarget(col, mw.pm.profile, (api.base, api.user, api.token))
+    rollover = int(col.get_config("rollover", 4))
 
     def work():
         clock_offset = offset_west_min()
-        catalog = deck_snapshots(mw.col, int(time.time() * 1000), clock_offset, rollover)
+        catalog = deck_snapshots(col, int(time.time() * 1000), clock_offset, rollover)
         api.upload([], rollover, True, decks=catalog, clock_offset=clock_offset, catalog=True)
         return api.deck_settings()
 
     def done(future):
+        if not target.current(client()):
+            return
         try:
             settings = future.result()
         except Exception as e:
             failed(tr("ankiquest: could not load your decks (%s)"), e)
             return
         choice = ui.deck_dialog(mw, settings, state["companion"])
-        if choice is None:
+        if choice is None or not target.current(client()):
             return
         shared, unshared, recipients, nudges, celebrations = choice
         if shared and not recipients:
@@ -722,13 +752,20 @@ def open_deck_notifications():
 
 
 def save_deck_choice(api, shared, unshared, recipients, nudges, celebrations=None):
+    target = UploadTarget(mw.col, mw.pm.profile, (api.base, api.user, api.token))
+    if not target.current(client()):
+        return
+
     def work():
         api.save_deck_settings(shared, unshared, recipients, nudges, celebrations)
         return api.shared_decks()
 
     def done(future):
+        if not target.current(client()):
+            return
         try:
-            mw.pm.profile[SHARED_KEY] = future.result()
+            decks = future.result()
+            _upload_prefs(api)["shared"] = decks
         except Exception as e:
             failed(tr("ankiquest: could not save your decks (%s)"), e)
             return
