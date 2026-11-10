@@ -1,6 +1,6 @@
 needs Anki 23.10 or newer (Qt 6). everything here is also under **Tools → AnkiQuest settings…**, which is easier to use.
 
-new here? **tools → ankiquest: sign in or create account…** (or the link under the deck list) signs in with a username and password, or creates an account, and fills in the three settings below. the password is not stored; the add-on keeps only a token for this computer.
+new here? **Tools → AnkiQuest: sign in or create account…** (or the link under the deck list) signs in with a username and password, or creates an account, and fills in the three settings below. the password is not stored; the add-on keeps only a token for this computer.
 
 - `url`: the ankiquest server, e.g. `https://anki.example.com`. When the server names another `https` address as its main one and your token works there, the add-on switches to it by itself.
 - `user`: your player name
