@@ -176,7 +176,8 @@ def settings_dialog(
     token.setEchoMode(QLineEdit.EchoMode.Password)
 
     # Keep account actions first. Manual fields still support existing token-only setups.
-    signed_in = all(field.text().strip() for field in (url, user, token))
+    original = tuple(field.text().strip() for field in (url, user, token))
+    signed_in = all(original)
     signed_server = url.text().strip() if signed_in else None
     identity = QLabel(tr("Signed in as %s on %s") % (user.text(), signed_server) if signed_in else "")
     identity.setTextFormat(Qt.TextFormat.PlainText)
@@ -184,6 +185,7 @@ def settings_dialog(
     identity.setVisible(signed_in)
     layout.addWidget(identity)
     manage = QPushButton(tr("Manage account on the website…")) if on_manage is not None else None
+    sign_out = QPushButton(tr("Sign out"))
     if on_account is not None:
         account = QPushButton(tr("Switch account…") if signed_in else tr("Sign in or create account…"))
 
@@ -199,6 +201,7 @@ def settings_dialog(
             identity.setText(tr("Signed in as %s on %s") % (answer["user"], signed_server))
             identity.show()
             account.setText(tr("Switch account…"))
+            sign_out.show()
             if manage is not None:
                 manage.show()
 
@@ -208,6 +211,15 @@ def settings_dialog(
         manage.clicked.connect(lambda: on_manage(signed_server))
         manage.setVisible(signed_in)
         layout.addWidget(manage)
+
+    def forget_account():
+        for field in (url, user, token):
+            field.clear()
+        dialog.accept()
+
+    sign_out.clicked.connect(forget_account)
+    sign_out.setVisible(signed_in)
+    layout.addWidget(sign_out)
 
     manual = QWidget()
     fields = QVBoxLayout(manual)
@@ -249,7 +261,7 @@ def settings_dialog(
 
     if not dialog.exec():
         return None
-    if finish:
+    if finish and original == tuple(field.text().strip() for field in (url, user, token)):
         finish()
     return dict(_values(url, user, token, rank, hours, channel), **today_values())
 

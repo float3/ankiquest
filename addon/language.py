@@ -1054,3 +1054,8 @@ PORTUGUESE.update({
     "Manage account on the website…": "Gerir a conta no site…",
     "Manual connection": "Ligação manual",
 })
+
+SPANISH.update({"Sign out": "Cerrar sesión"})
+GERMAN.update({"Sign out": "Abmelden"})
+FRENCH.update({"Sign out": "Se déconnecter"})
+PORTUGUESE.update({"Sign out": "Terminar sessão"})

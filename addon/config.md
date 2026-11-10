@@ -4,6 +4,8 @@ An unconnected profile offers sign-in when it opens. **Not now** dismisses the o
 
 The sign-in dialog starts with the main AnkiQuest server. If you self-host, enter your server address. Use HTTPS for a server outside your local network. After sign-in the add-on keeps a token for this computer.
 
+Use **Switch account…** or **Sign out** in **Tools → AnkiQuest settings…**. Signing out clears the saved connection and account data shown in the add-on. Your upload checkpoint stays with that server and account in this Anki profile, so signing back in continues with new reviews.
+
 Open **Tools → ankiquest settings…** to change your preferences. **Manage account on the website…** opens the account settings for your server, including devices, sign-in methods and your data. **Manual connection** contains the server, player and token fields and the connection check.
 
 - `notify_rank`: say something when your place on the leaderboard changes

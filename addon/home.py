@@ -541,6 +541,15 @@ def open_progress():
     addon().open_page(PAGES["history"])
 
 
+def clear_account():
+    """Drop the previous account's Home data while keeping the periodic refresh."""
+    local.update(board=None, board_account=None, days=None, session=None, capabilities=None, restarted=None)
+    profile = mw.pm.profile
+    if profile is not None:
+        for key in (GOAL_KEY, PLAN_KEY, REACHED_KEY, STREAK_MINUTES_KEY, CELEBRATED_KEY, SESSION_KEY):
+            profile.pop(key, None)
+
+
 def on_profile_open():
     local["board"], local["days"], local["session"] = None, None, None
     if local["timer"] is None:
