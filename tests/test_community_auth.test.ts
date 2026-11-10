@@ -275,6 +275,73 @@ test('a rejected disconnect preserves the native account and can be retried', as
   await view.locator('#reminder-form').waitFor({state:'detached'});
 });
 
+test('a new browser sign-in restores Community after disconnect', async t => {
+  const {page, control, requests, deliver} = await fixture(t, saved, {cookieUser:'cerro'});
+  const view = page.locator('#view-reminders');
+  await view.locator('#reminder-form').waitFor();
+  await view.locator('[data-disconnect]').click();
+  await view.locator('[data-connect]').waitFor();
+  await deliver();
+  control.cookieUser = 'hill';
+  await page.evaluate(() => AnkiQuestSite.status(true));
+  await view.locator('.auth-status strong').filter({hasText:'Hill'}).waitFor({timeout:2000});
+  await view.locator('#reminder-form').waitFor();
+  assert.ok(requests.filter(request => request.url.endsWith('/hill')).every(request => !request.auth));
+});
+
+test('logout clears the native account even if the access refresh throws', async t => {
+  const {page, control} = await fixture(t, saved, {cookieUser:'cerro'});
+  const view = page.locator('#view-reminders');
+  await view.locator('#reminder-form').waitFor();
+  await page.evaluate(() => {
+    const disconnect = AnkiQuestSite.disconnectMember;
+    AnkiQuestSite.disconnectMember = async () => {
+      await disconnect();
+      throw new Error('Access refresh failed');
+    };
+  });
+  await view.locator('[data-disconnect]').click();
+  await view.locator('[data-connect]').waitFor();
+  assert.equal(control.cookieUser, null);
+  assert.equal(await page.evaluate(() => window.ankiquestSession), undefined);
+});
+
+test('finishing a challenge save preserves a pending private reload', async t => {
+  const {page} = await fixture(t, saved, {challengeRecipients:true});
+  await page.locator('#tab-challenges').click();
+  await page.locator('[data-create-challenge]').click();
+  await page.locator('#challenge-form [name=recipients]').check();
+
+  let finishSave!: () => void, finishReload!: () => void;
+  const save = new Promise<void>(resolve => { finishSave = resolve; });
+  const reload = new Promise<void>(resolve => { finishReload = resolve; });
+  t.after(() => { finishSave(); finishReload(); });
+  await page.route(`${origin}/api/community/challenges/cerro`, async route => {
+    if (route.request().method() === 'POST') {
+      await save;
+      return route.fulfill({status:503, json:{error:'Goal service unavailable'}});
+    }
+    await reload;
+    return route.fallback();
+  });
+  const sent = page.waitForRequest(request => request.url().endsWith('/challenges/cerro') && request.method() === 'POST');
+  await page.getByRole('button', {name:'Send invitation'}).click();
+  await sent;
+  await page.evaluate(() => {
+    const retry = document.createElement('button');
+    retry.dataset.privateRetry = '';
+    document.body.append(retry);
+    retry.click();
+    retry.remove();
+  });
+  const loading = page.locator('#view-challenges').getByText('Loading your account…');
+  await loading.waitFor();
+  finishSave();
+  await page.locator('#challenge-status').getByText('Goal service unavailable').waitFor();
+  assert.equal(await loading.count(), 1);
+  finishReload();
+});
+
 test('a failed challenge save stays visible after closing the form', async t => {
   const {page} = await fixture(t, saved, {challengeRecipients:true});
   await page.route(`${origin}/api/community/challenges/cerro`, async route => {
