@@ -199,8 +199,9 @@ async fn leaderboard(
 ) -> Result<Json<Board>, StatusCode> {
     let scope = query.scope()?;
     let viewer = access::viewer(&app, &headers);
-    // The public default board has the same privacy rules as explicit global scope.
-    if scope == Some(social::Scope::Global) || (scope.is_none() && viewer.member.is_none()) {
+    // Preserve the full default board for shared-password sessions.
+    let public_default = scope.is_none() && viewer.member.is_none() && !viewer.community;
+    if scope == Some(social::Scope::Global) || public_default {
         return global_board(&app, &viewer, query.period)
             .map(|rows| Json(Board::Global(rows)))
             .map_err(store_error);
@@ -1045,6 +1046,20 @@ mod tests {
         let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
         assert!(row(&board, "bobby")["today_reviews"].is_u64());
         assert!(row(&board, "bobby").get("me").is_none());
+
+        // Group membership grants the same full row as friendship.
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute_batch(
+                "delete from friendships;
+                 insert into groups values (1, 'Spanish club', 'invite', 'ana', 0);
+                 insert into group_members values (1, 'ana', 1, 0), (1, 'bobby', 0, 0);",
+            )
+            .unwrap();
+        let (_, board) = get(&app, "/api/leaderboard?scope=global", Some(&ana)).await;
+        assert!(row(&board, "bobby")["today_reviews"].is_u64());
 
         // Without signing in, only the listed public profiles are there.
         for route in ["/api/leaderboard?scope=global", "/api/leaderboard"] {
