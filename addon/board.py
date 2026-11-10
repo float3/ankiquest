@@ -356,8 +356,12 @@ def board_card(today, translate, profile=None):
         return ""
     if standing.get("retry"):
         return (
-            "<div class=aq-card><h3>%s</h3><button type=button onclick=\"pycmd('ankiquest:retry-board')\">%s</button></div>"
-            % (escape(translate("Leaderboard")), escape(translate("Retry leaderboard")))
+            "<div class=aq-card><h3>%s</h3><p>%s</p>"
+            "<button type=button onclick=\"pycmd('ankiquest:retry-board')\">%s</button></div>"
+            % (
+                escape(translate("Leaderboard")), escape(translate("The leaderboard could not be loaded.")),
+                escape(translate("Retry leaderboard")),
+            )
         )
     rows = "".join(board_row(*row) for row in standing["rows"])
     if not rows:

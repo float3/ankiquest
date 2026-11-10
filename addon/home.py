@@ -23,7 +23,8 @@ PERIOD_KEY = "ankiquestBoardPeriod"
 SESSION_KEY = "ankiquestLastStudySession"
 ART = Path(__file__).resolve().parent / "art"
 BOARD_MS = 5 * 60 * 1000
-BOARD_RETRY_SECONDS = 30
+BOARD_RETRY_MS = 30_000
+BOARD_RETRY_CAP_MS = BOARD_MS
 CACHE_MS = 2000
 
 local = {
@@ -78,7 +79,8 @@ class _GoalRequest(_Request):
 @dataclass
 class _BoardRetry:
     request: _Request
-    at: float
+    at: int
+    delay: int
 
 
 class _BoardFetch(Enum):
@@ -394,9 +396,11 @@ def refresh_board(mode=_BoardFetch.AUTOMATIC):
     if pending is not None and pending.owns(api):
         return
     retry = local["board_retry"]
-    if (mode is _BoardFetch.AUTOMATIC and retry is not None and retry.request.owns(api)
-            and time.monotonic() < retry.at):
-        return
+    delay = BOARD_RETRY_MS
+    if retry is not None and retry.request.owns(api):
+        if mode is _BoardFetch.AUTOMATIC and time.monotonic() * 1000 < retry.at:
+            return
+        delay = min(retry.delay * 2, BOARD_RETRY_CAP_MS)
     request = _Request(account(api), mw.pm.profile)
     local["board_request"] = request
 
@@ -409,7 +413,7 @@ def refresh_board(mode=_BoardFetch.AUTOMATIC):
         try:
             board = future.result()
         except Exception as e:
-            local["board_retry"] = _BoardRetry(request, time.monotonic() + BOARD_RETRY_SECONDS)
+            local["board_retry"] = _BoardRetry(request, int(time.monotonic() * 1000) + delay, delay)
             print("ankiquest leaderboard:", e)
             if local["board"] is None or local["board_account"] != request.who:
                 addon().redraw()

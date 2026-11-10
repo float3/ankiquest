@@ -977,16 +977,20 @@ PORTUGUESE.update({
 
 SPANISH.update({
     "Retry leaderboard": "Volver a cargar la clasificación",
+    "The leaderboard could not be loaded.": "No se pudo cargar la clasificación.",
 })
 
 GERMAN.update({
     "Retry leaderboard": "Rangliste erneut laden",
+    "The leaderboard could not be loaded.": "Die Rangliste konnte nicht geladen werden.",
 })
 
 FRENCH.update({
     "Retry leaderboard": "Recharger le classement",
+    "The leaderboard could not be loaded.": "Impossible de charger le classement.",
 })
 
 PORTUGUESE.update({
     "Retry leaderboard": "Voltar a carregar a classificação",
+    "The leaderboard could not be loaded.": "Não foi possível carregar a classificação.",
 })

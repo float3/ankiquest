@@ -885,15 +885,33 @@ class HomeTests(unittest.TestCase):
             self.home.board_view(self.api)
         self.api.leaderboard.assert_called_once()
 
-        clock += self.home.BOARD_RETRY_SECONDS
+        clock += self.home.BOARD_RETRY_MS / 1000
         self.api.leaderboard.side_effect = None
         board = self.home.board_view(self.api)
         self.assertEqual(2, self.api.leaderboard.call_count)
         self.assertEqual("week", board["period"])
 
+    def test_board_wait_doubles_after_consecutive_failures(self):
+        self.api.leaderboard.side_effect = OSError("offline")
+        clock = 100
+        self.home.time = SimpleNamespace(time=self.home.time.time, monotonic=lambda: clock)
+        self.home.board_view(self.api)
+        clock += 30
+        self.home.board_view(self.api)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        clock += 30
+        self.home.board_view(self.api)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        clock += 30
+        self.api.leaderboard.side_effect = None
+        self.home.board_view(self.api)
+        self.assertEqual(3, self.api.leaderboard.call_count)
+
     def test_the_deck_list_can_retry_a_failed_board_now(self):
         self.api.leaderboard.side_effect = OSError("offline")
-        self.assertIn("ankiquest:retry-board", self.render().stats)
+        rendered = self.render().stats
+        self.assertIn("The leaderboard could not be loaded.", rendered)
+        self.assertIn("ankiquest:retry-board", rendered)
         self.api.leaderboard.side_effect = None
 
         result = self.home.on_js_message(False, "ankiquest:retry-board", self.mw.deckBrowser)
