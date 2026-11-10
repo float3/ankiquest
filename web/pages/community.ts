@@ -422,7 +422,12 @@ async function disconnect() {
     await AnkiQuestSite.disconnectMember();
     if(window.ankiquestSession===native) { delete window.ankiquestSession; }
   } catch(error) {
-    if(state.session===session) { state.connectionError=errorMessage(error); }
+    if(state.session===session) {
+      state.connectionError=errorMessage(error);
+    } else if(state.nativeMode==="disconnected"&&window.ankiquestSession===native) {
+      // The lock already ran. A failed access refresh cannot undo logout.
+      delete window.ankiquestSession;
+    }
   } finally {
     state.disconnecting=false;
     connectNativeSession();
@@ -452,8 +457,8 @@ addEventListener("ankiquest-auth",()=>{
   connectNativeSession();
 });
 async function restoreMember() {
-  if(state.connecting||state.disconnecting||state.nativeMode!=="allowed"||connectNativeSession()) { return; }
-  if(nativeAccount())return;
+  if(state.connecting||state.disconnecting||state.nativeMode==="removed"||connectNativeSession()) { return; }
+  if(state.nativeMode==="allowed"&&nativeAccount()) { return; }
   const epoch=state.authEpoch,session=await AnkiQuestSite.member();
   if(state.connecting||state.disconnecting||epoch!==state.authEpoch) { return; }
   if(!session){if(state.session&&!state.session.token)clearPrivate();return;}
@@ -685,7 +690,7 @@ document.addEventListener("submit",async event=>{
       if(state.session===session) {
         state.challengeSaving=false;
         controls.forEach(control=>control.disabled=false);
-        renderChallenges(accountBanner());
+        if(!state.privateLoading&&!state.privateError) { renderChallenges(accountBanner()); }
       }
     }
   }
