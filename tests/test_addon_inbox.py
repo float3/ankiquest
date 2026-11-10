@@ -180,6 +180,36 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"pixels"
 
 
 class ShareTests(unittest.TestCase):
+    def test_invitations_use_the_servers_first_person_words(self):
+        for kind, title, body in (
+            ("celebration", "I reached level 4", "I earned 900 XP."),
+            ("weekly_recap", "My week in review", "I studied on 6 days."),
+        ):
+            with self.subTest(kind=kind):
+                win = share.win_from_entry({
+                    "id": 42, "kind": kind, "title": "Your progress", "body": "You studied.",
+                    "share_title": title, "share_body": body,
+                })
+                self.assertEqual(
+                    f"{title}: {body}\nStudy with me on AnkiQuest: https://quest.example",
+                    share.invitation(win, "https://quest.example"),
+                )
+
+        climb = share.win_from_place({
+            "title": "You took the crown", "body": "You passed Ana.",
+            "share_title": "I took the crown", "share_body": "I passed Ana.",
+        }, 1)
+        self.assertEqual("I took the crown: I passed Ana.\nI study with AnkiQuest.", share.invitation(climb, ""))
+
+    def test_first_person_fields_fall_back_independently(self):
+        win = share.win_from_entry({
+            "id": 42, "title": "Daily goal", "body": "Goal reached", "share_title": "", "share_body": "I reached my goal.",
+        })
+        self.assertEqual(("Daily goal", "I reached my goal."), (win["title"], win["body"]))
+
+        climb = share.win_from_place({"title": "#2", "body": "Up one", "share_title": "I'm second", "share_body": None}, 2)
+        self.assertEqual(("I'm second", "Up one"), (climb["title"], climb["body"]))
+
     def test_wins_are_shared_by_id_and_older_rows_by_notification_or_place(self):
         win = share.win_from_entry({"id": 42, "title": "Level 5!", "body": "Well done", "kind": "celebration", "win": 17})
         self.assertEqual({"win": 17, "to": "friends"}, share.request_body(win))
@@ -290,7 +320,7 @@ class TranslationTests(unittest.TestCase):
             wanted.update(translated_literals(ADDON / (name + ".py")))
         for group in inbox.QUICK.values():
             wanted.update(group)
-        wanted.add("Tools → ankiquest inbox… to reply")
+        wanted.add("Tools → AnkiQuest inbox… to reply")
         self.assertEqual([], sorted(label for label in wanted if label not in language.SPANISH))
 
     def test_formatted_translations_keep_their_placeholders(self):
@@ -358,7 +388,7 @@ class CelebrationHookTests(unittest.TestCase):
     def test_the_reply_hint_points_at_the_native_inbox(self):
         self.offered()
         self.addon.poll()
-        self.assertIn("Tools → ankiquest inbox… to reply", self.addon.tooltip.call_args.args[0])
+        self.assertIn("Tools → AnkiQuest inbox… to reply", self.addon.tooltip.call_args.args[0])
 
 
 if __name__ == "__main__":

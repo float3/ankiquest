@@ -59,7 +59,7 @@ class Texts(unittest.TestCase):
         )
         self.assertEqual("1 review · 4 of 10 minutes for the streak so far", ui.describe(data, day(0), english))
         self.assertEqual("4 reviews · 10 of 10 minutes, short of the streak minimum", ui.describe(data, day(-1), english))
-        self.assertEqual("2 reviews · ankiquest kept your streak", ui.describe(data, day(-2), english))
+        self.assertEqual("2 reviews · AnkiQuest kept your streak", ui.describe(data, day(-2), english))
         self.assertEqual("0 reviews", ui.describe(data, day(-3), english))
         self.assertEqual("3 review cards due (estimate)", ui.describe(data, day(1), english))
         self.assertEqual("Forecast is available for the next 90 days.", ui.describe(data, day(91), english))
