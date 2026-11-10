@@ -51,7 +51,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" ankiquest.ankiaddon \
             --title "Desktop add-on ${GITHUB_REF_NAME#addon-}" \
-            --notes "Double-click ankiquest.ankiaddon, or use Tools → Add-ons → Install from file in Anki. Then set url, user and token under Tools → Add-ons → ankiquest → Config and restart Anki."
+            --notes "Double-click ankiquest.ankiaddon or choose Tools → Add-ons → Install from file. Restart Anki, then open the Tools menu to sign in or create an AnkiQuest account."
 
       - name: Publish nightly
         if: github.ref == 'refs/heads/master'
