@@ -3,7 +3,8 @@
 use crate::access::authorized;
 use crate::app::{App, now_ms};
 use crate::game::{Periods, Profile, Records};
-use crate::web_util::store_error;
+use crate::store::Store;
+use crate::web_util::{normalize_user, store_error};
 use crate::{access, feedback, game, i18n, social};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -56,6 +57,9 @@ impl BoardQuery {
 
 /// How many players the global board lists, besides the viewer's own row.
 const GLOBAL_ROWS: usize = 100;
+
+/// How many players one member can hide from Global.
+const MAX_HIDDEN: usize = 500;
 
 /// The players a board shows this viewer, or why it cannot.
 fn board_users(
@@ -130,9 +134,9 @@ impl From<Standing> for Stranger {
 /// the people they muted.
 fn global_users(
     app: &App,
+    store: &Store,
     viewer: &social::Viewer,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), crate::Error> {
-    let store = app.store.lock().unwrap();
     let conn = &store.conn;
     let mut users = app
         .board(conn, viewer, Some(social::Scope::Global))?
@@ -157,25 +161,111 @@ fn global_users(
     Ok((users, full))
 }
 
+fn hidden_players(store: &Store, member: &str) -> rusqlite::Result<BTreeSet<String>> {
+    store
+        .conn
+        .prepare("select target from global_board_hides where viewer = ?1")?
+        .query_map([member], |row| row.get(0))?
+        .collect()
+}
+
+async fn global_hidden(
+    State(app): State<Arc<App>>,
+    UrlPath(member): UrlPath<String>,
+    headers: HeaderMap,
+) -> Result<Json<BTreeSet<String>>, StatusCode> {
+    access::require_owner(&app, &member, &headers)?;
+    hidden_players(&app.store.lock().unwrap(), &member)
+        .map(Json)
+        .map_err(store_error)
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum HiddenAction {
+    Hide { user: String },
+    Unhide { user: String },
+}
+
+async fn change_global_hidden(
+    State(app): State<Arc<App>>,
+    UrlPath(owner): UrlPath<String>,
+    headers: HeaderMap,
+    Json(action): Json<HiddenAction>,
+) -> Result<Json<BTreeSet<String>>, StatusCode> {
+    let viewer = access::viewer(&app, &headers);
+    let member = viewer
+        .member
+        .as_deref()
+        .filter(|member| *member == owner)
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let store = app.store.lock().unwrap();
+
+    match action {
+        HiddenAction::Hide { user } => {
+            let target = normalize_user(&user);
+            if target == member || target.is_empty() {
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            let hidden = hidden_players(&store, member).map_err(store_error)?;
+            if hidden.contains(&target) {
+                return Ok(Json(hidden));
+            }
+
+            // Only a stranger this member could already see on Global can be hidden.
+            let (users, full) = global_users(&app, &store, &viewer).map_err(store_error)?;
+            if !users.contains(&target) || full.contains(&target) {
+                return Err(StatusCode::NOT_FOUND);
+            }
+            if hidden.len() >= MAX_HIDDEN {
+                return Err(StatusCode::CONFLICT);
+            }
+            store
+                .conn
+                .execute(
+                    "insert into global_board_hides (viewer, target, created_at) values (?1, ?2, ?3)",
+                    rusqlite::params![member, target, now_ms()],
+                )
+                .map_err(store_error)?;
+        }
+        HiddenAction::Unhide { user } => {
+            store
+                .conn
+                .execute(
+                    "delete from global_board_hides where viewer = ?1 and target = ?2",
+                    rusqlite::params![member, normalize_user(&user)],
+                )
+                .map_err(store_error)?;
+        }
+    }
+    hidden_players(&store, member)
+        .map(Json)
+        .map_err(store_error)
+}
+
 /// The top of the global board, plus the viewer's own row when it falls below.
 fn global_board(
     app: &App,
     viewer: &social::Viewer,
     period: Option<String>,
 ) -> Result<Vec<GlobalRow>, crate::Error> {
-    let (users, full) = global_users(app, viewer)?;
     let me = viewer.member.as_deref();
-    let shown = match me {
-        Some(me) => {
-            let store = app.store.lock().unwrap();
-            store.global_leaderboard(me)?
-        }
-        None => false,
+    let (users, full, shown, hidden) = {
+        let store = app.store.lock().unwrap();
+        let (users, full) = global_users(app, &store, viewer)?;
+        let (shown, hidden) = match me {
+            Some(me) => (store.global_leaderboard(me)?, hidden_players(&store, me)?),
+            None => (false, BTreeSet::new()),
+        };
+        (users, full, shown, hidden)
     };
+
+    // Keep the rank, XP and cutoff of the unfiltered board.
     Ok(standings(app, &users, period)
         .into_iter()
         .enumerate()
         .filter(|(place, standing)| *place < GLOBAL_ROWS || Some(standing.user.as_str()) == me)
+        .filter(|(_, standing)| !hidden.contains(&standing.user))
         .map(|(place, standing)| {
             let mine = Some(standing.user.as_str()) == me;
             GlobalRow {
@@ -465,6 +555,10 @@ async fn week_info(State(app): State<Arc<App>>) -> Json<WeekInfo> {
 pub(crate) fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/leaderboard", get(leaderboard))
+        .route(
+            "/api/leaderboard/hidden/{user}",
+            get(global_hidden).post(change_global_hidden),
+        )
         .route("/api/records", get(records))
         .route("/api/week", get(week_info))
         .route("/api/rank/{user}", post(rank))
@@ -849,6 +943,21 @@ mod tests {
         json_response(route(app, request.body(axum::body::Body::empty()).unwrap()).await).await
     }
 
+    async fn set_hidden(
+        app: &Arc<App>,
+        token: Option<&str>,
+        action: &str,
+        user: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        let mut request = axum::http::Request::post("/api/leaderboard/hidden/ana")
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header("authorization", format!("Bearer {token}"));
+        }
+        let body = serde_json::json!({ "action": action, "user": user });
+        json_response(route(app, request.body(body.to_string().into()).unwrap()).await).await
+    }
+
     fn users(board: &serde_json::Value) -> Vec<&str> {
         board
             .as_array()
@@ -1099,6 +1208,104 @@ mod tests {
             ["bobby", "ana"],
             "muting is one way, as everywhere else"
         );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn hiding_a_global_row_is_private_and_preserves_rank() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        let bobby = account(&app, "bobby", 8);
+        let carla = account(&app, "carla", 6);
+        let url = "/api/leaderboard?scope=global&period=all";
+        let (_, before) = get(&app, url, Some(&ana)).await;
+        assert_eq!(users(&before), ["bobby", "carla", "ana"]);
+
+        let (status, hidden) = set_hidden(&app, Some(&ana), "hide", "bobby").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(hidden, serde_json::json!(["bobby"]));
+        assert_eq!(
+            set_hidden(&app, Some(&ana), "hide", "bobby").await.1,
+            hidden
+        );
+
+        let (_, after) = get(&app, url, Some(&ana)).await;
+        assert_eq!(users(&after), ["carla", "ana"]);
+        assert_eq!(row(&after, "carla"), row(&before, "carla"));
+        assert_eq!(row(&after, "ana"), row(&before, "ana"));
+        for token in [Some(bobby.as_str()), Some(carla.as_str()), None] {
+            assert_eq!(users(&get(&app, url, token).await.1), users(&before));
+        }
+        assert_eq!(
+            get(&app, "/api/leaderboard/hidden/ana", Some(&ana)).await.1,
+            hidden
+        );
+        assert_eq!(
+            get(&app, "/api/leaderboard/hidden/bobby", Some(&bobby))
+                .await
+                .1,
+            serde_json::json!([])
+        );
+        assert_eq!(
+            get(&app, "/api/leaderboard/hidden/ana", None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get(&app, "/api/leaderboard/hidden/ana", Some(&bobby))
+                .await
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            set_hidden(&app, Some(&bobby), "unhide", "bobby").await.0,
+            StatusCode::UNAUTHORIZED
+        );
+
+        // A later friendship reaches the Friends board, while the Global choice stays in force.
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute_batch("insert into friendships values ('ana', 'bobby', 'ana', 1, 0);")
+            .unwrap();
+        let (_, friends) = get(
+            &app,
+            "/api/leaderboard?scope=friends&period=all",
+            Some(&ana),
+        )
+        .await;
+        assert_eq!(users(&friends), ["bobby", "ana"]);
+        assert_eq!(row(&friends, "ana")["xp"], row(&after, "ana")["xp"]);
+        assert_eq!(users(&get(&app, url, Some(&ana)).await.1), ["carla", "ana"]);
+
+        let (status, hidden) = set_hidden(&app, Some(&ana), "unhide", "bobby").await;
+        assert_eq!((status, hidden), (StatusCode::OK, serde_json::json!([])));
+        assert_eq!(users(&get(&app, url, Some(&ana)).await.1), users(&before));
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn only_members_can_hide_listed_strangers() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        account(&app, "bobby", 8);
+        account(&app, "carla", 6);
+        make_private(&app, "carla");
+
+        assert_eq!(
+            set_hidden(&app, None, "hide", "bobby").await.0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            set_hidden(&app, Some(&ana), "hide", "ana").await.0,
+            StatusCode::BAD_REQUEST
+        );
+        for user in ["carla", "unknown"] {
+            assert_eq!(
+                set_hidden(&app, Some(&ana), "hide", user).await.0,
+                StatusCode::NOT_FOUND
+            );
+        }
         cleanup(app, path);
     }
 

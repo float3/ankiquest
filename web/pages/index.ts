@@ -16,6 +16,7 @@ interface Person { user: string; display: string; }
  * the viewer's circle have `user`, `display`, `level`, `xp`, `period`, `streak` and `rank`.
  */
 interface Standing extends Person {
+  rank?: number;
   level: number;
   xp_total?: number;
   week_xp?: number;
@@ -104,9 +105,17 @@ const entries = <K extends string, V>(object: Record<K, V>) => Object.entries(ob
 
 let weekEnds = 0;
 let renderId = 0, privatePageHidden = false;
-addEventListener("ankiquest:locked",()=>{delete window.ankiquestSession;renderId++;app.innerHTML="";});
-addEventListener("pagehide",()=>{privatePageHidden=true;renderId++;});
-addEventListener("pageshow",()=>{privatePageHidden=false;});
+let globalHideOwner: string | null = null;
+addEventListener("ankiquest:locked",()=>{delete window.ankiquestSession;globalHideOwner=null;renderId++;app.innerHTML="";});
+addEventListener("pagehide",()=>{
+  privatePageHidden=true;
+  renderId++;
+  clearGlobalHides(null);
+});
+addEventListener("pageshow",event=>{
+  privatePageHidden=false;
+  if (event.persisted) void render();
+});
 const winnerState: {data: WinnerHistory | null; scope: WinScope; metric: WinMetric; error: boolean; request: number} = { data: null, scope: "shared", metric: "day", error: false, request: 0 };
 const settingsOpen = () => AnkiQuestAvatars!.isOpen();
 // Translated once the catalogs have loaded; render() waits for them.
@@ -143,8 +152,24 @@ function tabs(active: Period) {
 type ScopeChoice = [value: string, label: string];
 interface SocialOverview { groups: {id: number; name: string}[]; friends: unknown[] }
 let scopeCache: {user: string; choices: Promise<ScopeChoice[]>} | null = null;
-addEventListener("ankiquest:identity", () => { scopeCache = null; });
-addEventListener("ankiquest-auth", () => { scopeCache = null; });
+function clearGlobalHides(nextOwner: string | null) {
+  if (!globalHideOwner || globalHideOwner === nextOwner) return;
+  globalHideOwner = null;
+  renderId++;
+  // Clear the previous account before waiting for the new board.
+  app.querySelector("#leaderboard-rows")?.replaceChildren();
+  if (!privatePageHidden) void render();
+}
+
+addEventListener("ankiquest:identity", event => {
+  scopeCache = null;
+  const {user} = (event as CustomEvent<{user?: string}>).detail;
+  clearGlobalHides(nativeAccount()?.user ?? user ?? null);
+});
+addEventListener("ankiquest-auth", () => {
+  scopeCache = null;
+  clearGlobalHides(nativeAccount()?.user ?? null);
+});
 
 async function viewer(): Promise<OwnerSession | null> {
   return nativeAccount() ?? AnkiQuestSite.member();
@@ -292,13 +317,16 @@ function streakBadge(row: Standing) {
   const label = aqText`${num(row.streak)} day streak · ${status}`;
   return aqHtml`<span class="streak" data-streak-state="${state}" role="img" tabindex="0" aria-label="${esc(label)}" title="${esc(label)}">${streakIcon(state)}${num(row.streak)}</span>`;
 }
-function board(rows: Standing[], me: string) {
+function board(rows: Standing[], me: string, hideFor?: string) {
   if (!rows.length) return aqHtml`<p class="empty">Nobody has uploaded reviews yet.</p>`;
   if (rows.every(row => row.xp === 0)) return aqHtml`<p class="empty">No XP in this period yet.</p>`;
   const lead = Math.max(1, rows[0].xp);
-  return aqHtml`<ol class="board">${rows.map((r, i) => aqHtml`
-    <li class="${[r.user === me && "me", i === 0 && r.xp > 0 && "lead"].filter(Boolean).join(" ")}">
-      <span class="rank">${["👑", "🥈", "🥉"][i] ?? i + 1}</span>
+  return aqHtml`<ol class="board">${rows.map((r, i) => {
+    const rank = r.rank ?? i + 1;
+    const hide = hideFor && r.user !== hideFor && r.today_reviews == null;
+    return aqHtml`
+    <li class="${[r.user === me && "me", rank === 1 && r.xp > 0 && "lead"].filter(Boolean).join(" ")}">
+      <span class="rank">${["👑", "🥈", "🥉"][rank - 1] ?? num(rank)}</span>
       <div class="player-cell">${AnkiQuestSite.avatar(r.user, r.display)}<div class="player-progress">
         <div class="line">
           <a class="name" href="#${encodeURIComponent(r.user)}">${esc(r.display)}</a>
@@ -306,10 +334,51 @@ function board(rows: Standing[], me: string) {
           <span class="lvl">Lv ${r.level}</span>
         </div>
         <div class="bar"><i style="width:${pct(r.xp, lead)}%"></i></div>
+        ${hide ? aqHtml`<button type="button" class="hide-row" data-global-hide="${esc(r.user)}" aria-label="${esc(aqText`Hide ${r.display} for me`)}">Hide for me</button>` : ""}
       </div>
       </div><div class="xp"><b>${num(r.xp)}</b>${r.today_reviews != null ? aqHtml`<span>${num(r.today_reviews)} today</span>` : ""}${r.closing_xp != null && (r.day_ends_at ?? 0) > Date.now() ? aqHtml`<span class="closing-xp">${esc(aqText`${num(r.closing_xp)} XP still counting for last week`)}</span>` : ""}</div>
-    </li>`).join("")}
+    </li>`;
+  }).join("")}
   </ol><p class="streak-legend">${[["studied",aqText("Studied today")],["pending",aqText("Not studied yet")],["protected",aqText("Streak protected")]].map(([state,label]) => aqHtml`<span data-streak-state="${state}">${streakIcon(state)}${label}</span>`).join("")}</p>`;
+}
+
+const hiddenPath = (session: OwnerSession) => "/api/leaderboard/hidden/" + encodeURIComponent(session.user);
+
+function hiddenPanel(hidden: string[]) {
+  const open = app.querySelector<HTMLDetailsElement>("#hidden-players")?.open;
+  const restore = hidden.map(user => aqHtml`<li><span>${esc(user)}</span><button type="button" data-global-unhide="${esc(user)}" aria-label="${esc(aqText`Show ${user} again`)}">Show again</button></li>`).join("");
+  return aqHtml`<details id="hidden-players"${open ? " open" : ""}><summary>Hidden players</summary>
+    ${restore ? aqHtml`<ul>${restore}</ul>` : aqHtml`<p>No hidden players.</p>`}
+  </details><p id="hide-status" role="status"></p>`;
+}
+
+function bindGlobalHides(session: OwnerSession, id: number) {
+  const section = document.getElementById("leaderboard-rows")!;
+  const status = document.getElementById("hide-status")!;
+  section.addEventListener("click", async event => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-global-hide],[data-global-unhide]");
+    const user = button?.dataset.globalHide ?? button?.dataset.globalUnhide;
+    if (!user || id !== renderId) return;
+    const controls = section.querySelectorAll<HTMLButtonElement>("[data-global-hide],[data-global-unhide]");
+    controls.forEach(control => { control.disabled = true; });
+    status.textContent = "";
+
+    // The URL binds the action to the account that rendered this button.
+    try {
+      const action = button?.dataset.globalHide ? "hide" : "unhide";
+      await request<string[]>(hiddenPath(session), {session, json: {action, user}, gate: false});
+    } catch (_) {
+      controls.forEach(control => { control.disabled = false; });
+      status.textContent = aqText("Could not update hidden players. Try again.");
+      return;
+    }
+    if (id !== renderId) return;
+    section.querySelector<HTMLDetailsElement>("#hidden-players")!.open = true;
+    const refreshing = render();
+    const refreshedId = renderId;
+    await refreshing;
+    if (refreshedId === renderId) app.querySelector<HTMLElement>("#hidden-players summary")?.focus();
+  });
 }
 
 const winCount = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
@@ -530,6 +599,7 @@ async function render() {
     const auth: RequestInit = session?.token ? {headers: AnkiQuestSite.ownerHeaders(session)} : {};
     const scoped = (url: string) => scope ? url + (url.includes("?") ? "&" : "?") + "scope=" + encodeURIComponent(scope) : url;
     if (!canRender()) return;
+    globalHideOwner = currentView() !== "records" && scope === "global" && !user ? session?.user ?? null : null;
     if (currentView() === "records") {
       const held = await request<RecordBoard[]>(scoped("/api/records"), auth);
       if (!canRender()) return;
@@ -540,9 +610,12 @@ async function render() {
     }
     const period = currentPeriod();
     loadWinners();
-    const [rows, week] = await Promise.all([
+    const [rows, week, hidden] = await Promise.all([
       request<Standing[]>(scoped("/api/leaderboard?period=" + period), auth),
       request<WeekInfo>("/api/week").catch(() => null),
+      session && globalHideOwner
+        ? request<string[]>(hiddenPath(session), {session, gate: false}).catch(() => null)
+        : null,
     ]);
     weekEnds = week?.ends_at ?? 0;
     if (user) {
@@ -564,7 +637,9 @@ async function render() {
     if (!canRender()) return;
     document.title = aqText("Leaderboard · AnkiQuest");
     AnkiQuestSite.setProfile(me);
-    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + (newcomer ? welcome() : "") + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me)}</section>` + winnerSection() + receivingNotificationsEntry();
+    const owner = hidden && session ? session : null;
+    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + (newcomer ? welcome() : "") + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card" id="leaderboard-rows"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, session?.user ?? me, owner?.user)}${hidden ? hiddenPanel(hidden) : ""}</section>` + winnerSection() + receivingNotificationsEntry();
+    if (owner) bindGlobalHides(owner, id);
   } catch (e) {
     if (!canRender()) return;
     app.innerHTML = aqHtml`<div class="notice error" role="alert">Could not reach the server. <button type="button" id="retry-load">Try again</button></div>`;

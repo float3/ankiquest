@@ -56,6 +56,13 @@ pub fn initialize(conn: &Connection) -> Result<(), Error> {
              sender text not null,
              created_at integer not null,
              primary key (recipient, sender)
+         ) without rowid;
+         create table if not exists global_board_hides (
+             viewer text not null,
+             target text not null,
+             created_at integer not null,
+             primary key (viewer, target),
+             check (viewer != target)
          ) without rowid;",
     )?;
     Ok(())
