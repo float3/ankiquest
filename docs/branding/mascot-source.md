@@ -1,28 +1,47 @@
 # A single source for mascot art
 
-Keep the transparent PNG masters in `art/mascots/<mascot>/<pose>.png`. Use the same pose names for Aki and Ankilope. Put shared scenes under `duo` and mascot-free icons under `common`. Keep generation prompts next to the masters.
+Keep the transparent PNG masters in `art/mascots/<mascot>/<pose>.png`.
+Register each mascot and the common pose names in `art/mascots/manifest.json`.
+The exporter checks that every mascot directory is registered and contains the
+full set of poses. Put group illustrations in `art/mascots/scenes/` and list
+their participants by mascot ID in the manifest. Put mascot-free icons in
+`art/mascots/common/`. Keep each mascot's generation prompts with its masters.
 
-A manifest maps each pose to the existing web URL, add-on filename, card filename and Android resource name. It records each export's size and format. The source check compares the complete Aki and Ankilope pose sets before publishing a bundle.
+The manifest records each export's dimensions, format, and destination. Keep
+existing web URLs, add-on filenames, card keys and Android resource names.
 
 ```text
 PNG masters and manifest
     |
-    +-- web PNGs at the existing URLs
-    +-- add-on and card PNGs
-    +-- versioned Android bundle of WebP drawables
+    +-- Rust exporter --> web, add-on and card PNGs
+    |
+    +-- Rust exporter --> Android WebPs and SHA-256 manifest
 ```
 
-## Build inputs
+## Exporter and packaging
 
-Extend the current exporter to produce all three outputs with pinned image tooling. Generate the web, add-on and card files during packaging. The Rust build needs the card PNGs before compiling `src/cards.rs`, which embeds them in the binary. [Current exporter](../../tools/export_android_art.py).
+Add a Rust workspace crate in `tools/mascot-export/` with a CLI and a library.
+Use the workspace's locked PNG and lossless WebP encoders and fix the resize
+filter, encoder settings, and metadata handling in the exporter. Generate the
+files from the manifest in sorted order. Run the exporter twice in CI and
+compare bytes to verify reproducibility.
 
-Android pins the bundle version and SHA-256. Its build extracts the bundle into a generated `drawable-nodpi` source set. Cache the verified bundle so a prepared checkout can build offline. Check resource names and dimensions against the manifest from that bundle.
+Call the exporter library from `build.rs` for the web and card PNGs. Write them
+under Cargo's `OUT_DIR`, register the source files for rebuilds, and point the
+`include_bytes!` calls in `src/cards.rs` and the web handlers at those outputs.
+Nix builds the same locked dependencies and source tree as Cargo. The build
+script runs with its local inputs. Add-on packaging invokes the CLI to put its
+PNG exports in the add-on archive.
 
-## Merge order
+## Android drawables
 
-1. Merge the Android drawables first, then the server PNG masters. [Android PR #176](https://github.com/float3/AnkiQuest-Android/pull/176), [server PR #208](https://github.com/float3/ankiquest/pull/208).
-2. Merge the server exporter and manifest once they reproduce the current filenames, dimensions and public URLs. Publish the first pinned Android bundle after its pose parity and transparency checks pass.
-3. Merge Android's bundle consumer after the bundle is available. Verify its resources and offline build before removing the checked-in WebP copies.
-4. Remove the committed web, add-on and card copies after each packaging path produces and verifies its own outputs. Keep existing web URLs working through the generated files.
+Keep the generated WebPs committed in Android's `drawable-nodpi` so a checkout
+can build offline. Record the server source commit and a SHA-256 for each
+drawable in an Android manifest. Whoever changes the masters runs the locked
+exporter and updates the drawables and manifest in a companion PR. Android CI
+regenerates the WebPs from the pinned server commit and checks the complete
+resource list, dimensions, and hashes against the committed files. Gradle
+consumes the committed resources directly.
 
-Review the generated assets at native size and 64 px on light and dark backgrounds. Check neutral icons at 24 px and the launcher art on a device.
+Review generated assets at native size and 64 px on light and dark backgrounds.
+Check neutral icons at 24 px and the launcher art on a device.
