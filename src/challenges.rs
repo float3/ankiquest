@@ -11,8 +11,9 @@ use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
+use rusqlite::types::{FromSql, FromSqlResult, ValueRef};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -71,11 +72,78 @@ pub struct Action {
     pub action: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemberAction {
+    Accept,
+    Decline,
+    Leave,
+    Cancel,
+    Unknown,
+}
+
+impl From<&str> for MemberAction {
+    fn from(value: &str) -> Self {
+        match value {
+            "accept" => Self::Accept,
+            "decline" => Self::Decline,
+            "leave" => Self::Leave,
+            "cancel" => Self::Cancel,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MemberStatus {
+    Invited,
+    Accepted,
+    Declined,
+    Left,
+    Other(String),
+}
+
+impl FromSql for MemberStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        Ok(match value.as_str()? {
+            "invited" => Self::Invited,
+            "accepted" => Self::Accepted,
+            "declined" => Self::Declined,
+            "left" => Self::Left,
+            // Preserve the stored value if an older database has an unfamiliar status.
+            value => Self::Other(value.to_owned()),
+        })
+    }
+}
+
+impl Serialize for MemberStatus {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(match self {
+            Self::Invited => "invited",
+            Self::Accepted => "accepted",
+            Self::Declined => "declined",
+            Self::Left => "left",
+            Self::Other(value) => value,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeState {
+    Declined,
+    Cancelled,
+    Complete,
+    Ended,
+    Waiting,
+    Upcoming,
+    Active,
+}
+
 #[derive(Serialize, Debug)]
 pub struct Member {
     pub user: String,
     pub display: String,
-    pub status: String,
+    pub status: MemberStatus,
     pub progress: u64,
 }
 
@@ -91,7 +159,7 @@ pub struct Challenge {
     pub target: u64,
     pub members: Vec<Member>,
     pub progress: u64,
-    pub status: String,
+    pub status: ChallengeState,
     pub weekly: bool,
     pub started: bool,
     pub start_when_ready: bool,
@@ -280,7 +348,7 @@ pub fn act(store: &mut Store, user: &str, id: i64, action: &str, now: i64) -> Re
         )
         .optional()?;
     let (creator, title, end, cancelled) = row.ok_or(Error::NotFound)?;
-    let membership: Option<String> = tx
+    let membership: Option<MemberStatus> = tx
         .query_row(
             "select status from community_members where challenge=?1 and user=?2",
             params![id, user],
@@ -288,28 +356,26 @@ pub fn act(store: &mut Store, user: &str, id: i64, action: &str, now: i64) -> Re
         )
         .optional()?;
     let status = membership.ok_or(Error::Forbidden)?;
-    if (action == "cancel" && creator == user && cancelled)
-        || (action == "accept" && creator != user && status == "accepted")
-        || (action == "decline" && status == "declined")
-        || (action == "leave" && status == "left")
+    let action = MemberAction::from(action);
+    if (action == MemberAction::Cancel && creator == user && cancelled)
+        || (action == MemberAction::Accept && creator != user && status == MemberStatus::Accepted)
+        || (action == MemberAction::Decline && status == MemberStatus::Declined)
+        || (action == MemberAction::Leave && status == MemberStatus::Left)
     {
         return Ok(());
     }
     if cancelled || now >= end {
         return Err(Error::Invalid("This challenge has ended."));
     }
-    let waiting_weekly = crate::weekly_challenges::started(&tx, id)? == Some(false);
-    let deferred = deferred_goal(&tx, id)?;
-    let waiting_custom = deferred.is_some_and(|(started, _)| !started);
-    let waiting = waiting_weekly || waiting_custom;
+    let start = ChallengeStart::read(&tx, id)?;
     match action {
-        "cancel" if creator == user => {
+        MemberAction::Cancel if creator == user => {
             tx.execute(
                 "update community_challenges set cancelled=1,end_at=min(end_at,?2) where id=?1",
                 params![id, now],
             )?;
         }
-        "accept" if status == "invited" => {
+        MemberAction::Accept if status == MemberStatus::Invited => {
             tx.execute(
                 "update community_members set status='accepted',joined_at=?3 where challenge=?1 and user=?2 and status='invited'",
                 params![id,user,now],
@@ -319,51 +385,30 @@ pub fn act(store: &mut Store, user: &str, id: i64, action: &str, now: i64) -> Re
                 [id],
                 |r| r.get(0),
             )?;
-            if waiting && all_accepted {
-                tx.execute(
-                    "update community_challenges set start_at=?2,end_at=?3 where id=?1",
-                    params![
-                        id,
-                        now,
-                        now + deferred
-                            .map_or(crate::weekly_challenges::DURATION_MS, |(_, days)| days
-                                * DAY_MS)
-                    ],
-                )?;
-                tx.execute("update community_members set joined_at=?2 where challenge=?1 and status='accepted'", params![id,now])?;
-                if waiting_weekly {
-                    tx.execute(
-                        "update community_weekly_goals set started=1 where challenge=?1",
-                        [id],
-                    )?;
-                } else {
-                    tx.execute(
-                        "update community_deferred_goals set started=1 where challenge=?1",
-                        [id],
-                    )?;
-                }
+            if all_accepted {
+                start.activate(&tx, id, now)?;
             }
             notice(&tx, &creator, user, id, &title, "challenge_accepted", now)?;
         }
-        "decline" if status == "invited" => {
+        MemberAction::Decline if status == MemberStatus::Invited => {
             tx.execute(
                 "update community_members set status='declined',left_at=?3 where challenge=?1 and user=?2",
                 params![id,user,now],
             )?;
-            if waiting {
+            if start.waiting() {
                 tx.execute(
                     "update community_challenges set cancelled=1,end_at=min(end_at,?2) where id=?1",
                     params![id, now],
                 )?;
             }
         }
-        "leave" if status == "accepted" && creator != user => {
+        MemberAction::Leave if status == MemberStatus::Accepted && creator != user => {
             tx.execute(
                 "update community_members set status='left',left_at=?3 where challenge=?1 and user=?2",
                 params![id,user,now],
             )?;
         }
-        "cancel" => return Err(Error::Forbidden),
+        MemberAction::Cancel => return Err(Error::Forbidden),
         _ => {
             return Err(Error::Invalid(
                 "That action is not available for this invitation.",
@@ -518,6 +563,62 @@ fn deferred_goal(conn: &Connection, id: i64) -> rusqlite::Result<Option<(bool, i
     .optional()
 }
 
+#[derive(Clone, Copy)]
+enum ChallengeStart {
+    Immediate,
+    WeeklyWaiting,
+    WeeklyStarted,
+    CustomWaiting(i64),
+    CustomStarted,
+}
+
+impl ChallengeStart {
+    /// Project both stored goal types into one start state.
+    fn read(conn: &Connection, id: i64) -> rusqlite::Result<Self> {
+        if let Some(started) = weekly_challenges::started(conn, id)? {
+            return Ok(if started {
+                Self::WeeklyStarted
+            } else {
+                Self::WeeklyWaiting
+            });
+        }
+        Ok(match deferred_goal(conn, id)? {
+            Some((false, days)) => Self::CustomWaiting(days),
+            Some((true, _)) => Self::CustomStarted,
+            None => Self::Immediate,
+        })
+    }
+
+    fn waiting(self) -> bool {
+        matches!(self, Self::WeeklyWaiting | Self::CustomWaiting(_))
+    }
+
+    /// Last acceptance -> shared start and end -> accepted members -> saved start.
+    fn activate(self, tx: &Transaction<'_>, id: i64, now: i64) -> rusqlite::Result<()> {
+        let (duration, mark_started) = match self {
+            Self::WeeklyWaiting => (
+                weekly_challenges::DURATION_MS,
+                "update community_weekly_goals set started=1 where challenge=?1",
+            ),
+            Self::CustomWaiting(days) => (
+                days * DAY_MS,
+                "update community_deferred_goals set started=1 where challenge=?1",
+            ),
+            _ => return Ok(()),
+        };
+        tx.execute(
+            "update community_challenges set start_at=?2,end_at=?3 where id=?1",
+            params![id, now, now + duration],
+        )?;
+        tx.execute(
+            "update community_members set joined_at=?2 where challenge=?1 and status='accepted'",
+            params![id, now],
+        )?;
+        tx.execute(mark_started, [id])?;
+        Ok(())
+    }
+}
+
 /// Stops pushing invitations to challenges that were cancelled, ended, or already started.
 pub fn cancel_stale_invites(conn: &Connection, now: i64) -> rusqlite::Result<()> {
     conn.execute(
@@ -573,7 +674,8 @@ fn reconcile(
                 .map_err(|error| format!("challenge progress: {error:?}"))?
                 .into_iter()
                 .filter(|challenge| {
-                    challenge.status == "complete" && challenge.end_at >= now - 90 * DAY_MS
+                    challenge.status == ChallengeState::Complete
+                        && challenge.end_at >= now - 90 * DAY_MS
                 }),
         );
     }
@@ -582,7 +684,7 @@ fn reconcile(
         for member in challenge
             .members
             .iter()
-            .filter(|member| member.status == "accepted")
+            .filter(|member| member.status == MemberStatus::Accepted)
         {
             if let Some(sent) = notice(
                 &tx,
@@ -639,12 +741,16 @@ pub fn list(
         .collect::<Result<Vec<_>, _>>()?;
     let mut challenges = Vec::new();
     for (id, title, kind, cooperative, creator, start_at, end_at, target, cancelled) in rows {
-        let weekly_started = crate::weekly_challenges::started(&store.conn, id)?;
-        let weekly = weekly_started.is_some();
-        let deferred = deferred_goal(&store.conn, id)?;
-        let started = weekly_started
-            .or(deferred.map(|(started, _)| started))
-            .unwrap_or(true);
+        let start = ChallengeStart::read(&store.conn, id)?;
+        let weekly = matches!(
+            start,
+            ChallengeStart::WeeklyWaiting | ChallengeStart::WeeklyStarted
+        );
+        let start_when_ready = matches!(
+            start,
+            ChallengeStart::CustomWaiting(_) | ChallengeStart::CustomStarted
+        );
+        let started = !start.waiting();
         let kind = if kind == "study_days" {
             Kind::StudyDays
         } else {
@@ -657,7 +763,7 @@ pub fn list(
             .query_map([id], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
+                    r.get::<_, MemberStatus>(1)?,
                     r.get::<_, Option<i64>>(2)?,
                 ))
             })?
@@ -669,7 +775,7 @@ pub fn list(
                 let mut count = 0;
                 let mut days = BTreeSet::new();
                 if started
-                    && status == "accepted"
+                    && status == MemberStatus::Accepted
                     && let (Some(player), Some(joined)) = (player, joined)
                 {
                     for review in player.reviews.iter() {
@@ -696,34 +802,34 @@ pub fn list(
             .collect();
         let progress = members.iter().map(|m| m.progress).sum();
         let complete = started
-            && (!weekly || members.iter().all(|m| m.status == "accepted"))
+            && (!weekly || members.iter().all(|m| m.status == MemberStatus::Accepted))
             && if cooperative {
                 progress >= target
             } else {
-                !members.iter().any(|m| m.status == "invited")
+                !members.iter().any(|m| m.status == MemberStatus::Invited)
                     && members
                         .iter()
-                        .filter(|m| m.status == "accepted")
+                        .filter(|m| m.status == MemberStatus::Accepted)
                         .all(|m| m.progress >= target)
             };
         let status = if cancelled
-            && (weekly || deferred.is_some())
+            && (weekly || start_when_ready)
             && !started
-            && members.iter().any(|m| m.status == "declined")
+            && members.iter().any(|m| m.status == MemberStatus::Declined)
         {
-            "declined"
+            ChallengeState::Declined
         } else if cancelled {
-            "cancelled"
+            ChallengeState::Cancelled
         } else if complete {
-            "complete"
+            ChallengeState::Complete
         } else if now >= end_at {
-            "ended"
+            ChallengeState::Ended
         } else if !started {
-            "waiting"
+            ChallengeState::Waiting
         } else if now < start_at {
-            "upcoming"
+            ChallengeState::Upcoming
         } else {
-            "active"
+            ChallengeState::Active
         };
         challenges.push(Challenge {
             id,
@@ -736,10 +842,10 @@ pub fn list(
             target,
             members,
             progress,
-            status: status.into(),
+            status,
             weekly,
             started,
-            start_when_ready: deferred.is_some(),
+            start_when_ready,
         });
     }
     Ok(challenges)
@@ -913,6 +1019,26 @@ mod tests {
     use crate::game::{ClockHistory, FreezePolicy, Review};
     use crate::test_support::*;
     use crate::weekly_challenges;
+
+    #[test]
+    fn statuses_keep_wire_values() {
+        let conn = Connection::open_in_memory().unwrap();
+        for status in ["invited", "accepted", "declined", "left", "older-value"] {
+            let member: MemberStatus = conn.query_row("select ?1", [status], |r| r.get(0)).unwrap();
+            assert_eq!(serde_json::to_value(member).unwrap(), status);
+        }
+        for (state, status) in [
+            (ChallengeState::Declined, "declined"),
+            (ChallengeState::Cancelled, "cancelled"),
+            (ChallengeState::Complete, "complete"),
+            (ChallengeState::Ended, "ended"),
+            (ChallengeState::Waiting, "waiting"),
+            (ChallengeState::Upcoming, "upcoming"),
+            (ChallengeState::Active, "active"),
+        ] {
+            assert_eq!(serde_json::to_value(state).unwrap(), status);
+        }
+    }
 
     #[test]
     fn challenge_events_are_private_transactional_and_retry_safe() {
@@ -1240,17 +1366,17 @@ mod tests {
             player("friend", &[250, 303]),
         ];
         let waiting = list(&store, "owner", &players, start + 8 * DAY_MS).unwrap();
-        assert_eq!(waiting[0].status, "waiting");
+        assert_eq!(waiting[0].status, ChallengeState::Waiting);
         assert_eq!(waiting[0].progress, 0);
         act(&mut store, "friend", id, "accept", start + 8 * DAY_MS).unwrap();
         assert_eq!(
             list(&store, "owner", &players, start + 8 * DAY_MS).unwrap()[0].status,
-            "waiting"
+            ChallengeState::Waiting
         );
         let accepted_at = start + 10 * DAY_MS;
         act(&mut store, "other", id, "accept", accepted_at).unwrap();
         let running = list(&store, "owner", &players, accepted_at).unwrap();
-        assert_eq!(running[0].status, "active");
+        assert_eq!(running[0].status, ChallengeState::Active);
         assert_eq!(running[0].start_at, accepted_at);
         assert_eq!(running[0].end_at, accepted_at + 7 * DAY_MS);
         assert_eq!(
@@ -1269,7 +1395,7 @@ mod tests {
         let id = create(&mut store, "owner", &request, &eligible, 100).unwrap();
         act(&mut store, "friend", id, "decline", 100 + 9 * DAY_MS).unwrap();
         let goal = &list(&store, "owner", &[], 100 + 9 * DAY_MS).unwrap()[0];
-        assert_eq!(goal.status, "declined");
+        assert_eq!(goal.status, ChallengeState::Declined);
         assert!(!goal.started);
         assert!(matches!(
             act(&mut store, "friend", id, "accept", 100 + 9 * DAY_MS + 1),
@@ -1305,7 +1431,7 @@ mod tests {
         act(&mut store, "friend", id, "accept", 200).unwrap();
         let result = list(&store, "owner", &players, 300).unwrap();
         assert_eq!(result[0].progress, 3);
-        assert_eq!(result[0].status, "complete");
+        assert_eq!(result[0].status, ChallengeState::Complete);
         act(&mut store, "friend", id, "accept", 250).unwrap();
         assert!(matches!(
             act(&mut store, "friend", id, "cancel", 250),
@@ -1353,7 +1479,7 @@ mod tests {
         act(&mut store, "owner", id, "cancel", 200).unwrap();
         let players = [player("owner", &[101, 199, 200, 201, 500])];
         let result = list(&store, "owner", &players, 1000).unwrap();
-        assert_eq!(result[0].status, "cancelled");
+        assert_eq!(result[0].status, ChallengeState::Cancelled);
         assert_eq!(result[0].end_at, 200);
         assert_eq!(
             result[0].progress, 2,
@@ -1379,7 +1505,7 @@ mod tests {
             list(&store, "owner", &players, 150)
                 .unwrap()
                 .iter()
-                .all(|goal| goal.status == "complete")
+                .all(|goal| goal.status == ChallengeState::Complete)
         );
         assert!(matches!(
             create(&mut store, "owner", &request(), &eligible, 150),
@@ -1443,10 +1569,9 @@ mod tests {
                 .iter()
                 .any(|goal| {
                     goal.id == open
-                        && goal
-                            .members
-                            .iter()
-                            .any(|member| member.user == "friend" && member.status == "accepted")
+                        && goal.members.iter().any(|member| {
+                            member.user == "friend" && member.status == MemberStatus::Accepted
+                        })
                 })
         );
         act(&mut store, "friend", open, "leave", LATER + 302).unwrap();
@@ -1478,7 +1603,11 @@ mod tests {
         }
         let invitations = list(&store, "friend", &[], 200).unwrap();
         assert_eq!(invitations.len(), 105);
-        assert!(invitations.iter().all(|goal| goal.status == "active"));
+        assert!(
+            invitations
+                .iter()
+                .all(|goal| goal.status == ChallengeState::Active)
+        );
     }
 
     #[tokio::test]
@@ -1534,12 +1663,12 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(goal.challenges.len(), 1);
-        assert_eq!(goal.challenges[0].status, "waiting");
+        assert_eq!(goal.challenges[0].status, ChallengeState::Waiting);
         assert!(
             goal.challenges[0]
                 .members
                 .iter()
-                .any(|m| m.user == draft.friend.user && m.status == "invited")
+                .any(|m| m.user == draft.friend.user && m.status == MemberStatus::Invited)
         );
         assert_eq!(
             act_on_weekly_challenge(
@@ -1603,7 +1732,7 @@ mod tests {
                 .find(|m| m.user == "hill")
                 .unwrap()
                 .status,
-            "invited"
+            MemberStatus::Invited
         );
         assert!(
             get_challenges(
@@ -1650,7 +1779,7 @@ mod tests {
                 .find(|m| m.user == "hill")
                 .unwrap()
                 .status,
-            "accepted"
+            MemberStatus::Accepted
         );
         assert_eq!(
             act_on_challenge(
@@ -1678,7 +1807,7 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(cancelled.challenges[0].status, "cancelled");
+        assert_eq!(cancelled.challenges[0].status, ChallengeState::Cancelled);
         cleanup(app, path);
     }
 }
