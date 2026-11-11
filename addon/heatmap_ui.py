@@ -167,6 +167,17 @@ def _days(tr, count):
     return _plural(tr, count, "%s day", "%s days")
 
 
+def _state_label(state, tr):
+    return tr({
+        heatmap.MET: "Streak minimum met",
+        heatmap.SHORT: "Short of the streak minimum",
+        heatmap.FROZEN: "Frozen — streak kept",
+        heatmap.SKIPPED: "Skipped day — streak kept",
+        heatmap.NONE: "No study counted",
+        "protected": "Protected — streak kept",
+    }.get(state, "Streak unknown"))
+
+
 def describe(data, day, tr):
     """What a day says when clicked, as ReviewHeatmapGrid.kt's dayCountDescription."""
     if day > data.forecast_end:
@@ -175,11 +186,11 @@ def describe(data, day, tr):
         return _plural(tr, data.scheduled.get(day, 0), "%s review card due (estimate)", "%s review cards due (estimate)")
 
     reviews = _reviews(tr, data.reviews.get(day, 0))
-    if day in data.protected:
-        return tr("%s · AnkiQuest kept your streak") % reviews
     verdict = data.verdicts.get(day)
-    if verdict is None or verdict.state != heatmap.SHORT:
-        return reviews
+    if verdict is None:
+        return reviews + " · " + _state_label("protected", tr) if day in data.protected else reviews
+    if verdict.state != heatmap.SHORT:
+        return reviews + " · " + _state_label(verdict.state, tr)
     minutes = min(verdict.minutes, verdict.streak_minutes)
     if day == data.today:
         return tr("%s · %s of %s minutes for the streak so far") % (reviews, minutes, verdict.streak_minutes)

@@ -2,13 +2,14 @@
 
 import time
 from dataclasses import dataclass
+from datetime import date, timedelta
 from enum import Enum, auto
 from pathlib import Path
 
 from aqt import gui_hooks, mw
 
-from . import address, day_verdict, goal_ui, goals, moods, today, today_ui
-from .board import PAGES
+from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today, today_ui
+from .board import PAGES, _day_label
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
 from .language import tr
@@ -371,6 +372,28 @@ def last_session(api):
     return today.session_text(stored, tr)
 
 
+def _session_day(summary):
+    """The session's day, judged by the server; never infer a past verdict from its minutes."""
+    profile = addon().state["profile"] or {}
+    starts = (profile.get("today") or {}).get("starts_at")
+    ends, finished = profile.get("day_ends_at"), summary.get("finished_at", 0)
+    if starts is not None and ends and starts <= finished < ends:
+        view = _profile_for_display(profile)
+        state = view["_day_status"]
+        label = _day_label(view, tr)
+        if state == "pending":
+            state = "short" if view["today"].get("reviews", 0) else "none"
+            label = heatmap_ui._state_label(state, tr)
+        return {"state": state, "label": label}
+    cell = next((cell for cell in profile.get("heatmap", []) if cell.get("date") == summary.get("day")), {})
+    state = cell.get("state", "unknown")
+    return {"state": state, "label": heatmap_ui._state_label(state, tr)}
+
+
+def _streak_title(summary):
+    return tr("Streak secured! 🔥") if _session_day(summary)["state"] == "met" else tr("Streak minimum reached — syncing")
+
+
 def today_view(deck_browser, chosen_companion):
     """What board.html needs for the Today panel, or None when the collection cannot be read."""
     try:
@@ -383,6 +406,7 @@ def today_view(deck_browser, chosen_companion):
     api = addon().client()
     profile = day_verdict._for_display(addon().state["profile"], status.verdict)
     mood = moods.mood([day.due for day in days], focus.due if focus else 0, profile, now_ms())
+    session = last_session(api)
     return {
         "profile": profile,
         "art": art_url(chosen_companion, mood),
@@ -391,7 +415,8 @@ def today_view(deck_browser, chosen_companion):
         "focus": focus_view(focus),
         "goal": goal_view(status),
         "board": board_view(api, profile),
-        "session": last_session(api),
+        "session": session,
+        "session_day": _session_day(mw.pm.profile[SESSION_KEY]) if session else None,
         "moments": addon()._moments._count(),
     }
 
@@ -504,6 +529,7 @@ def finish_session():
         return
     if summary is None:
         return
+    summary["day"] = (date(1970, 1, 1) + timedelta(days=server_day())).isoformat()
     mw.pm.profile[SESSION_KEY] = dict(summary, account=[api.base, api.user])
     local["board"] = None
     refresh_board()
@@ -593,7 +619,7 @@ def celebrate(summary):
     topics = ["secured", "goal"] if earned == goals.BOTH else ["secured" if earned == goals.MINIMUM else "goal"]
     items = [{
         "key": "%s:%d" % (topic, status.day), "topic": topic,
-        "title": goals.celebration_title(goals.MINIMUM if topic == "secured" else goals.GOAL, tr),
+        "title": _streak_title(summary) if topic == "secured" else goals.celebration_title(goals.GOAL, tr),
         "body": goals.celebration_text(goals.MINIMUM if topic == "secured" else goals.GOAL, status, tr),
         "at": summary["finished_at"], "local": True, "summary": summary,
     } for topic in topics]

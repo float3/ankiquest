@@ -49,8 +49,9 @@ font-weight:800;font-size:13px;color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.
 #ankiquest .aq-pill.aq-rank{background:var(--aq-gold);color:#5c4400}
 #ankiquest .aq-pill.aq-risk{background:var(--aq-red)}
 #ankiquest .aq-pill.aq-met{background:#dff1c9;color:#254a12}
-#ankiquest .aq-pill.aq-syncing,#ankiquest .aq-pill.aq-protected{background:#def0ff;color:#16527b}
-#ankiquest .aq-row-day{display:block;font-size:11px;color:var(--aq-muted);font-weight:600}
+#ankiquest .aq-pill.aq-syncing,#ankiquest .aq-pill.aq-protected,#ankiquest .aq-pill.aq-frozen,#ankiquest .aq-pill.aq-skipped{background:#def0ff;color:#16527b}
+#ankiquest .aq-pill.aq-short{background:#e9d8a6;color:#534619}
+#ankiquest .aq-row-day{display:block;white-space:normal;font-size:11px;color:var(--aq-muted);font-weight:600}
 #ankiquest .aq-pill.aq-ghost{background:var(--aq-soft);color:var(--aq-muted);box-shadow:inset 0 -3px 0 var(--aq-line)}
 #ankiquest .aq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-items:start}
 #ankiquest .aq-card{background:var(--aq-bg);border:2px solid var(--aq-line);border-bottom-width:5px;border-radius:18px;padding:14px 16px}
@@ -246,7 +247,7 @@ def pills(profile, place, translate):
         found += pill(translate("streak at risk today"), "risk")
     label = _day_label(profile, translate)
     if label:
-        state = (profile or {}).get("_day_status", "unknown")
+        state = (profile or {}).get("_day_status") or "unknown"
         found += pill(label, state if state in ("met", "syncing", "protected") else "ghost")
     return "<div class=aq-pills>%s</div>" % found if found else ""
 
@@ -402,7 +403,9 @@ def board_card(today, translate, profile=None):
 def session_line(today, translate):
     if not today.get("session"):
         return ""
-    return "<div class=aq-session>%s</div>" % pill("%s: %s" % (translate("Your last study session"), today["session"]), "ghost")
+    day = today.get("session_day")
+    status = pill(day["label"], day["state"] if day["state"] in ("met", "syncing", "protected", "short", "frozen", "skipped") else "ghost") if day else ""
+    return "<div class=aq-session>%s %s</div>" % (pill("%s: %s" % (translate("Your last study session"), today["session"]), "ghost"), status)
 
 
 def panel(profile, place, unread, translate, today):
