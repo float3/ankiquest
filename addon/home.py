@@ -1,17 +1,21 @@
 """Connects the Today panel, deck list badges, the daily goal and session recaps to Anki."""
 
 import time
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from enum import Enum, auto
 from pathlib import Path
+from html import escape
 
 from aqt import gui_hooks, mw
 
-from . import address, day_verdict, goal_ui, goals, moods, today, today_ui
-from .board import PAGES
+from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today, today_ui
+from .board import _day_label
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
 from .language import tr
+from . import board_data, board_pictures, progress_ui
 
 GOAL_KEY = "ankiquestDayGoal"
 PLAN_KEY = "ankiquestServerGoal"
@@ -26,6 +30,7 @@ BOARD_MS = 5 * 60 * 1000
 BOARD_RETRY_MS = 30_000
 BOARD_RETRY_CAP_MS = BOARD_MS
 CACHE_MS = 2000
+_RECAP_MS = 7 * 86_400_000
 
 local = {
     "addon": None,
@@ -42,6 +47,10 @@ local = {
     "capabilities": None,
     "capabilities_loading": False,
     "moving": False,
+    "progress": None,
+    "browser_buttons": set(),
+    "board_window": None,
+    "pictures": None,
 }
 
 
@@ -81,6 +90,14 @@ class _BoardRetry:
     request: _Request
     at: int
     delay: int
+
+
+@dataclass
+class _BoardRequest(_Request):
+    query: board_data._Query
+
+    def owns(self, api):
+        return super().owns(api) and self.query == board_data._chosen(self.profile, api)
 
 
 class _BoardFetch(Enum):
@@ -335,16 +352,51 @@ def focus_view(day):
     }
 
 
-def board_view(api):
-    if local["board_account"] != account(api):
+def board_view(api, profile=None):
+    query = board_data._chosen(mw.pm.profile, api)
+    if local["board_account"] != account(api) or local["board"] is not None and local["board"].query != query:
         local["board"] = None
     if local["board"] is None:
         refresh_board()
     if local["board"] is None:
         retry = local["board_retry"]
         return {"retry": True} if retry is not None and retry.request.owns(api) else None
-    chosen = today.period(mw.pm.profile.get(PERIOD_KEY))
-    return {"period": chosen, "rows": today.standings(local["board"], chosen, api.name)}
+    board = local["board"]
+    chosen = board.query.period
+    rows = []
+    pictures = _pictures()
+    for place, entry, mine in board_data._top(board, api.name):
+        if mine:
+            entry = dict(entry, day=profile or {"_day_status": "unknown"})
+            if chosen == "day" and entry["day"].get("_day_status") == "unknown":
+                entry["xp"] = None
+        entry["avatar"] = pictures._get(entry.get("user"))
+        rows.append((place, entry, mine))
+    pictures._load([row[1]["user"] for row in rows], addon().redraw)
+    return {"period": chosen, "scope": board.query.scope, "scopes": board.scopes, "rows": rows}
+
+
+def _pictures():
+    pictures = local["pictures"]
+    if pictures is None or not pictures._owns():
+        pictures = local["pictures"] = board_pictures._Pictures(addon())
+    return pictures
+
+
+def _choose_board(query):
+    board_data._remember(mw.pm.profile, addon().client(), query)
+    refresh_board(_BoardFetch.MANUAL)
+    addon().redraw()
+
+
+def _profile_for_display(profile, now=None):
+    moment = now_ms() if now is None else now
+    try:
+        found = day_verdict.verdict(profile, day_verdict.unsent(mw.col, profile), moment)
+    except Exception as error:
+        print("ankiquest day verdict:", error)
+        found = None
+    return day_verdict._for_display(profile, found)
 
 
 def last_session(api):
@@ -352,6 +404,28 @@ def last_session(api):
     if not isinstance(stored, dict) or stored.get("account") != [api.base, api.user]:
         return None
     return today.session_text(stored, tr)
+
+
+def _session_day(summary):
+    """The session's day, judged by the server; never infer a past verdict from its minutes."""
+    profile = addon().state["profile"] or {}
+    starts = (profile.get("today") or {}).get("starts_at")
+    ends, finished = profile.get("day_ends_at"), summary.get("finished_at", 0)
+    if starts is not None and ends and starts <= finished < ends:
+        view = _profile_for_display(profile)
+        state = view["_day_status"]
+        label = _day_label(view, tr)
+        if state == "pending":
+            state = "short" if view["today"].get("reviews", 0) else "none"
+            label = heatmap_ui._state_label(state, tr)
+        return {"state": state, "label": label}
+    cell = next((cell for cell in profile.get("heatmap", []) if cell.get("date") == summary.get("day")), {})
+    state = cell.get("state", "unknown")
+    return {"state": state, "label": heatmap_ui._state_label(state, tr)}
+
+
+def _streak_title(summary):
+    return tr("Streak secured! 🔥") if _session_day(summary)["state"] == "met" else tr("Streak minimum reached — syncing")
 
 
 def today_view(deck_browser, chosen_companion):
@@ -364,17 +438,88 @@ def today_view(deck_browser, chosen_companion):
         print("ankiquest today:", e)
         return None
     api = addon().client()
-    mood = moods.mood([day.due for day in days], focus.due if focus else 0, addon().state["profile"], now_ms())
+    profile = day_verdict._for_display(addon().state["profile"], status.verdict)
+    mood = moods.mood([day.due for day in days], focus.due if focus else 0, profile, now_ms())
+    session = last_session(api)
     return {
+        "profile": profile,
         "art": art_url(chosen_companion, mood),
         "mood": tr(moods.message(chosen_companion, mood)) if chosen_companion != "none" else None,
         "winner": art_url(chosen_companion, moods.WINNER),
         "focus": focus_view(focus),
         "goal": goal_view(status),
-        "board": board_view(api),
-        "session": last_session(api),
+        "board": board_view(api, profile),
+        "session": session,
+        "session_day": _session_day(mw.pm.profile[SESSION_KEY]) if session else None,
         "moments": addon()._moments._count(),
+        "weekly": _weekly_recap(),
     }
+
+
+def _weekly_recap():
+    # A recap stays on Today until the next weekly recap is due.
+    now = now_ms()
+    entries = [entry for entry in addon().state["inbox"]
+               if entry.get("kind") == "reminder_weekly_recap" and not entry.get("sender")
+               and 0 <= now - int(entry.get("created_at", 0)) * 1000 < _RECAP_MS]
+    return max(entries, key=lambda entry: entry["created_at"], default=None)
+
+
+def _toolbar_values():
+    if mw.col is None or not addon().client().configured:
+        return "AnkiQuest", tr("Sign in to AnkiQuest")
+    profile = _profile_for_display(addon().state["profile"]) or {}
+    status = profile.get("_day_status", "unknown")
+    label = tr({"met": "Secured", "syncing": "Syncing", "protected": "Protected", "pending": "Not yet"}.get(status, "Streak unknown"))
+    streak = profile.get("streak")
+    return "AnkiQuest · " + ("%d · " % streak if streak is not None else "") + label, tr("Open Today")
+
+
+def _open_today():
+    if not addon().client().configured:
+        addon().open_account()
+    elif mw.col is not None:
+        mw.moveToState("deckBrowser")
+        for name in ("show", "raise_", "activateWindow"):
+            action = getattr(mw, name, None)
+            if action is not None:
+                action()
+
+
+def _toolbar_links(links, toolbar):
+    label, tip = _toolbar_values()
+    links.append(toolbar.create_link("ankiquest-today", escape(label, quote=True), _open_today,
+                                     tip=escape(tip, quote=True), id="ankiquest-today"))
+
+
+def _refresh_toolbar(toolbar=None):
+    toolbar = toolbar or getattr(mw, "toolbar", None)
+    if toolbar is None and not local["browser_buttons"]:
+        return
+    label, tip = _toolbar_values()
+    for button in local["browser_buttons"]:
+        button.setText(label)
+        button.setToolTip(tip)
+    if toolbar is None:
+        return
+    toolbar.web.eval("(function(){var aq=document.getElementById('ankiquest-today');if(aq){aq.textContent=%s;aq.title=%s;aq.setAttribute('aria-label',%s);}})();" % (
+        json.dumps(label), json.dumps(tip), json.dumps(label),
+    ))
+
+
+def _browser_entry(browser):
+    from aqt.qt import QToolButton, Qt
+
+    grid = getattr(browser.form, "gridLayout", None)
+    if grid is None:
+        return
+    button = QToolButton(browser)
+    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+    button.clicked.connect(_open_today)
+    local["browser_buttons"].add(button)
+    button.destroyed.connect(lambda: local["browser_buttons"].discard(button))
+    grid.addWidget(button, 0, grid.columnCount())
+    _refresh_toolbar()
 
 
 def on_deck_browser(deck_browser, content):
@@ -390,7 +535,7 @@ def on_deck_browser(deck_browser, content):
 
 def refresh_board(mode=_BoardFetch.AUTOMATIC):
     api = addon().client()
-    if not api.configured:
+    if not api.configured or mw.pm.profile is None or mw.col is None:
         return
     # Only the same account and profile share a flight or its retry delay.
     pending = local["board_request"]
@@ -402,7 +547,7 @@ def refresh_board(mode=_BoardFetch.AUTOMATIC):
         if mode is _BoardFetch.AUTOMATIC and time.monotonic() * 1000 < retry.at:
             return
         delay = min(retry.delay * 2, BOARD_RETRY_CAP_MS)
-    request = _Request(account(api), mw.pm.profile)
+    request = _BoardRequest(account(api), mw.pm.profile, board_data._chosen(mw.pm.profile, api))
     local["board_request"] = request
 
     def done(future):
@@ -420,10 +565,11 @@ def refresh_board(mode=_BoardFetch.AUTOMATIC):
                 addon().redraw()
             return
         local["board_retry"] = None
+        board_data._remember(mw.pm.profile, api, board.query)
         local["board"], local["board_account"] = board, request.who
         addon().redraw()
 
-    mw.taskman.run_in_background(api.leaderboard, done)
+    mw.taskman.run_in_background(lambda: board_data._fetch(api, request.query), done)
 
 
 def open_deck(deck_id):
@@ -451,8 +597,13 @@ def on_js_message(handled, message, context):
         refresh_board(_BoardFetch.MANUAL)
         return (True, None)
     if message.startswith("ankiquest:period:"):
-        mw.pm.profile[PERIOD_KEY] = today.period(message.rsplit(":", 1)[1])
-        addon().redraw()
+        _choose_board(replace(board_data._chosen(mw.pm.profile, addon().client()), period=today.period(message.rsplit(":", 1)[1])))
+        return (True, None)
+    if message.startswith("ankiquest:scope:"):
+        scope = message.split(":", 2)[2]
+        board = local["board"]
+        if board is not None and scope in dict(board.scopes):
+            _choose_board(replace(board.query, scope=scope))
         return (True, None)
     return handled
 
@@ -465,6 +616,7 @@ def remaining_cards():
 
 
 def on_state_change(new_state, old_state):
+    _refresh_toolbar()
     if new_state == "review" and old_state != "review":
         api = addon().client()
         local["session"] = {"account": account(api), "started": now_ms()} if api.configured else None
@@ -485,6 +637,7 @@ def finish_session():
         return
     if summary is None:
         return
+    summary["day"] = (date(1970, 1, 1) + timedelta(days=server_day())).isoformat()
     mw.pm.profile[SESSION_KEY] = dict(summary, account=[api.base, api.user])
     local["board"] = None
     refresh_board()
@@ -574,7 +727,7 @@ def celebrate(summary):
     topics = ["secured", "goal"] if earned == goals.BOTH else ["secured" if earned == goals.MINIMUM else "goal"]
     items = [{
         "key": "%s:%d" % (topic, status.day), "topic": topic,
-        "title": goals.celebration_title(goals.MINIMUM if topic == "secured" else goals.GOAL, tr),
+        "title": _streak_title(summary) if topic == "secured" else goals.celebration_title(goals.GOAL, tr),
         "body": goals.celebration_text(goals.MINIMUM if topic == "secured" else goals.GOAL, status, tr),
         "at": summary["finished_at"], "local": True, "summary": summary,
     } for topic in topics]
@@ -603,14 +756,62 @@ def continue_studying():
 
 
 def open_progress():
-    addon().open_page(PAGES["history"])
+    if not addon().client().configured:
+        addon().open_account()
+        return
+    opened = local["progress"]
+    if opened is not None and opened._owns():
+        opened._dialog.raise_()
+        opened._dialog.activateWindow()
+        return
+    _close_progress()
+    opened = local["progress"] = progress_ui._Progress(addon())
+    opened._dialog.finished.connect(lambda _result: local.update(progress=None) if local["progress"] is opened else None)
+    opened._dialog.show()
+
+
+def _close_progress():
+    opened, local["progress"] = local["progress"], None
+    if opened is not None:
+        opened._close()
+
+
+def _open_board():
+    from . import board_ui
+
+    if not addon().client().configured:
+        addon().open_account()
+        return
+    opened = local["board_window"]
+    if opened is not None and opened._owns():
+        opened._dialog.raise_()
+        opened._dialog.activateWindow()
+        return
+    _close_board()
+    opened = local["board_window"] = board_ui._Window(addon(), _pictures(), _choose_board)
+    opened._dialog.finished.connect(lambda _result: local.update(board_window=None) if local["board_window"] is opened else None)
+    opened._dialog.show()
+
+
+def _close_board():
+    opened, local["board_window"] = local["board_window"], None
+    if opened is not None:
+        opened._close()
+
+
+def _clear_boards():
+    _close_board()
+    if local["pictures"] is not None:
+        local["pictures"]._close()
+    local.update(board=None, board_account=None, board_request=None, board_retry=None, pictures=None)
 
 
 def clear_account():
     """Drop the previous account's Home data while keeping the periodic refresh."""
+    _close_progress()
+    _clear_boards()
     local.update(
-        board=None, board_account=None, board_request=None, board_retry=None, goal_request=None,
-        days=None, session=None, capabilities=None, restarted=None,
+        goal_request=None, days=None, session=None, capabilities=None, restarted=None,
     )
     profile = mw.pm.profile
     if profile is not None:
@@ -619,7 +820,9 @@ def clear_account():
 
 
 def on_profile_open():
-    local["board"], local["days"], local["session"] = None, None, None
+    _close_progress()
+    _clear_boards()
+    local["days"], local["session"] = None, None
     if local["timer"] is None:
         try:
             local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, repeat=True, parent=mw)
@@ -638,3 +841,9 @@ def install(module):
     gui_hooks.state_did_change.append(on_state_change)
     gui_hooks.profile_did_open.append(on_profile_open)
     gui_hooks.sync_did_finish.append(refresh_board)
+    for name, callback in (("top_toolbar_did_init_links", _toolbar_links), ("top_toolbar_did_redraw", _refresh_toolbar),
+                           ("profile_will_close", _close_progress), ("profile_will_close", _clear_boards),
+                           ("browser_will_show", _browser_entry)):
+        hook = getattr(gui_hooks, name, None)
+        if hook is not None:
+            hook.append(callback)

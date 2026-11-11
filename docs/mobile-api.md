@@ -184,6 +184,8 @@ the switch is `global_leaderboard` in the player's settings, beside `nudges` and
 
 `GET /api/week` answers `{ "ends_at", "starts_at", "timezone" }`: when the competition week, and so the weekly board, began and resets (ms).
 
+The desktop Today board and native leaderboard request the selected scope and period from the server. They preserve its rank gaps after hiding, show the top five plus the player's own row on Today, and show all returned rows in the native window. Scope and period are kept per account and follow a verified server-address move. Older servers without `global_leaderboard` offer only Friends and joined groups. Avatars load in the background for visible rows, with initials while waiting; their authenticated PNG reads stay in memory and cannot redirect credentials. On servers with `global_leaderboard_hide`, a stranger's **Hide for me** action is private and reversible in **Hidden players**. Records use the same selected scope. See the [Today board](screenshots/desktop-boards-light.png) and [native window](screenshots/desktop-board-window.png).
+
 `GET /api/profile/{user}` answers the player's level, XP, `periods`, `records`, streak and `streak_state`, streak freezes (`stored_freezes`, `freezes_enabled`, `freeze_earned_today`), `today`, `lifetime`, daily `quests`, `achievements`, `heatmap` and `conquests`. Only the owner's own profile has `goal`. `closing_week: { "xp", "ends_at" }` is there only while the player's current Anki day began before the weekly reset, so it still counts toward the closing week although `week_xp` already shows the new one: `xp` is what counts toward the closing week, today's included, and `ends_at` (ms) is when it closes for them, the end of their current day. West of `week_timezone` this lasts up to the player's own rollover, about 9 hours in California for a reset at Monday 00:00 UTC; clients show it as "last week still counting" and drop it once `ends_at` has passed. A player the viewer may not see is `404`, the same as an unknown one. The owner's recent wins are `GET /api/wins/{user}` (see [sharing.md](sharing.md)).
 
 ### day verdicts
@@ -208,6 +210,8 @@ A client may judge one thing itself: today, with reviews it holds but has not up
 - the streak is `streak` plus one when today becomes met and `streak_state` was not `studied`; otherwise `streak`, and while not met the state stays `streak_state`. An unsent review from an earlier day can change that day's verdict, so the streak and, while today is not met, its state are then unknown until the upload lands.
 
 `tests/fixtures/day_verdicts.json` holds cases worked out by the server (`src/day_verdicts.rs`); clients test their copy of the rule against it.
+
+The desktop Today panel uses this same verdict for its streak pill, companion mood, warning and own leaderboard row. A locally met day says “Syncing” until the server confirms it; an expired day hides the old streak and daily XP. Session cards and the review heatmap name the server's historical states explicitly, including the difference between a frozen and a skipped day. A session without a known server day stays unknown instead of treating its review count as proof that the minimum was met.
 
 ## records and study history
 
