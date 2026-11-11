@@ -1,10 +1,13 @@
-needs Anki 23.10 or newer (Qt 6). everything here is also under **Tools → AnkiQuest settings…**, which is easier to use.
+AnkiQuest needs Anki 23.10 or newer with Qt 6.
 
-new here? **Tools → AnkiQuest: sign in or create account…** (or the link under the deck list) signs in with a username and password, or creates an account, and fills in the three settings below. the password is not stored; the add-on keeps only a token for this computer.
+An unconnected profile offers sign-in when it opens. **Not now** dismisses the offer for that profile. You can sign in later from **Tools → AnkiQuest: sign in or create account…** or the link under the deck list.
 
-- `url`: the ankiquest server, e.g. `https://anki.example.com`. When the server names another `https` address as its main one and your token works there, the add-on switches to it by itself.
-- `user`: your player name
-- `token`: your upload token
+The sign-in dialog starts with the main AnkiQuest server. If you self-host, enter your server address. Use HTTPS for a server outside your local network. After sign-in the add-on keeps a token for this computer.
+
+Use **Switch account…** or **Sign out** in **Tools → AnkiQuest settings…**. Signing out clears the saved connection and account data shown in the add-on. Your upload checkpoint stays with that server and account in this Anki profile, so signing back in continues with new reviews.
+
+Open **Tools → AnkiQuest settings…** to change your preferences. **Manage account on the website…** opens the account settings for your server, including devices, sign-in methods and your data. **Manual connection** contains the server, player and token fields and the connection check.
+
 - `notify_rank`: say something when your place on the leaderboard changes
 - `streak_hours`: warn you this many hours before your streak ends (0 turns it off)
 - `update_channel`: `stable` for `addon-<n>` releases, `nightly` for the build of every change (untested)
@@ -36,3 +39,5 @@ to give friends a copy of a deck, open **Tools → AnkiQuest: send a deck to fri
 the settings window also switches streak protection on or off, turns all deck completion alerts you receive on or off, unsubscribes you from specific people (people you muted before show as unsubscribed), and shows when reviews were last uploaded. these choices live on the server and apply across your devices.
 
 **Ctrl+Shift+K** opens the ankiquest website window. with a server and player but no token, reviews are only previewed: you still see the XP feedback if the server shows that player publicly, and nothing is stored.
+
+For a manual connection, set `url` to your server address, `user` to your player name and `token` to your upload token. When the server advertises a different main HTTPS address, the add-on switches after verifying your token there.
