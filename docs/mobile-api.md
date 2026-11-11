@@ -73,7 +73,7 @@ all cookie-authenticated mutations require `X-Ankiquest-CSRF: 1`. when origin is
 
 ## durable activity
 
-`GET /api/activity/{user}` accepts optional `days=90` (default) or `days=30`, `limit=100` (default, 1–200), and `before=<positive notification ID>`. it returns newest IDs first:
+`GET /api/activity/{user}` accepts optional `days=90` (default) or `days=30`, `limit=100` (default, 1–200), and `before=<positive notification ID>`. Filter with `category=needs_action|messages|challenges|deck_completions|study_updates` and/or `unread_only=true`; omit both for all activity. An older server that rejects filters with `400` can be retried unfiltered. it returns newest IDs first:
 
 ```json
 {
@@ -111,7 +111,9 @@ Own moments wait until studying stops and survive an account switch without repl
 
 counts cover all items within the selected window, independently of pagination, push state, and any Android delivery cursor. `unread_count` counts rows with no read timestamp. `action_count` counts still-pending challenge invitations whose challenge is neither cancelled nor past its deadline. reading an invitation does not accept it. a 30-day view counts its own 30-day window; use the default 90-day view for the full retained inbox. follow `next_before` until null to load more.
 
-`POST /api/activity/{user}/read` accepts `{ "ids": [42, 43] }` and returns `204`. at most 200 positive IDs per request; clients mark larger selections in batches. duplicate IDs/retries are safe and preserve the first read timestamp. unknown, expired, push-only, and other members' IDs have no effect. the caller must own `{user}`. read state survives restart and changes neither push acknowledgement nor legacy delivery state.
+`attention` contains up to three still-pending invitations independently of the displayed page, so the all-activity view can show them first. `latest_id` is the newest retained inbox ID in the window, independent of filters and pagination; use it as the cutoff for marking everything currently known read. Neither field is a cursor for announcing historical reminders.
+
+`POST /api/activity/{user}/read` accepts `{ "ids": [42, 43] }` and returns `204`. at most 200 positive IDs per request; clients mark larger selections in batches. For "Mark all read", send `{ "through": 43 }` with the latest ID the server returned: this marks retained inbox rows up to that ID, including older pages, and leaves later arrivals unread. duplicate IDs/retries are safe and preserve the first read timestamp. unknown, expired, push-only, and other members' IDs have no effect. the caller must own `{user}`. read state survives restart and changes neither push acknowledgement nor legacy delivery state.
 
 the server physically retains notifications for 90 days; history already deleted by an older server cannot be reconstructed. the legacy `GET /api/notifications/{user}` remains an oldest-first array of up to 500 notifications from the last seven days, with its existing reminder delivery checks. it gains the four fields `read_at`, `challenge_id`, `route`, and `action_required`; old clients can ignore them. push delivery eligibility also stays seven days. Push-only game events remain excluded from both personal inbox endpoints. new clients can fall back to the legacy endpoint after an Activity `404`, with no inferred unread badge.
 

@@ -1,0 +1,59 @@
+{
+  "action_count": 1,
+  "attention": [
+    {
+      "action_required": true,
+      "body": "friend invited you to Fifty reviews each.",
+      "challenge_id": 4,
+      "created_at": 1793179800,
+      "day": 20754,
+      "id": 15,
+      "kind": "challenge_invite",
+      "read_at": null,
+      "replied": false,
+      "route": "/community#challenge-4",
+      "sender": "friend",
+      "title": "Challenge invitation"
+    }
+  ],
+  "items": [
+    {
+      "action_required": false,
+      "body": "cerro joined Three study days together.",
+      "challenge_id": 1,
+      "created_at": 1793179800,
+      "day": 20754,
+      "id": 12,
+      "kind": "challenge_accepted",
+      "read_at": null,
+      "replied": false,
+      "route": "/community#challenge-1",
+      "sender": "cerro",
+      "title": "Invitation accepted"
+    },
+    {
+      "action_required": false,
+      "body": "You reached level 3 with 400 XP.",
+      "challenge_id": null,
+      "created_at": 1793183400,
+      "day": 20754,
+      "id": 9,
+      "kind": "celebration",
+      "moment": "level:3",
+      "read_at": null,
+      "replied": false,
+      "route": null,
+      "sender": "",
+      "share_body": "I reached level 3 with 400 XP.",
+      "share_title": "Level 3",
+      "title": "Level 3",
+      "topic": "level",
+      "win": 3
+    }
+  ],
+  "latest_id": 17,
+  "next_before": 9,
+  "retention_days": 90,
+  "unread_count": 7,
+  "window_days": 90
+}
