@@ -4,8 +4,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from addon_loader import load_module
+import test_deck_completion as fixture
 
 updates = load_module("ankiquest_updates", "updates.py")
 
@@ -62,6 +64,24 @@ class UpdateTests(unittest.TestCase):
                 updates.download("u", target, lambda url, timeout=20: b"<html>")
             updates.download("u", target, lambda url, timeout=20: b"PK\x03\x04data")
             self.assertEqual(target.read_bytes()[:2], b"PK")
+
+
+class UpdateOwnership(unittest.TestCase):
+    setUp = fixture.RefreshTests.setUp
+    run_task = fixture.RefreshTests.run_task
+    read_rows = fixture.RefreshTests.read_rows
+    write_config = fixture.RefreshTests.write_config
+
+    def test_ankiweb_installs_do_not_request_a_github_update(self):
+        with tempfile.TemporaryDirectory() as folder:
+            installed = Path(folder) / "123456"
+            installed.mkdir()
+            (installed / "version.json").write_text(json.dumps({"release": 11, "nightly": 0}), "utf-8")
+            self.addon.ADDON_DIR = installed
+            self.addon.updates.available = Mock(return_value=None)
+            self.addon.check_updates(quiet=False)
+            self.addon.updates.available.assert_not_called()
+            self.assertIn("AnkiWeb", self.addon.tooltip.call_args.args[0])
 
 
 if __name__ == "__main__":

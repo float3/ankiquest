@@ -2,6 +2,7 @@
 
 import json
 import re
+from enum import Enum, auto
 from pathlib import Path
 
 REPO = "float3/ankiquest"
@@ -10,6 +11,19 @@ NIGHTLY_URL = "https://github.com/%s/releases/download/addon-nightly/" % REPO
 PACKAGE = "ankiquest.ankiaddon"
 TAG = re.compile(r"addon-([1-9][0-9]*)")
 DAY_MS = 86_400_000
+
+
+class _Source(Enum):
+    ANKIWEB = auto()
+    GITHUB = auto()
+    LOCAL = auto()
+
+
+def _source(addon_dir):
+    # Anki's AddonMeta.ankiweb_id() uses the numeric installation directory.
+    if re.fullmatch(r"\d+", Path(addon_dir).name):
+        return _Source.ANKIWEB
+    return _Source.GITHUB if installed(addon_dir) is not None else _Source.LOCAL
 
 
 def fetch(url, timeout=20):

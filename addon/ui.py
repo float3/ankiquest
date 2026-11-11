@@ -1,6 +1,7 @@
 """The dialogs behind the Tools menu: settings and deck sharing."""
 
 import html
+from pathlib import Path
 
 from aqt.qt import (
     QCheckBox,
@@ -27,7 +28,7 @@ from .decks import label, ordered
 from .language import tr
 from .share import face_path
 from .today_ui import settings_section
-from . import reminders_ui
+from . import reminders_ui, updates
 
 
 def _scroller(widgets):
@@ -267,7 +268,13 @@ def settings_dialog(
     for value, title in (("stable", tr("Stable releases")), ("nightly", tr("Nightly builds (untested)"))):
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
-    groups["app"].addWidget(_row(QLabel(tr("Update channel")), channel))
+    installed = updates.installed(Path(__file__).parent)
+    version = updates.label(installed) if installed is not None else tr("Local copy")
+    groups["app"].addWidget(QLabel(tr("Version: %s") % version))
+    if updates._source(Path(__file__).parent) is updates._Source.ANKIWEB:
+        groups["app"].addWidget(QLabel(tr("Updates are managed by AnkiWeb.")))
+    else:
+        groups["app"].addWidget(_row(QLabel(tr("Update channel")), channel))
     today_values = settings_section(groups["app"], config, notify_layout=groups["notify"])
     if on_privacy is not None:
         privacy = QPushButton(tr("Privacy notice"))

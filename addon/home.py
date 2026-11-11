@@ -10,7 +10,7 @@ from html import escape
 
 from aqt import gui_hooks, mw
 
-from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today, today_ui
+from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today
 from .board import _day_label
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
@@ -854,10 +854,7 @@ def on_profile_open():
     _close_friends()
     local["days"], local["session"] = None, None
     if local["timer"] is None:
-        try:
-            local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, repeat=True, parent=mw)
-        except TypeError:
-            local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, True)
+        local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, repeat=True, parent=mw)
     refresh_board()
     sync_goal(prompt=True)
     load_capabilities(addon().client())

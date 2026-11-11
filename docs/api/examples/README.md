@@ -60,4 +60,4 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `global_leaderboard_on.json` | `POST /api/decks/{user}` `{"decks": [], "global_leaderboard": true}` |
 | `leaderboard_global.json` | `GET /api/leaderboard?scope=global&period=day`: the viewer's own row and a stranger with a private profile who turned it on |
 
-The Android repository's CI fetches these files and parses them with the app's real client code, so a server change that would break the app shows up there before it is deployed.
+The Android repository's CI fetches these files and parses them with the app's real client code. The desktop CI jobs exercise its client and consumers against the same recordings in `tests/test_desktop_contract.py` and the activity, board and social tests. A server response change that would break a client can therefore fail CI before deployment.

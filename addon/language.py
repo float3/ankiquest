@@ -1791,3 +1791,25 @@ PORTUGUESE.update({
     "Equal start and end times turn quiet hours off. Quiet hours also hold desktop messages.": "Horas de início e fim iguais desativam o silêncio. Durante o silêncio, as mensagens no computador também ficam à espera.",
     "Show system notifications when Anki is in the background": "Mostrar notificações do sistema quando o Anki está em segundo plano",
 })
+
+# Packaged versions and AnkiWeb-owned updates.
+SPANISH.update({
+    "Local copy": "Copia local", "Version: %s": "Versión: %s",
+    "Updates are managed by AnkiWeb.": "AnkiWeb gestiona las actualizaciones.",
+    "This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates.": "Esta instalación se actualiza desde AnkiWeb. Usa Herramientas → Complementos → Comprobar actualizaciones.",
+})
+GERMAN.update({
+    "Local copy": "Lokale Kopie", "Version: %s": "Version: %s",
+    "Updates are managed by AnkiWeb.": "AnkiWeb verwaltet die Updates.",
+    "This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates.": "Diese Installation wird über AnkiWeb aktualisiert. Nutze Extras → Erweiterungen → Auf Aktualisierungen prüfen.",
+})
+FRENCH.update({
+    "Local copy": "Copie locale", "Version: %s": "Version : %s",
+    "Updates are managed by AnkiWeb.": "AnkiWeb gère les mises à jour.",
+    "This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates.": "Cette installation est mise à jour via AnkiWeb. Utilise Outils → Greffons → Rechercher des mises à jour.",
+})
+PORTUGUESE.update({
+    "Local copy": "Cópia local", "Version: %s": "Versão: %s",
+    "Updates are managed by AnkiWeb.": "O AnkiWeb gere as atualizações.",
+    "This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates.": "Esta instalação é atualizada pelo AnkiWeb. Usa Ferramentas → Extras → Procurar atualizações.",
+})
