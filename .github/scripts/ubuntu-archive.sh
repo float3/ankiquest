@@ -7,7 +7,8 @@ source /etc/os-release
 for mirror in https://archive.ubuntu.com/ubuntu https://mirrors.kernel.org/ubuntu; do
     if curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
         "$mirror/dists/$VERSION_CODENAME/InRelease" --output "$RUNNER_TEMP/ubuntu-inrelease"; then
-        sudo sed -i "s|mirror+file:/etc/apt/apt-mirrors.txt|$mirror|g" /etc/apt/sources.list.d/ubuntu.sources
+        # The runner's cloud-init template also references this list.
+        printf '%s/\n' "$mirror" | sudo tee /etc/apt/apt-mirrors.txt
         sudo apt-get update -qq -o APT::Update::Error-Mode=any -o Acquire::Retries=2 -o Acquire::https::Timeout=30
         exit 0
     fi
