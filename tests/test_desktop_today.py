@@ -11,13 +11,13 @@ from http import HTTPStatus
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
-from addon_loader import ADDON, load_module
+from addon_loader import ADDON, load_in_package, load_module
 
-goals = load_module("ankiquest_goals", "goals.py")
+goals = load_in_package("ankiquest_today_test", "goals")
 moods = load_module("ankiquest_moods", "moods.py")
-today = load_module("ankiquest_today", "today.py")
-board = load_module("ankiquest_today_board", "board.py")
-language = load_module("ankiquest_today_language", "language.py")
+today = load_in_package("ankiquest_today_test", "today")
+board = load_in_package("ankiquest_today_test", "board")
+language = load_in_package("ankiquest_today_test", "language")
 progress = load_module("ankiquest_today_progress", "deck_completion.py")
 
 

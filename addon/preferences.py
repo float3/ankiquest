@@ -1,9 +1,7 @@
 """Account preferences the server keeps: streak protection and the deck alerts I receive."""
 
 import html
-from datetime import datetime
-
-from .language import tr
+from .language import _date_time, tr
 
 LAST_UPLOAD_KEY = "ankiquestLastUploadAt"
 
@@ -61,7 +59,7 @@ def freeze_body(enabled):
 
 
 def last_upload_text(at_ms, translate=tr):
-    when = datetime.fromtimestamp(at_ms / 1000).strftime("%Y-%m-%d %H:%M") if at_ms else translate("never")
+    when = _date_time(at_ms / 1000) if at_ms else translate("never")
     return translate("Last upload: %s") % when
 
 

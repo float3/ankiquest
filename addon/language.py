@@ -422,9 +422,39 @@ def language_code(language):
 
 def tr(source, language=None):
     if language is None:
-        from anki.lang import current_lang
-        language = current_lang
+        language = _current()
     return TABLES.get(language_code(language), {}).get(source, source)
+
+
+def _current():
+    from anki.lang import current_lang
+    return current_lang or "en"
+
+
+def _plural(one, other, count, translate=tr):
+    # Nonnegative integer counts: French uses "one" for 0 and 1. The pt table is pt-PT.
+    singular = count in (0, 1) if language_code(_current()) == "fr" else count == 1
+    return translate(one if singular else other)
+
+
+def _locale():
+    from aqt.qt import QLocale
+    return QLocale(_current().replace("-", "_"))
+
+
+def _date_time(seconds):
+    from aqt.qt import QDateTime, QLocale
+    return _locale().toString(QDateTime.fromSecsSinceEpoch(int(seconds)), QLocale.FormatType.ShortFormat)
+
+
+def _clock(ms):
+    from aqt.qt import QDateTime, QLocale
+    return _locale().toString(QDateTime.fromMSecsSinceEpoch(int(ms)).time(), QLocale.FormatType.ShortFormat)
+
+
+def _hour(hour):
+    from aqt.qt import QLocale, QTime
+    return _locale().toString(QTime(hour, 0), QLocale.FormatType.ShortFormat)
 
 
 SPANISH.update({
@@ -1812,4 +1842,44 @@ PORTUGUESE.update({
     "Local copy": "Cópia local", "Version: %s": "Versão: %s",
     "Updates are managed by AnkiWeb.": "O AnkiWeb gere as atualizações.",
     "This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates.": "Esta instalação é atualizada pelo AnkiWeb. Usa Ferramentas → Extras → Procurar atualizações.",
+})
+
+# Shared settings, moments and sharing wording; see tests/fixtures/desktop-wording.json.
+SPANISH.update({
+    "Notify me about": "Avísame de",
+    "App and privacy": "App y privacidad",
+    "%s: %s\nStudy with me on AnkiQuest: %s": "%s: %s\nEstudiá conmigo en AnkiQuest: %s",
+    "Nobody new got it: your friends already have it, or you have no friends in AnkiQuest yet.": "Nadie nuevo lo recibió: tus amigos ya lo tienen, o todavía no tenés amigos en AnkiQuest.",
+})
+GERMAN.update({
+    "Aki is here to help. One card, one small step.": "Aki hilft dir. Eine Karte, ein kleiner Schritt.",
+    "Your cards are done for now. Nice work!": "Fürs Erste sind deine Karten geschafft. Gut gemacht!",
+    "You showed up today. That is progress worth keeping.": "Du hast heute gelernt. Diesen Fortschritt lohnt es sich zu bewahren.",
+    "Your streak is protected by a freeze. A fresh start is waiting.": "Deine Lernserie ist geschützt. Ein neuer Anfang wartet auf dich.",
+    "Show me on the global leaderboard": "Mich in der globalen Rangliste zeigen",
+})
+FRENCH.update({
+    "View progress": "Voir la progression",
+    "Don’t show this again": "Ne plus afficher ceci",
+    "Your cards are done for now. Nice work!": "Tu as terminé tes cartes pour le moment. Bravo !",
+    "You showed up today. That is progress worth keeping.": "Tu as étudié aujourd’hui. Ce progrès mérite d’être préservé.",
+    "Your streak is protected by a freeze. A fresh start is waiting.": "Ta série est protégée par un gel. Un nouveau départ t’attend.",
+    "Notify me about": "Me prévenir pour",
+    "App and privacy": "Appli et confidentialité",
+    "Quiet hours": "Heures calmes",
+    "Show me on the global leaderboard": "M’afficher au classement mondial",
+    "%s: %s\nStudy with me on AnkiQuest: %s": "%s : %s\nRévise avec moi sur AnkiQuest : %s",
+    "%s: %s\nI study with AnkiQuest.": "%s : %s\nJe révise avec AnkiQuest.",
+    "This win belongs to an AnkiQuest account that is no longer signed in.": "Cette victoire appartient à un compte AnkiQuest qui n’est plus connecté.",
+})
+PORTUGUESE.update({
+    "Don’t show this again": "Não voltar a mostrar",
+    "Aki is here to help. One card, one small step.": "Aki está aqui para te ajudar. Um cartão, um pequeno passo.",
+    "A small step starts with one card.": "Um pequeno passo começa com um cartão.",
+    "Your cards are done for now. Nice work!": "Já terminaste os cartões por agora. Bom trabalho!",
+    "You showed up today. That is progress worth keeping.": "Estudaste hoje. Vale a pena preservar esse progresso.",
+    "Your streak is protected by a freeze. A fresh start is waiting.": "Uma proteção salvou a tua sequência. Um novo começo espera por ti.",
+    "Notify me about": "Avisar-me sobre",
+    "App and privacy": "App e privacidade",
+    "Nobody new got it: your friends already have it, or you have no friends in AnkiQuest yet.": "Ninguém novo recebeu: os teus amigos já têm, ou ainda não tens amigos no AnkiQuest.",
 })
