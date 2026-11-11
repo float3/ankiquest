@@ -77,16 +77,56 @@ jobs:
       - name: Test
         run: nix develop --command cargo test --workspace
 
-      - name: Test desktop deck completion
+      - name: Lint
+        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+
+  desktop:
+    name: Desktop (Anki ${{ matrix.anki }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - anki: '23.10'
+            python: '3.9'
+          - anki: '26.9.4'
+            python: '3.12'
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: tests/requirements-anki-${{ matrix.anki }}.txt
+      - name: Install Anki and Qt
         run: |
           bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
-          python3 -m venv "$RUNNER_TEMP/aqt"
-          "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqt
-          "$RUNNER_TEMP/aqt/bin/python" -m unittest discover -s tests -v
+          python -m pip install -r tests/requirements-anki-${{ matrix.anki }}.txt
+      - name: Lint the add-on
+        run: python -m pyflakes addon
+      - name: Test the add-on and its real Anki APIs
+        run: python -m unittest discover -s tests -v
 
-      - name: Lint
-        run: nix develop --command cargo clippy --workspace --all-targets -- -D warnings
+  addon-package:
+    name: Add-on archive
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Test and build the archive
+        run: |
+          python3 -m unittest discover -s tests -p test_addon_package.py -v
+          python3 .github/scripts/package-addon.py --output ankiquest.ankiaddon
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ankiquest-addon
+          path: ankiquest.ankiaddon
+          if-no-files-found: error
 
   package:
     runs-on: ubuntu-latest

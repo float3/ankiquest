@@ -19,6 +19,7 @@ does not replace AnkiWeb or an Anki sync server.
 - [Server configuration and administration](docs/server.md)
 - [Client API and compatibility](docs/mobile-api.md)
 - [Development and tests](docs/server.md#development)
+- [Desktop compatibility, tests and packages](docs/desktop.md)
 
 ## license
 
