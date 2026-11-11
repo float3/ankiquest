@@ -127,11 +127,17 @@ class _Failed:
     message: str
 
 
+@dataclass(frozen=True)
+class _PollFailure:
+    retry_at: float
+
+
 state = {
     # Idle, uploading, waiting for a retry, or holding the last failure.
     "upload": None,
     # A poll belongs to one open profile and credential.
     "polling": None,
+    "poll_failure": None,
     "reauth": None,
     "timer": None,
     "place": None,
@@ -478,8 +484,11 @@ def poll(quiet=False):
                 redraw()
                 return
             print("ankiquest poll:", e)
+            state["poll_failure"] = _PollFailure(time.monotonic() + RETRY_START_MS / 1000)
+            redraw()
             return
         state["reauth"] = None
+        state["poll_failure"] = None
         order = rank.get("order") or []
         state["place"] = order.index(api.name) + 1 if api.name in order else None
         state["profile"], state["inbox"] = profile, inbox
@@ -503,7 +512,7 @@ def announce(rank, profile, inbox, quiet):
             if (item := moments._notice(entry)) is not None]
     mw.pm.profile[INBOX_KEY] = cursor
     warning = notify.streak_warning(
-        profile,
+        home._profile_for_display(profile, now_ms) or {},
         int(settings.get("streak_hours", 2) or 0),
         now_ms,
         mw.pm.profile.get(STREAK_DAY_KEY),
@@ -535,6 +544,7 @@ def failed(template, error):
 
 
 def redraw():
+    home._refresh_toolbar()
     if mw.state == "deckBrowser":
         mw.deckBrowser.refresh()
 
@@ -547,21 +557,31 @@ def on_deck_browser(deck_browser, content):
     if state["reauth"] == [api.base, api.user, api.token]:
         content.stats += board.welcome(tr, text=tr("Sign in to AnkiQuest again"))
         return
-    if state["profile"] is None and not state["polling"]:
+    failure = state["poll_failure"]
+    if state["profile"] is None and not state["polling"] and (failure is None or time.monotonic() >= failure.retry_at):
         poll(quiet=True)
     waiting = sum(1 for entry in state["inbox"] if answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
-    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))
+    today = home.today_view(deck_browser, companion)
+    profile = today["profile"] if today is not None else home._profile_for_display(state["profile"])
+    content.stats += board.html(profile, state["place"], waiting, tr, mascot, today)
+    content.stats += board._connection_note(state["profile"], state["poll_failure"], tr)
     content.stats += '<p style="text-align:center;font-size:12px">%s</p>' % html.escape(_upload_status(api))
 
 
 def on_js_message(handled, message, context):
+    if message == "ankiquest:retry-connection" and context is mw.deckBrowser:
+        poll(quiet=True)
+        return (True, None)
     if message == "ankiquest:account":
         open_account()
         return (True, None)
     if message.startswith("ankiquest:web:"):
         page = message.split(":", 2)[2]
+        if page == "history":
+            home.open_progress()
+            return (True, None)
         if page in board.PAGES:
             open_page(board.PAGES[page])
         return (True, None)
@@ -667,7 +687,7 @@ def _save_account_config(values):
         for key in (ORDER_KEY, ORDER_WEEK_KEY, INBOX_KEY, STREAK_DAY_KEY, copies_ui.SEEN_KEY):
             profile.pop(key, None)
     state.update(
-        upload=None, polling=None, reauth=None, profile=None, place=None, inbox=[],
+        upload=None, polling=None, poll_failure=None, reauth=None, profile=None, place=None, inbox=[],
         companion="aki", companion_account=None,
     )
     _moments._clear()
@@ -700,7 +720,7 @@ def _offer_sign_in():
 def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
-        extra=settings_sections, on_goal=home.open_goal_dialog, on_manage=_manage_account,
+        extra=settings_sections, on_manage=_manage_account,
         on_decks=open_deck_notifications, on_privacy=_open_privacy,
     )
     if values is None:
@@ -852,6 +872,7 @@ def on_operation(changes, handler):
 
 
 def on_profile_open():
+    state["poll_failure"] = None
     if state["timer"] is None:
         try:
             state["timer"] = mw.progress.timer(POLL_MS, poll, repeat=True, parent=mw)
