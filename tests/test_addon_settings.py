@@ -45,6 +45,10 @@ class SettingsMenu(unittest.TestCase):
             self.addon.settings_sections(Mock(), {"sharing": Mock()})
             return section.call_args.kwargs["on_saved"]
 
+    def test_friends_menu_opens_the_native_window(self):
+        connections = self.addon.QAction.return_value.triggered.connect.call_args_list
+        self.assertIn(self.addon.home._open_friends, [call.args[0] for call in connections])
+
     def test_saved_choices_refresh_after_invalidating_an_older_poll(self):
         saved = self.saved_callback()
         self.addon.state["polling"] = object()

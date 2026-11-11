@@ -192,9 +192,11 @@ def _row(entry, context):
         buttons.addWidget(share_button)
     if "cheer" in found:
         buttons.addWidget(_cheer_button(entry, context, status))
-    website = QPushButton(tr("Open on the website"))
+    website = QPushButton(tr("View friend goal") if inbox.challenge_target(entry) is not None else tr("Open on the website"))
 
     def opened():
+        if not context.owned(status):
+            return
         context.open_path(inbox.web_path(entry))
         context.mark_read(entry, refreshed)
 
