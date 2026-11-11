@@ -87,7 +87,8 @@ class Poll(unittest.TestCase):
     def test_an_already_seen_own_moment_is_not_replayed_but_a_friends_cheer_is(self):
         self.with_board()
         self.api.deck_settings = Mock(return_value={"celebrations": True})
-        self.addon.poll(quiet=True)
+        self.addon.poll()
+        self.addon.tooltip.reset_mock()
         profile, account = self.mw.pm.profile, (self.api.base, self.api.user)
         self.addon.moments._acknowledge(profile, account, ["level:3"])
         self.inbox.extend([
