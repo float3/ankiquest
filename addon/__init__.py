@@ -15,9 +15,9 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QKeySequence, QMenu, QTimer
 from aqt.utils import openLink, tooltip
 
-from . import activity, board, heatmap_ui, home, notify, ui, updates, web
+from . import board, delivery, heatmap_ui, home, notify, ui, updates, web
 from . import inbox_ui, moments, moments_ui, share, share_ui, sharing
-from .inbox import CHALLENGE_ROUTE, answerable, shareable
+from .inbox import CHALLENGE_ROUTE
 from .language import tr
 from .client import (
     COUNT_SQL,
@@ -446,7 +446,8 @@ def refresh_shared_decks():
 
 def poll(quiet=False):
     """Keeps the deck list board, the inbox and the streak warning up to date."""
-    copies_ui.poll(quiet)
+    # Queue offers first; the activity poll refreshes quiet hours before delivery.
+    copies_ui.poll(quiet=True)
     api = client()
     account = [api.base, api.user, api.token]
     prefs = mw.pm.profile
@@ -460,14 +461,18 @@ def poll(quiet=False):
 
     previous = prefs.get(ORDER_KEY) or []
     week = prefs.get(ORDER_WEEK_KEY)
+    announcements = delivery._record(prefs, api)
+    cursor = announcements["cursor"]
 
     def work():
-        rank, profile, notifications = api.rank(previous, week), api.profile(), activity._load(api)
+        rank, profile = api.rank(previous, week), api.profile()
+        notifications, arrivals = delivery._fetch(api, cursor)
+        reminders = preferences._load_reminders(api)
         try:
             companion = api.companion()
         except Exception:
             companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
-        return rank, profile, notifications, companion
+        return rank, profile, notifications, companion, arrivals, reminders
 
     def done(future):
         if state["polling"] is not request:
@@ -477,7 +482,7 @@ def poll(quiet=False):
         if mw.pm.profile is not prefs or [current.base, current.user, current.token] != account:
             return
         try:
-            rank, profile, inbox, companion = future.result()
+            rank, profile, inbox, companion, arrivals, reminders = future.result()
         except Exception as e:
             # Keep a direct sign-in link on the deck list for a revoked credential.
             if isinstance(e, ServerError) and e.status == HTTPStatus.UNAUTHORIZED:
@@ -494,7 +499,9 @@ def poll(quiet=False):
         state["place"] = order.index(api.name) + 1 if api.name in order else None
         state["profile"], state["activity"], state["inbox"] = profile, inbox, inbox.items
         state["companion"], state["companion_account"] = companion, account
-        announce(rank, profile, inbox.items, quiet)
+        if reminders is not None:
+            announcements["reminders"] = reminders
+        announce(rank, profile, arrivals, quiet)
         redraw()
 
     mw.taskman.run_in_background(work, done)
@@ -507,31 +514,14 @@ def announce(rank, profile, inbox, quiet):
     mw.pm.profile[ORDER_KEY] = rank.get("order") or []
     mw.pm.profile[ORDER_WEEK_KEY] = rank.get("week")
     previous_cursor = mw.pm.profile.get(INBOX_KEY, 0)
-    fresh, cursor = notify.fresh_messages(inbox, previous_cursor, now_ms // 1000)
+    _, cursor = notify.fresh_messages(inbox, previous_cursor, now_ms // 1000)
     wins = [item for entry in inbox if entry["id"] > previous_cursor
             and entry.get("created_at", 0) >= now_ms // 1000 - notify.FRESH_SECONDS
             if (item := moments._notice(entry)) is not None]
+    _delivery._receive(inbox, delivery._Mode.QUIET if quiet else delivery._Mode.ANNOUNCE)
     mw.pm.profile[INBOX_KEY] = cursor
-    warning = notify.streak_warning(
-        home._profile_for_display(profile, now_ms) or {},
-        int(settings.get("streak_hours", 2) or 0),
-        now_ms,
-        mw.pm.profile.get(STREAK_DAY_KEY),
-    )
-    if warning:
-        mw.pm.profile[STREAK_DAY_KEY] = warning[1]
     if quiet:
         return
-
-    if warning:
-        tooltip(warning[0], period=5000)
-    for entry in fresh:
-        if shareable(entry):
-            continue
-        text = notify.notice(entry)
-        if answerable(entry):
-            text += "<br><i>%s</i>" % html.escape(tr("Tools → AnkiQuest → Inbox to reply"))
-        tooltip(text, period=6000)
     if settings.get("notify_rank", True) and rank.get("change"):
         place = share.climbed_to(previous, rank.get("order"), client().name)
         if place:
@@ -606,12 +596,14 @@ def open_page(path):
 
 def on_state_change(new_state, old_state):
     _moments._transition(new_state, old_state)
+    _delivery._flush()
 
 
 def open_inbox():
     mw.pm.profile[INBOX_KEY] = max(
         [entry["id"] for entry in state["inbox"]] + [mw.pm.profile.get(INBOX_KEY, 0)]
     )
+    _delivery._acknowledge({entry["id"] for entry in state["inbox"]})
     open_native_inbox()
     redraw()
 
@@ -683,6 +675,8 @@ def _save_account_config(values):
     changed = (old.base, old.user, old.token) != (new.base, new.user, new.token)
     profile = mw.pm.profile
     checkpoint = _upload_prefs(old) if changed and old.configured and profile is not None else None
+    if changed and old.configured and profile is not None:
+        delivery._record(profile, old)
     save_config(values)
     if not changed:
         return
@@ -699,6 +693,7 @@ def _save_account_config(values):
         companion="aki", companion_account=None,
     )
     _moments._clear()
+    _delivery._clear()
     home.clear_account()
     preview.clear_account()
     copies_ui.clear_account()
@@ -888,7 +883,7 @@ def on_profile_open():
             state["timer"] = mw.progress.timer(POLL_MS, poll, True)
     refresh_shared_decks()
     _request_upload(Refresh(False, UploadMode.PROFILE_OPEN))
-    poll(quiet=True)
+    poll()
     maybe_check_updates()
     _offer_sign_in()
     _moments._transition(mw.state, None)
@@ -1000,6 +995,7 @@ gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
 if hasattr(gui_hooks, "profile_will_close"):
     gui_hooks.profile_will_close.append(inbox_ui.clear_account)
+    gui_hooks.profile_will_close.append(lambda: _delivery._clear())
 
 
 def current_companion():
@@ -1032,5 +1028,7 @@ def on_replied(notification):
 
 
 _moments = moments_ui._Presenter(sys.modules[__name__])
+_delivery = delivery._Delivery(sys.modules[__name__])
+copies_ui.state["delivery"] = _delivery
 heatmap_ui.install(sys.modules[__name__])
 home.install(sys.modules[__name__])

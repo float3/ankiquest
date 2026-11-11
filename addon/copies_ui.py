@@ -22,7 +22,7 @@ from .ui import _brand, _scroller
 
 SEEN_KEY = "ankiquestSeenDeckCopies"
 
-state = {"mw": None, "client": None, "companion": None, "action": None, "polling": None, "count": 0}
+state = {"mw": None, "client": None, "companion": None, "action": None, "polling": None, "count": 0, "delivery": None}
 
 
 def clear_account():
@@ -93,6 +93,11 @@ def poll(quiet=False):
 
 
 def announce(offers, names, quiet):
+    if state["delivery"] is not None:
+        from .delivery import _Mode
+
+        state["delivery"]._receive_copies(offers, names, _Mode.QUIET if quiet else _Mode.ANNOUNCE)
+        return
     profile = state["mw"].pm.profile
     fresh, seen = copies.new_offers(offers, profile.get(SEEN_KEY))
     profile[SEEN_KEY] = seen
@@ -228,6 +233,8 @@ def _row_buttons(dialog, accept_text, on_accept):
 
 
 def open_offers():
+    if state["delivery"] is not None:
+        state["delivery"]._ack_copies()
     api = _configured()
     if api is None:
         return

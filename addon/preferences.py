@@ -8,6 +8,29 @@ from .language import tr
 LAST_UPLOAD_KEY = "ankiquestLastUploadAt"
 
 
+_REMINDERS = ("gentle_daily", "urgent_streak", "freeze_used", "freeze_refill", "milestone", "weekly_closing", "weekly_recap")
+
+
+def _load_reminders(api):
+    try:
+        found = api._request("/api/community/reminders/" + api.user)
+        valid_hours = all(type(found.get(key)) is int and 0 <= found[key] < 24 for key in ("reminder_hour", "quiet_start", "quiet_end"))
+        if valid_hours and all(isinstance(found.get(key), bool) for key in _REMINDERS):
+            return found
+    except Exception as error:
+        print("ankiquest reminders:", error)
+    return None
+
+
+def _save_reminders(api, changes):
+    if not changes:
+        return
+    fresh = _load_reminders(api)
+    if fresh is None:
+        raise ValueError(tr("Could not load your current reminders. Please try again."))
+    api._request("/api/community/reminders/" + api.user, dict(fresh, **changes))
+
+
 def alert_senders(data):
     """The senders to offer and those shown as unsubscribed, as the web client's `alertSenders`.
     Older mutes count as unsubscribes, and people who left stay listed so they can be cleared."""
@@ -51,8 +74,8 @@ def freezes_path(api):
 
 
 def load(api):
-    """Both settings, each None when this server or token does not offer it."""
-    found = {}
+    """Account settings, each None when this server or token does not offer it."""
+    found = {"reminders": _load_reminders(api)}
     for key, path in (("freezes", freezes_path(api)), ("alerts", subscriptions_path(api))):
         try:
             found[key] = api._request(path)
@@ -64,6 +87,7 @@ def load(api):
 
 def save(api, loaded, wanted):
     """Writes only what changed; `wanted` holds the dialog's answers."""
+    _save_reminders(api, wanted.get("reminders"))
     if loaded.get("freezes") is not None and wanted["freezes"] != bool(loaded["freezes"].get("enabled")):
         api._request(freezes_path(api), freeze_body(wanted["freezes"]))
     alerts = loaded.get("alerts")
@@ -105,11 +129,14 @@ def section(dialog, groups, mw, api, upload_status=None, on_saved=None):
     for widget in (freeze, freeze_help, alerts, people_title, holder, note):
         widget.setVisible(False)
     loaded = {}
+    reminders = groups.get("reminders")
     finish_choices = _account_choices(groups, mw, api, on_saved)
 
     def shown(future):
         try:
             loaded.update(future.result())
+            if reminders is not None:
+                reminders._loaded(loaded.get("reminders"))
             _fill(loaded, freeze, freeze_help, alerts, people_title, holder, people, note, status, QCheckBox)
         except RuntimeError:
             return
@@ -125,8 +152,14 @@ def section(dialog, groups, mw, api, upload_status=None, on_saved=None):
             "alerts": alerts.isChecked(),
             "before": [user for user, (box, was) in people.items() if was],
             "after": [user for user, (box, _) in people.items() if box.isChecked()],
+            "reminders": reminders._changes() if reminders is not None else {},
         }
-        mw.taskman.run_in_background(lambda: save(api, dict(loaded), wanted), _saved)
+
+        def saved(future):
+            if _saved(future) and wanted["reminders"] and on_saved is not None:
+                on_saved()
+
+        mw.taskman.run_in_background(lambda: save(api, dict(loaded), wanted), saved)
 
     return finish
 
@@ -178,6 +211,7 @@ def _saved(future):
 
     try:
         future.result()
+        return True
     except Exception as error:
         tooltip(tr("Could not save your notification settings (%s).") % html.escape(str(error)))
 

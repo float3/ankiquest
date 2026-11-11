@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QPushButton, QScrollArea, QTimer
+from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QPushButton, QScrollArea, QSpinBox, QTimer
 
 from addon_loader import load_in_package
 
@@ -22,6 +22,8 @@ class Settings(unittest.TestCase):
         self.config = {"url": "https://example.test", "user": "sam", "token": "token"}
         self.decks = {"nudges": True, "celebrations": False, "global_leaderboard": True, "decks": []}
         self.posts = []
+        self.reminders = dict.fromkeys(preferences._REMINDERS, False)
+        self.reminders.update(reminder_hour=20, quiet_start=22, quiet_end=9, daily_limit=2)
         self.api = SimpleNamespace(
             configured=True, user="sam", _request=self.request,
             deck_settings=lambda: deepcopy(self.decks), companion=lambda: "ankilope",
@@ -35,6 +37,8 @@ class Settings(unittest.TestCase):
             return {}
         if "/streak-freezes/" in path:
             return {"enabled": True}
+        if "/community/reminders/" in path:
+            return deepcopy(self.reminders)
         if "/deck-subscriptions/" in path:
             return {"enabled": True, "senders": [], "unsubscribed_senders": []}
         if "/decks/" in path:
@@ -138,6 +142,70 @@ class Settings(unittest.TestCase):
 
         values = self.open(edit, on_account=lambda _url: account)
         self.assertEqual(account, {key: values[key] for key in account})
+        self.assertEqual([], self.posts)
+
+    def test_reminders_off_disables_local_warning_and_every_server_kind(self):
+        self.reminders.update(gentle_daily=True, urgent_streak=True)
+
+        def edit(dialog):
+            self.checkbox(dialog, "Reminders").setChecked(False)
+            self.button(dialog, "Save").click()
+
+        values = self.open(edit)
+        self.assertEqual(0, values["streak_hours"])
+        saved = self.posts[0][1]
+        self.assertFalse(any(saved[key] for key in preferences._REMINDERS))
+        self.assertEqual(20, saved["reminder_hour"])
+
+    def test_reminders_on_enables_both_and_timing_preserves_remote_changes(self):
+        self.config["streak_hours"] = 0
+
+        def edit(dialog):
+            self.checkbox(dialog, "Reminders").setChecked(True)
+            dialog.findChild(QComboBox, "ankiquest_reminder_hour").setCurrentIndex(19)
+            self.reminders["daily_limit"] = 4
+            self.button(dialog, "Save").click()
+
+        self.assertEqual(2, self.open(edit)["streak_hours"])
+        saved = self.posts[0][1]
+        self.assertTrue(all(saved[key] for key in preferences._REMINDERS))
+        self.assertEqual((19, 4), (saved["reminder_hour"], saved["daily_limit"]))
+
+    def test_timing_only_preserves_other_reminder_toggles(self):
+        def edit(dialog):
+            dialog.findChild(QComboBox, "ankiquest_quiet_end").setCurrentIndex(8)
+            self.reminders["weekly_recap"] = True
+            self.button(dialog, "Save").click()
+
+        self.open(edit)
+        saved = self.posts[0][1]
+        self.assertTrue(saved["weekly_recap"])
+        self.assertFalse(saved["gentle_daily"])
+        self.assertEqual(8, saved["quiet_end"])
+
+    def test_account_switch_drops_reminder_edits(self):
+        def edit(dialog):
+            self.checkbox(dialog, "Reminders").setChecked(False)
+            dialog.findChild(QComboBox, "ankiquest_reminder_hour").setCurrentIndex(10)
+            self.button(dialog, "Switch account…").click()
+            self.assertFalse(dialog.findChild(QComboBox, "ankiquest_reminder_hour").isEnabled())
+            self.button(dialog, "Save").click()
+
+        self.open(edit, on_account=lambda _: {"url": "https://example.test", "user": "other", "token": "new"})
+        self.assertEqual([], self.posts)
+
+    def test_late_reminder_read_does_not_enable_the_staged_accounts_controls(self):
+        pending = []
+        self.mw.taskman.run_in_background = lambda work, done: pending.append((work, done))
+
+        def edit(dialog):
+            self.button(dialog, "Switch account…").click()
+            for work, done in pending:
+                self.run_task(work, done)
+            self.assertFalse(dialog.findChild(QComboBox, "ankiquest_reminder_hour").isEnabled())
+            self.button(dialog, "Save").click()
+
+        self.open(edit, on_account=lambda _: {"url": "https://example.test", "user": "other", "token": "new"})
         self.assertEqual([], self.posts)
 
     def test_cancel_does_not_save_server_changes(self):
