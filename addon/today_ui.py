@@ -76,7 +76,7 @@ def session_dialog(parent, title, text, art, on_continue, on_progress, never_aga
     return dialog
 
 
-def settings_section(layout, config, on_goal=None):
+def settings_section(layout, config, on_goal=None, *, notify_layout=None):
     """Appends the Today settings to a settings dialog; returns a function that reads them back.
     `on_goal()` opens the daily goal dialog, which saves on its own."""
     heading = QLabel(tr("Today"))
@@ -93,11 +93,13 @@ def settings_section(layout, config, on_goal=None):
     for key, text in (
         ("deck_status", "Mark decks finished today, and learning due later today"),
         ("session_summary", "Show a recap when you leave a study session"),
+        ("review_heatmap", "Show the review heatmap under the deck list"),
         ("goal_celebrations", "Celebrate when today counts for your streak and when you reach your daily goal"),
     ):
         toggles[key] = QCheckBox(tr(text))
         toggles[key].setChecked(bool(config.get(key, True)))
-        layout.addWidget(toggles[key])
+        target = notify_layout if key == "goal_celebrations" and notify_layout is not None else layout
+        target.addWidget(toggles[key])
 
     def values():
         return {key: box.isChecked() for key, box in toggles.items()}
