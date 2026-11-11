@@ -97,8 +97,8 @@ class DeckCopyRules(unittest.TestCase):
         self.assertIn("2.0 MB", text)
 
     def test_the_menu_shows_how_many_offers_wait(self):
-        self.assertEqual(copies.menu_title(0, english), "ankiquest: decks offered to me…")
-        self.assertEqual(copies.menu_title(3, english), "ankiquest: decks offered to me… (3)")
+        self.assertEqual(copies.menu_title(0, english), "AnkiQuest: decks offered to me…")
+        self.assertEqual(copies.menu_title(3, english), "AnkiQuest: decks offered to me… (3)")
 
     def test_each_offer_is_announced_once(self):
         offers = [{"id": 5}, {"id": 3}]

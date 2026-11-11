@@ -117,7 +117,7 @@ def welcome(translate=lambda value: value):
     """Shown under the deck list until the add-on is connected to a server."""
     return (
         "<div id=ankiquest style='max-width:600px;margin:2em auto 0;font-size:13px;text-align:center'>"
-        "<b>ankiquest</b> <a href=# onclick=\"pycmd('ankiquest:account');return false\">%s</a></div>"
+        "<b>AnkiQuest</b> <a href=# onclick=\"pycmd('ankiquest:account');return false\">%s</a></div>"
         % escape(translate("Sign in or create an account"))
     )
 
@@ -184,7 +184,7 @@ def html(profile, place=None, unread=0, translate=lambda value: value, mascot=No
     return (
         "<div id=ankiquest style='max-width:600px;margin:2em auto 0;font-size:13px;"
         "display:flex;flex-wrap:wrap;justify-content:space-between;gap:.3em'>"
-        "<div style='display:flex;align-items:center;gap:.5em'>%s<div><b>ankiquest</b> <span style='opacity:.7'>%s</span></div></div><div>%s</div></div>"
+        "<div style='display:flex;align-items:center;gap:.5em'>%s<div><b>AnkiQuest</b> <span style='opacity:.7'>%s</span></div></div><div>%s</div></div>"
         % (mascot_html, escape("  ·  ".join(parts)), plain_links(unread, translate))
     )
 

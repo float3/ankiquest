@@ -253,7 +253,7 @@ def _request_upload(request, *, attempts=0):
     history = request.mode == UploadMode.HISTORY
     if not api.configured:
         if history:
-            tooltip(tr("Set the server, player and token in ankiquest settings first."))
+            tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         else:
             preview.refresh(mw, api, request.show_feedback, tooltip)
         return
@@ -496,7 +496,7 @@ def announce(rank, profile, inbox, quiet):
     for entry in fresh:
         text = notify.notice(entry)
         if answerable(entry):
-            text += "<br><i>%s</i>" % html.escape(tr("Tools → ankiquest inbox… to reply"))
+            text += "<br><i>%s</i>" % html.escape(tr("Tools → AnkiQuest inbox… to reply"))
         tooltip(text, period=6000)
     celebrate_latest(previous, rank, fresh, settings)
 
@@ -540,7 +540,7 @@ def on_js_message(handled, message, context):
 def open_page(path):
     api = client()
     if not api.base:
-        tooltip(tr("Set the server in ankiquest settings first."))
+        tooltip(tr("Set the server in AnkiQuest settings first."))
         return
     web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
 
@@ -645,7 +645,7 @@ def open_settings():
     refresh_shared_decks()
     poll(quiet=True)
     home.sync_goal()
-    tooltip(tr("ankiquest settings saved."))
+    tooltip(tr("AnkiQuest settings saved."))
 
 
 def settings_sections(dialog, layout):
@@ -670,7 +670,7 @@ def test_connection(values):
         try:
             profile = future.result()
         except Exception as e:
-            failed("ankiquest: %s", e)
+            failed("AnkiQuest: %s", e)
             return
         tooltip(tr("Connected as %s, level %d.") % (values["user"], profile.get("level", 1)))
 
@@ -684,14 +684,14 @@ def upload_everything():
 def open_companion():
     api = client()
     if not api.configured:
-        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
 
     def loaded(future):
         try:
             current = future.result()
         except Exception as error:
-            failed("ankiquest: %s", error)
+            failed("AnkiQuest: %s", error)
             return
         if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
             return
@@ -703,7 +703,7 @@ def open_companion():
             try:
                 companion = future.result()
             except Exception as error:
-                failed("ankiquest: %s", error)
+                failed("AnkiQuest: %s", error)
                 return
             if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
                 return
@@ -719,7 +719,7 @@ def open_companion():
 def open_deck_notifications():
     api = client()
     if mw.col is None or not api.configured:
-        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
     col = mw.col
     target = UploadTarget(col, mw.pm.profile, (api.base, api.user, api.token))
@@ -737,7 +737,7 @@ def open_deck_notifications():
         try:
             settings = future.result()
         except Exception as e:
-            failed(tr("ankiquest: could not load your decks (%s)"), e)
+            failed(tr("AnkiQuest: could not load your decks (%s)"), e)
             return
         choice = ui.deck_dialog(mw, settings, state["companion"])
         if choice is None or not target.current(client()):
@@ -767,7 +767,7 @@ def save_deck_choice(api, shared, unshared, recipients, nudges, celebrations=Non
             decks = future.result()
             _upload_prefs(api)["shared"] = decks
         except Exception as e:
-            failed(tr("ankiquest: could not save your decks (%s)"), e)
+            failed(tr("AnkiQuest: could not save your decks (%s)"), e)
             return
         tooltip(tr("%d deck shared." if len(shared) == 1 else "%d decks shared.") % len(shared))
 
@@ -801,7 +801,7 @@ def check_updates(quiet=True):
     current = updates.installed(ADDON_DIR)
     if current is None:
         if not quiet:
-            tooltip(tr("This ankiquest is a local copy; it does not update itself."))
+            tooltip(tr("This AnkiQuest is a local copy; it does not update itself."))
         return
     channel = config().get("update_channel", "stable")
 
@@ -810,12 +810,12 @@ def check_updates(quiet=True):
             candidate = future.result()
         except Exception as e:
             if not quiet:
-                failed(tr("ankiquest: could not check for updates (%s)"), e)
+                failed(tr("AnkiQuest: could not check for updates (%s)"), e)
             return
         if updates.newer(candidate, current):
             offer_update(candidate)
         elif not quiet:
-            tooltip(tr("ankiquest is up to date (%s).") % updates.label(current))
+            tooltip(tr("AnkiQuest is up to date (%s).") % updates.label(current))
 
     mw.taskman.run_in_background(lambda: updates.available(channel), done)
 
@@ -839,7 +839,7 @@ def offer_update(candidate):
         try:
             path = future.result()
         except Exception as e:
-            failed(tr("ankiquest: could not download the update (%s)"), e)
+            failed(tr("AnkiQuest: could not download the update (%s)"), e)
             return
         install_update(path)
 
@@ -852,9 +852,9 @@ def install_update(path):
 
     result = mw.addonManager.install(str(path))
     if isinstance(result, InstallError):
-        tooltip(tr("ankiquest: the update could not be installed (%s)") % result.errmsg)
+        tooltip(tr("AnkiQuest: the update could not be installed (%s)") % result.errmsg)
         return
-    showInfo(tr("ankiquest was updated. Restart Anki to use the new version."))
+    showInfo(tr("AnkiQuest was updated. Restart Anki to use the new version."))
 
 
 def on_answer(_reviewer, card, _ease):
@@ -882,13 +882,13 @@ def add_action(title, handler, shortcut=None):
     return action
 
 
-add_action(tr("ankiquest: sign in or create account…"), open_account)
-add_action(tr("ankiquest settings…"), open_settings)
-add_action(tr("ankiquest study companion…"), open_companion)
-add_action(tr("ankiquest deck notifications…"), open_deck_notifications)
-add_action(tr("ankiquest inbox…"), open_inbox, inbox_ui.SHORTCUT)
-add_action(tr("ankiquest on the web…"), open_website, WEBSITE_SHORTCUT)
-add_action(tr("ankiquest: check for updates…"), lambda: check_updates(quiet=False))
+add_action(tr("AnkiQuest: sign in or create account…"), open_account)
+add_action(tr("AnkiQuest settings…"), open_settings)
+add_action(tr("AnkiQuest study companion…"), open_companion)
+add_action(tr("AnkiQuest deck notifications…"), open_deck_notifications)
+add_action(tr("AnkiQuest inbox…"), open_inbox, inbox_ui.SHORTCUT)
+add_action(tr("AnkiQuest on the web…"), open_website, WEBSITE_SHORTCUT)
+add_action(tr("AnkiQuest: check for updates…"), lambda: check_updates(quiet=False))
 copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
 
 
@@ -909,7 +909,7 @@ def current_companion():
 def open_native_inbox():
     api = client()
     if not api.configured:
-        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
     inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, open_page, on_replied)
 

@@ -286,7 +286,7 @@ def open_goal_dialog():
     """The daily goal dialog, saved to the server."""
     api = addon().client()
     if not api.configured:
-        addon().tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        addon().tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
     answer = goal_ui.goal_dialog(mw, current_plan(server_day()), collection_forecast())
     if answer is None:
