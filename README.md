@@ -6,7 +6,7 @@ XP, streaks, daily quests, friends and leaderboards for Anki. Clients send revie
 
 1. create an account on an AnkiQuest server, such as [ankiquest.rationality-munich.com](https://ankiquest.rationality-munich.com).
 2. Connect Anki:
-   - **desktop:** download `ankiquest.ankiaddon` from the [latest release](https://github.com/float3/ankiquest/releases/latest), open it with Anki 23.10 or newer, then choose **Tools → AnkiQuest → Settings → Account**
+   - **desktop:** in Anki 23.10 or newer (Qt 6), open **Tools → Add-ons → Get Add-ons** and enter **414948448** ([AnkiWeb listing](https://ankiweb.net/shared/info/414948448)). Restart Anki, then choose **Tools → AnkiQuest → Settings → Account**. AnkiWeb manages updates. The [GitHub package](https://github.com/float3/ankiquest/releases/latest) remains available; remove the other installation before switching channels and sign in with the same AnkiQuest account.
    - **Android:** install `AnkiQuest.apk` from the [latest release](https://github.com/float3/AnkiQuest-Android/releases/latest). it installs next to AnkiDroid as **AnkiQuest**; sync your collection through AnkiWeb as usual. then open **Settings → ankiquest → Account & connection → Sign in or create account**.
 3. study as usual. On desktop, open **Tools → AnkiQuest → Friends** to manage friends and groups, preview a group invitation, or start a friend goal. The website's **Friends** page is also available.
 

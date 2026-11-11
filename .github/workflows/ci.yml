@@ -122,10 +122,17 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_addon_package.py -v
           python3 .github/scripts/package-addon.py --output ankiquest.ankiaddon
+          python3 .github/scripts/package-addon.py --ankiweb --output ankiquest-ankiweb.ankiaddon
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ankiquest-addon
           path: ankiquest.ankiaddon
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ankiquest-ankiweb-addon
+          path: ankiquest-ankiweb.ankiaddon
           if-no-files-found: error
 
   package:

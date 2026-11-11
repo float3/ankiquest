@@ -9,6 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 _EXCLUDED = {"__pycache__", "tests", "meta.json", "version.json", "manifest.json"}
 _FORMATS = {".py", ".json", ".png", ".md", ".js", ".html", ".css", ".svg", ".wasm"}
+_ANKIWEB_ID = "414948448"
 
 
 def _git(repo, *args):
@@ -31,9 +32,13 @@ def _label(version):
     return label
 
 
-def _build(source, output, version):
+def _build(source, output, version, *, ankiweb=False):
     manifest = json.loads((source / "manifest.json").read_text("utf-8"))
     manifest.update(name="AnkiQuest", human_version=_label(version))
+    github_package = manifest["package"]
+    # Each channel conflicts with the other, never itself on a later update.
+    manifest.update(package=_ANKIWEB_ID if ankiweb else github_package,
+                    conflicts=[github_package] if ankiweb else [_ANKIWEB_ID])
     files = {}
     for file in source.rglob("*"):
         relative = file.relative_to(source)
@@ -60,10 +65,11 @@ def _main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ref", default="")
     parser.add_argument("--metadata", type=Path)
+    parser.add_argument("--ankiweb", action="store_true", help="Build for the published AnkiWeb listing")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     version = _version(repo, args.ref)
-    _build(repo / "addon", args.output, version)
+    _build(repo / "addon", args.output, version, ankiweb=args.ankiweb)
     if args.metadata:
         metadata = dict(version, built_at=datetime.now(timezone.utc).isoformat())
         args.metadata.write_text(json.dumps(metadata, indent=2) + "\n", "utf-8")
