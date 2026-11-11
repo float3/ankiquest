@@ -17,17 +17,25 @@ def win_id(entry):
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
+def _share_words(notice):
+    """Use the player's own words, with a fallback for older notices."""
+    return {
+        "title": notice.get("share_title") or notice.get("title") or "",
+        "body": notice.get("share_body") or notice.get("body") or "",
+    }
+
+
 def win_from_entry(entry):
     """A shareable inbox row as a win; `win` is the server's win id when the row has one."""
     return {
-        "title": entry.get("title") or "", "body": entry.get("body") or "",
+        **_share_words(entry),
         "notification": int(entry["id"]), "place": None, "win": win_id(entry),
     }
 
 
 def win_from_place(change, place):
     """A climb into the top three, announced by the rank poll."""
-    return {"title": change.get("title") or "", "body": change.get("body") or "", "notification": None, "place": place, "win": None}
+    return {**_share_words(change), "notification": None, "place": place, "win": None}
 
 
 def has_card(win):

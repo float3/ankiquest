@@ -28,7 +28,7 @@ state = {"mw": None, "client": None, "companion": None, "action": None, "polling
 def setup(mw, client, companion):
     """`client()` gives the current account; `companion()` the mascot to show."""
     state.update(mw=mw, client=client, companion=companion)
-    send = QAction(tr("ankiquest: send a deck to friends…"), mw)
+    send = QAction(tr("AnkiQuest: send a deck to friends…"), mw)
     send.triggered.connect(open_send)
     offered = QAction(copies.menu_title(0, tr), mw)
     offered.triggered.connect(open_offers)
@@ -91,7 +91,7 @@ def announce(offers, names, quiet):
         return
     for offer in fresh:
         tooltip(
-            "%s<br><i>%s</i>" % (copies.offer_html(offer, names, tr), html.escape(tr("Tools → ankiquest: decks offered to me…"))),
+            "%s<br><i>%s</i>" % (copies.offer_html(offer, names, tr), html.escape(tr("Tools → AnkiQuest: decks offered to me…"))),
             period=6000,
         )
 
@@ -99,7 +99,7 @@ def announce(offers, names, quiet):
 def _configured():
     api = state["client"]()
     if not api.configured:
-        tooltip(tr("Set the server, player and token in ankiquest settings first."))
+        tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return None
     return api
 

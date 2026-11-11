@@ -91,7 +91,7 @@ def offer_html(offer, names, translate):
 
 
 def menu_title(count, translate):
-    title = translate("ankiquest: decks offered to me…")
+    title = translate("AnkiQuest: decks offered to me…")
     return title if not count else "%s (%d)" % (title, count)
 
 
