@@ -101,6 +101,7 @@ font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18)}
 #ankiquest .aq-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}
 #ankiquest .aq-xp{font-weight:800;color:var(--aq-orange);white-space:nowrap}
 #ankiquest .aq-empty-note{color:var(--aq-muted);padding:6px 8px}
+#ankiquest .aq-empty-note a{color:var(--aq-blue)}
 #ankiquest .aq-session{margin-top:12px;text-align:center}
 #ankiquest .aq-links{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px}
 #ankiquest .aq-links a{text-decoration:none;font-weight:800;font-size:13px;color:var(--aq-blue);background:var(--aq-bg);
@@ -269,7 +270,39 @@ def head(today, profile, place, translate):
     art = today.get("art")
     image = '<img src="%s" alt="">' % escape(art) if art else ""
     mood = "<div class=aq-bubble>%s</div>" % escape(today["mood"]) if today.get("mood") else ""
-    return "<div class=aq-hero>%s<div>%s%s</div></div>" % (image, mood, pills(profile, place, translate))
+    return "<div class=aq-hero>%s<div>%s%s%s</div></div>" % (image, mood, pills(profile, place, translate), _freeze_pills(profile, translate))
+
+
+def _freeze_pills(profile, translate):
+    if not profile or "freezes_enabled" not in profile:
+        return ""
+    if not profile["freezes_enabled"]:
+        return pill(translate("Streak freezes off"), "ghost")
+    stock = pill(translate("%d freezes saved") % max(0, int(profile.get("stored_freezes") or 0)), "protected")
+    if profile.get("freeze_earned_today") and profile.get("_day_status") != "unknown":
+        stock += " " + pill(translate("Freeze earned today"), "protected")
+    return "<div class=aq-pills>%s</div>" % stock
+
+
+def _connection_note(profile, failure, translate):
+    if failure:
+        text = translate("Could not refresh AnkiQuest. Your reviews stay on this device until they can upload.")
+        if profile:
+            text += " " + translate("Showing the last received profile.")
+    elif profile is None:
+        text = translate("Loading your AnkiQuest profile…")
+    else:
+        return ""
+    retry = '<button type=button onclick="pycmd(\'ankiquest:retry-connection\')">%s</button>' % escape(translate("Retry connection")) if failure else ""
+    return '<div style="max-width:680px;margin:12px auto;text-align:center">%s %s</div>' % (escape(text), retry)
+
+
+def _weekly_card(today, translate):
+    recap = today.get("weekly")
+    if not recap:
+        return ""
+    lines = "".join("<p>%s</p>" % escape(line) for line in (recap.get("body") or "").splitlines() if line.strip())
+    return card(translate("Weekly recap"), lines)
 
 
 def counts(deck, translate):
@@ -393,6 +426,8 @@ def board_card(today, translate, profile=None):
     rows = "".join(board_row(*row, translate) for row in standing["rows"])
     if not rows:
         rows = "<div class=aq-empty-note>%s</div>" % escape(translate("Nobody else plays yet."))
+    if not any(not mine for _, _, mine in standing["rows"]):
+        rows += "<div class=aq-empty-note>%s</div>" % link("challenges", translate("Add friends to study together"))
     closing = closing_week(profile, translate)
     if closing:
         rows += "<div class='aq-note aq-closing-week'>%s</div>" % escape(closing)
@@ -410,6 +445,7 @@ def session_line(today, translate):
 
 def panel(profile, place, unread, translate, today):
     cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate, profile)
+    cards += _weekly_card(today, translate)
     moments = ('<button type=button onclick="pycmd(\'ankiquest:moments\')">%s</button>'
                % escape(translate("Your moments (%d)") % today["moments"])) if today.get("moments") else ""
     return (

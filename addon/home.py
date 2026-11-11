@@ -1,18 +1,21 @@
 """Connects the Today panel, deck list badges, the daily goal and session recaps to Anki."""
 
 import time
+import json
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum, auto
 from pathlib import Path
+from html import escape
 
 from aqt import gui_hooks, mw
 
 from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today, today_ui
-from .board import PAGES, _day_label
+from .board import _day_label
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
 from .language import tr
+from . import progress_ui
 
 GOAL_KEY = "ankiquestDayGoal"
 PLAN_KEY = "ankiquestServerGoal"
@@ -27,6 +30,7 @@ BOARD_MS = 5 * 60 * 1000
 BOARD_RETRY_MS = 30_000
 BOARD_RETRY_CAP_MS = BOARD_MS
 CACHE_MS = 2000
+_RECAP_MS = 7 * 86_400_000
 
 local = {
     "addon": None,
@@ -43,6 +47,8 @@ local = {
     "capabilities": None,
     "capabilities_loading": False,
     "moving": False,
+    "progress": None,
+    "browser_buttons": set(),
 }
 
 
@@ -418,7 +424,74 @@ def today_view(deck_browser, chosen_companion):
         "session": session,
         "session_day": _session_day(mw.pm.profile[SESSION_KEY]) if session else None,
         "moments": addon()._moments._count(),
+        "weekly": _weekly_recap(),
     }
+
+
+def _weekly_recap():
+    # A recap stays on Today until the next weekly recap is due.
+    now = now_ms()
+    entries = [entry for entry in addon().state["inbox"]
+               if entry.get("kind") == "reminder_weekly_recap" and not entry.get("sender")
+               and 0 <= now - int(entry.get("created_at", 0)) * 1000 < _RECAP_MS]
+    return max(entries, key=lambda entry: entry["created_at"], default=None)
+
+
+def _toolbar_values():
+    if mw.col is None or not addon().client().configured:
+        return "AnkiQuest", tr("Sign in to AnkiQuest")
+    profile = _profile_for_display(addon().state["profile"]) or {}
+    status = profile.get("_day_status", "unknown")
+    label = tr({"met": "Secured", "syncing": "Syncing", "protected": "Protected", "pending": "Not yet"}.get(status, "Streak unknown"))
+    streak = profile.get("streak")
+    return "AnkiQuest · " + ("%d · " % streak if streak is not None else "") + label, tr("Open Today")
+
+
+def _open_today():
+    if not addon().client().configured:
+        addon().open_account()
+    elif mw.col is not None:
+        mw.moveToState("deckBrowser")
+        for name in ("show", "raise_", "activateWindow"):
+            action = getattr(mw, name, None)
+            if action is not None:
+                action()
+
+
+def _toolbar_links(links, toolbar):
+    label, tip = _toolbar_values()
+    links.append(toolbar.create_link("ankiquest-today", escape(label, quote=True), _open_today,
+                                     tip=escape(tip, quote=True), id="ankiquest-today"))
+
+
+def _refresh_toolbar(toolbar=None):
+    toolbar = toolbar or getattr(mw, "toolbar", None)
+    if toolbar is None and not local["browser_buttons"]:
+        return
+    label, tip = _toolbar_values()
+    for button in local["browser_buttons"]:
+        button.setText(label)
+        button.setToolTip(tip)
+    if toolbar is None:
+        return
+    toolbar.web.eval("(function(){var aq=document.getElementById('ankiquest-today');if(aq){aq.textContent=%s;aq.title=%s;aq.setAttribute('aria-label',%s);}})();" % (
+        json.dumps(label), json.dumps(tip), json.dumps(label),
+    ))
+
+
+def _browser_entry(browser):
+    from aqt.qt import QToolButton, Qt
+
+    grid = getattr(browser.form, "gridLayout", None)
+    if grid is None:
+        return
+    button = QToolButton(browser)
+    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+    button.clicked.connect(_open_today)
+    local["browser_buttons"].add(button)
+    button.destroyed.connect(lambda: local["browser_buttons"].discard(button))
+    grid.addWidget(button, 0, grid.columnCount())
+    _refresh_toolbar()
 
 
 def on_deck_browser(deck_browser, content):
@@ -509,6 +582,7 @@ def remaining_cards():
 
 
 def on_state_change(new_state, old_state):
+    _refresh_toolbar()
     if new_state == "review" and old_state != "review":
         api = addon().client()
         local["session"] = {"account": account(api), "started": now_ms()} if api.configured else None
@@ -648,11 +722,29 @@ def continue_studying():
 
 
 def open_progress():
-    addon().open_page(PAGES["history"])
+    if not addon().client().configured:
+        addon().open_account()
+        return
+    opened = local["progress"]
+    if opened is not None and opened._owns():
+        opened._dialog.raise_()
+        opened._dialog.activateWindow()
+        return
+    _close_progress()
+    opened = local["progress"] = progress_ui._Progress(addon())
+    opened._dialog.finished.connect(lambda _result: local.update(progress=None) if local["progress"] is opened else None)
+    opened._dialog.show()
+
+
+def _close_progress():
+    opened, local["progress"] = local["progress"], None
+    if opened is not None:
+        opened._close()
 
 
 def clear_account():
     """Drop the previous account's Home data while keeping the periodic refresh."""
+    _close_progress()
     local.update(
         board=None, board_account=None, board_request=None, board_retry=None, goal_request=None,
         days=None, session=None, capabilities=None, restarted=None,
@@ -664,6 +756,7 @@ def clear_account():
 
 
 def on_profile_open():
+    _close_progress()
     local["board"], local["days"], local["session"] = None, None, None
     if local["timer"] is None:
         try:
@@ -683,3 +776,8 @@ def install(module):
     gui_hooks.state_did_change.append(on_state_change)
     gui_hooks.profile_did_open.append(on_profile_open)
     gui_hooks.sync_did_finish.append(refresh_board)
+    for name, callback in (("top_toolbar_did_init_links", _toolbar_links), ("top_toolbar_did_redraw", _refresh_toolbar),
+                           ("profile_will_close", _close_progress), ("browser_will_show", _browser_entry)):
+        hook = getattr(gui_hooks, name, None)
+        if hook is not None:
+            hook.append(callback)
