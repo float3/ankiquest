@@ -80,7 +80,7 @@ def _brand(dialog, layout, companion="aki"):
     layout.addWidget(_row(image, QLabel(tr("Your study companion."))))
 
 
-def account_dialog(parent, url, on_submit, companion="aki"):
+def account_dialog(parent, url, on_submit, companion="aki", dismiss=None):
     """Signs in or creates an account. `on_submit(values, finish)` talks to the server and calls
     `finish(account, error)`; the dialog stays open with the error until it succeeds."""
     dialog = QDialog(parent)
@@ -111,7 +111,7 @@ def account_dialog(parent, url, on_submit, companion="aki"):
 
     row = QHBoxLayout()
     row.addStretch(1)
-    cancel = QPushButton(tr("Cancel"))
+    cancel = QPushButton(dismiss or tr("Cancel"))
     cancel.clicked.connect(dialog.reject)
     submit = QPushButton()
     submit.setDefault(True)
@@ -158,7 +158,10 @@ def account_dialog(parent, url, on_submit, companion="aki"):
     return result
 
 
-def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_account=None, extra=None, on_goal=None):
+def settings_dialog(
+    parent, config, on_test, on_upload_all, companion="aki", on_account=None, *,
+    extra=None, on_goal=None, on_manage=None,
+):
     """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
     a section and return what to run once the dialog is saved; `on_goal()` opens the daily goal dialog."""
     dialog = QDialog(parent)
@@ -171,9 +174,65 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     user = QLineEdit(config.get("user", ""))
     token = QLineEdit(config.get("token", ""))
     token.setEchoMode(QLineEdit.EchoMode.Password)
+
+    # Keep account actions first. Manual fields still support existing token-only setups.
+    original = tuple(field.text().strip() for field in (url, user, token))
+    signed_in = all(original)
+    signed_server = url.text().strip() if signed_in else None
+    identity = QLabel(tr("Signed in as %s on %s") % (user.text(), signed_server) if signed_in else "")
+    identity.setTextFormat(Qt.TextFormat.PlainText)
+    identity.setWordWrap(True)
+    identity.setVisible(signed_in)
+    layout.addWidget(identity)
+    manage = QPushButton(tr("Manage account on the website…")) if on_manage is not None else None
+    sign_out = QPushButton(tr("Sign out"))
+    if on_account is not None:
+        account = QPushButton(tr("Switch account…") if signed_in else tr("Sign in or create account…"))
+
+        def change_account():
+            nonlocal signed_server
+            answer = on_account(url.text().strip())
+            if not answer:
+                return
+            url.setText(answer["url"])
+            user.setText(answer["user"])
+            token.setText(answer["token"])
+            signed_server = answer["url"]
+            identity.setText(tr("Signed in as %s on %s") % (answer["user"], signed_server))
+            identity.show()
+            account.setText(tr("Switch account…"))
+            sign_out.show()
+            if manage is not None:
+                manage.show()
+
+        account.clicked.connect(change_account)
+        layout.addWidget(account)
+    if manage is not None:
+        manage.clicked.connect(lambda: on_manage(signed_server))
+        manage.setVisible(signed_in)
+        layout.addWidget(manage)
+
+    def forget_account():
+        for field in (url, user, token):
+            field.clear()
+        dialog.accept()
+
+    sign_out.clicked.connect(forget_account)
+    sign_out.setVisible(signed_in)
+    layout.addWidget(sign_out)
+
+    manual = QWidget()
+    fields = QVBoxLayout(manual)
+    fields.setContentsMargins(0, 0, 0, 0)
     for title, field in ((tr("Server"), url), (tr("Player"), user), (tr("Token"), token)):
-        layout.addWidget(QLabel(title))
-        layout.addWidget(field)
+        fields.addWidget(QLabel(title))
+        fields.addWidget(field)
+    more = QPushButton(tr("Manual connection"))
+    more.setCheckable(True)
+    more.toggled.connect(manual.setVisible)
+    manual.hide()
+    layout.addWidget(more)
+    layout.addWidget(manual)
 
     rank = QCheckBox(tr("Tell me when my place on the leaderboard changes"))
     rank.setChecked(bool(config.get("notify_rank", True)))
@@ -192,29 +251,17 @@ def settings_dialog(parent, config, on_test, on_upload_all, companion="aki", on_
     layout.addWidget(_row(QLabel(tr("Update channel")), channel))
     today_values = settings_section(layout, config, on_goal)
 
-    if on_account is not None:
-        account = QPushButton(tr("Sign in or create account…"))
-
-        def signed_in():
-            answer = on_account(url.text().strip())
-            if answer:
-                url.setText(answer["url"])
-                user.setText(answer["user"])
-                token.setText(answer["token"])
-
-        account.clicked.connect(signed_in)
-        layout.addWidget(account)
-
     test = QPushButton(tr("Test connection"))
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
+    fields.addWidget(test)
     upload = QPushButton(tr("Upload everything again"))
     upload.clicked.connect(on_upload_all)
     finish = extra(dialog, layout) if extra else None
-    layout.addLayout(_buttons(dialog, tr("Save"), (test, upload)))
+    layout.addLayout(_buttons(dialog, tr("Save"), (upload,)))
 
     if not dialog.exec():
         return None
-    if finish:
+    if finish and original == tuple(field.text().strip() for field in (url, user, token)):
         finish()
     return dict(_values(url, user, token, rank, hours, channel), **today_values())
 

@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from enum import IntEnum
 from http import HTTPStatus
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import anki.lang
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction, QKeySequence
+from aqt.qt import QAction, QKeySequence, QTimer
 from aqt.utils import openLink, tooltip
 
 from . import board, heatmap_ui, home, notify, ui, updates, web
@@ -24,6 +25,7 @@ from .client import (
     PENDING_SQL,
     UNDO_WINDOW_MS,
     WINDOW_SQL,
+    InsecureServer,
     ServerError,
     Client,
     check_deletes,
@@ -47,6 +49,7 @@ ORDER_WEEK_KEY = "ankiquestLastOrderWeek"
 INBOX_KEY = "ankiquestInboxCursor"
 STREAK_DAY_KEY = "ankiquestStreakDay"
 UPDATE_CHECK_KEY = "ankiquestUpdateCheckedAt"
+SIGN_IN_OFFER_KEY = "ankiquestSignInOffered"
 ADDON_DIR = Path(__file__).resolve().parent
 RESYNC_WINDOW_MS = 7 * 86_400_000
 POLL_MS = 5 * 60 * 1000
@@ -126,8 +129,9 @@ class _Failed:
 state = {
     # Idle, uploading, waiting for a retry, or holding the last failure.
     "upload": None,
-    # The account a poll runs for, or None. A poll for another account no longer counts.
+    # A poll belongs to one open profile and credential.
     "polling": None,
+    "reauth": None,
     "timer": None,
     "place": None,
     "profile": None,
@@ -301,9 +305,12 @@ def _request_upload(request, *, attempts=0):
         if state["upload"] is upload and target.current(client()):
             tooltip(tr("%s of %s reviews uploaded") % (sent, total))
 
+    def check_target():
+        if state["upload"] is not upload or mw.col is not col or mw.pm.profile is not prefs:
+            raise RuntimeError("AnkiQuest connection changed during upload")
+
     def work():
-        if mw.col is not col or mw.pm.profile is not prefs:
-            raise RuntimeError("Anki profile changed before upload")
+        check_target()
         window = col.db.all(WINDOW_SQL, window_start)
         present, candidates, restored = reconcile(window, recent, start, mark)
         deleted = check_deletes(col.db, present, candidates)
@@ -335,6 +342,7 @@ def _request_upload(request, *, attempts=0):
                         decks = None
                 except Exception as e:
                     print("ankiquest deck progress:", e)
+            check_target()
             profile = api.upload(
                 review_offsets.stamp(rows_to_reviews(sent), stamps), rollover, history or initial_sync or full, deleted if first else (),
                 decks=decks, clock_offset=clock_offset,
@@ -434,12 +442,17 @@ def poll(quiet=False):
     copies_ui.poll(quiet)
     api = client()
     account = [api.base, api.user, api.token]
-    if not api.configured or state["polling"] == account:
+    prefs = mw.pm.profile
+    if not api.configured or prefs is None:
         return
-    state["polling"] = account
+    active = state["polling"]
+    if active is not None and active[0] is prefs and active[1] == account:
+        return
+    request = (prefs, account)
+    state["polling"] = request
 
-    previous = mw.pm.profile.get(ORDER_KEY) or []
-    week = mw.pm.profile.get(ORDER_WEEK_KEY)
+    previous = prefs.get(ORDER_KEY) or []
+    week = prefs.get(ORDER_WEEK_KEY)
 
     def work():
         rank, profile, notifications = api.rank(previous, week), api.profile(), api.notifications()
@@ -450,16 +463,23 @@ def poll(quiet=False):
         return rank, profile, notifications, companion
 
     def done(future):
-        if state["polling"] == account:
-            state["polling"] = None
+        if state["polling"] is not request:
+            return
+        state["polling"] = None
         current = client()
-        if [current.base, current.user, current.token] != account:
+        if mw.pm.profile is not prefs or [current.base, current.user, current.token] != account:
             return
         try:
             rank, profile, inbox, companion = future.result()
         except Exception as e:
+            # Keep a direct sign-in link on the deck list for a revoked credential.
+            if isinstance(e, ServerError) and e.status == HTTPStatus.UNAUTHORIZED:
+                state.update(reauth=account, profile=None, place=None, inbox=[])
+                redraw()
+                return
             print("ankiquest poll:", e)
             return
+        state["reauth"] = None
         order = rank.get("order") or []
         state["place"] = order.index(api.name) + 1 if api.name in order else None
         state["profile"], state["inbox"] = profile, inbox
@@ -515,6 +535,9 @@ def on_deck_browser(deck_browser, content):
     api = client()
     if not api.configured:
         content.stats += board.welcome(tr)
+        return
+    if state["reauth"] == [api.base, api.user, api.token]:
+        content.stats += board.welcome(tr, text=tr("Sign in to AnkiQuest again"))
         return
     if state["profile"] is None and not state["polling"]:
         poll(quiet=True)
@@ -576,6 +599,8 @@ def open_inbox():
 
 
 def account_error(error):
+    if isinstance(error, InsecureServer):
+        return tr("Use HTTPS to send a password outside your local network.")
     if isinstance(error, ServerError):
         if error.status == 401:
             return tr("Username or password not recognized.")
@@ -610,42 +635,109 @@ def submit_account(values, finish):
     mw.taskman.run_in_background(work, done)
 
 
-def ask_account(url):
-    return ui.account_dialog(mw, url, submit_account, state["companion"])
+def ask_account(url, dismiss=None):
+    return ui.account_dialog(mw, url, submit_account, state["companion"], dismiss=dismiss)
 
 
 def open_account():
     answer = ask_account(config().get("url", ""))
-    if not answer:
-        return
-    save_config(dict(config(), **answer))
+    if answer:
+        _finish_sign_in(answer)
+
+
+def _finish_sign_in(answer):
+    _save_account_config(answer)
     state["profile"] = None
     state["place"] = None
     state["companion"], state["companion_account"] = "aki", None
     refresh_shared_decks()
-    refresh(False, resync=True)
+    refresh(False)
     poll(quiet=True)
     tooltip(tr("Signed in as %s.") % html.escape(answer["user"]))
     home.sync_goal(prompt=True)
 
 
+def _save_account_config(values):
+    """Keep upload progress with its account; discard data shown for the old connection."""
+    old = client()
+    settings = dict(config(), **values)
+    new = Client(settings.get("url", ""), settings.get("user", ""), settings.get("token", ""))
+    changed = (old.base, old.user, old.token) != (new.base, new.user, new.token)
+    profile = mw.pm.profile
+    checkpoint = _upload_prefs(old) if changed and old.configured and profile is not None else None
+    save_config(values)
+    if not changed:
+        return
+
+    # Retain the review watermark and undo history for a return to this account.
+    if checkpoint is not None:
+        checkpoint.pop("shared", None)
+        checkpoint.pop("last_upload", None)
+    if profile is not None:
+        for key in (ORDER_KEY, ORDER_WEEK_KEY, INBOX_KEY, STREAK_DAY_KEY, copies_ui.SEEN_KEY):
+            profile.pop(key, None)
+    state.update(
+        upload=None, polling=None, reauth=None, profile=None, place=None, inbox=[],
+        conquest=None, companion="aki", companion_account=None,
+    )
+    home.clear_account()
+    preview.clear_account()
+    copies_ui.clear_account()
+    inbox_ui.clear_account()
+    web.clear_account()
+
+
+def _offer_sign_in():
+    profile = mw.pm.profile
+    if profile is None:
+        return
+
+    def show():
+        # Profile open -> ready deck browser -> one sign-in offer for this profile.
+        settings = config()
+        if (mw.pm.profile is not profile or profile.get(SIGN_IN_OFFER_KEY)
+                or settings.get("user") or mw.state == "review"):
+            return
+        profile[SIGN_IN_OFFER_KEY] = True
+        answer = ask_account(settings.get("url", ""), dismiss=tr("Not now"))
+        if answer and mw.pm.profile is profile:
+            _finish_sign_in(answer)
+
+    QTimer.singleShot(0, show)
+
+
 def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
-        extra=settings_sections, on_goal=home.open_goal_dialog,
+        extra=settings_sections, on_goal=home.open_goal_dialog, on_manage=_manage_account,
     )
     if values is None:
         return
     if values.get("update_channel") != config().get("update_channel", "stable"):
         mw.pm.profile[UPDATE_CHECK_KEY] = 0
-    save_config(values)
+    _save_account_config(values)
     state["profile"] = None
     state["place"] = None
     state["companion"], state["companion_account"] = "aki", None
     refresh_shared_decks()
     poll(quiet=True)
     home.sync_goal()
+    redraw()
     tooltip(tr("AnkiQuest settings saved."))
+
+
+def _manage_account(base=None):
+    if base is None:
+        api = client()
+        if not api.configured:
+            return
+        base = api.base
+    try:
+        server = urlsplit(base)
+    except ValueError:
+        return
+    if server.scheme in ("https", "http") and server.hostname and server.username is None and not (server.query or server.fragment):
+        openLink(web.page_url(base, "/settings"))
 
 
 def settings_sections(dialog, layout):
@@ -795,6 +887,7 @@ def on_profile_open():
     _request_upload(Refresh(False, UploadMode.PROFILE_OPEN))
     poll(quiet=True)
     maybe_check_updates()
+    _offer_sign_in()
 
 
 def check_updates(quiet=True):

@@ -22,7 +22,12 @@ from .ui import _brand, _scroller
 
 SEEN_KEY = "ankiquestSeenDeckCopies"
 
-state = {"mw": None, "client": None, "companion": None, "action": None, "polling": False, "count": 0}
+state = {"mw": None, "client": None, "companion": None, "action": None, "polling": None, "count": 0}
+
+
+def clear_account():
+    state["polling"] = None
+    _set_count(0)
 
 
 def setup(mw, client, companion):
@@ -59,22 +64,26 @@ def _set_count(count):
 def poll(quiet=False):
     """Refreshes the badge on the menu entry; new offers are announced unless `quiet`."""
     mw, api = state["mw"], state["client"]() if state["client"] else None
-    if mw is None or api is None or not api.configured:
+    if mw is None or api is None or not api.configured or mw.pm.profile is None:
         _set_count(0)
         return
     if state["polling"]:
         return
-    state["polling"] = True
+    request = object()
+    state["polling"] = request
     account = _account(api)
+    profile = mw.pm.profile
 
     def done(future):
-        state["polling"] = False
+        if state["polling"] is not request:
+            return
+        state["polling"] = None
         try:
             inbox = future.result()
         except Exception as error:
             print("ankiquest deck copies:", error)
             return
-        if _account(state["client"]()) != account:
+        if mw.pm.profile is not profile or _account(state["client"]()) != account:
             return
         offers = copies.pending(inbox)
         _set_count(len(offers))

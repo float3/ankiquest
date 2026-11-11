@@ -14,6 +14,13 @@ ROUTES = (
 state = {"window": None, "account": None}
 
 
+def clear_account():
+    window = state["window"]
+    state.update(window=None, account=None)
+    if window is not None:
+        window.close()
+
+
 def page_url(base, path):
     return base.rstrip("/") + path
 

@@ -26,6 +26,13 @@ KEPT_PICTURES = 40
 state = {"dialog": None, "pictures": {}}
 
 
+def clear_account():
+    dialog = state["dialog"]
+    state.update(dialog=None, pictures={})
+    if dialog is not None:
+        dialog.close()
+
+
 def _plain(text, bold=False, muted=False):
     label = QLabel(text)
     label.setTextFormat(Qt.TextFormat.PlainText)

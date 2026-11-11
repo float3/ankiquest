@@ -7,6 +7,7 @@ import sys
 import time
 import unittest
 from concurrent.futures import Future
+from http import HTTPStatus
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -820,6 +821,44 @@ class HomeTests(unittest.TestCase):
 
     def write_config(self, _, values):
         self.settings = dict(values)
+
+    def test_an_unconnected_profile_gets_one_sign_in_offer(self):
+        self.settings.update(url="", user="", token="")
+        self.addon.QTimer = SimpleNamespace(singleShot=lambda delay, callback: callback())
+        self.addon.ask_account = Mock(return_value=None)
+        for name in ("refresh_shared_decks", "refresh", "poll", "maybe_check_updates"):
+            setattr(self.addon, name, Mock())
+
+        self.addon.on_profile_open()
+        self.addon.on_profile_open()
+        self.addon.ask_account.assert_called_once_with("", dismiss="Not now")
+
+        self.mw.pm.profile = {}
+        self.addon.on_profile_open()
+        self.assertEqual(2, self.addon.ask_account.call_count)
+
+    def test_a_revoked_poll_token_offers_sign_in_without_retrying_on_render(self):
+        self.api.rank.side_effect = self.addon.ServerError(HTTPStatus.UNAUTHORIZED, "revoked")
+        self.addon.poll(quiet=True)
+
+        self.assertIn("Sign in to AnkiQuest again", self.render().stats)
+        self.api.rank.assert_called_once()
+
+        self.api.token = "new-token"
+        self.api.rank.side_effect = None
+        self.assertNotIn("Sign in to AnkiQuest again", self.render().stats)
+        self.assertEqual(2, self.api.rank.call_count)
+
+    def test_account_management_opens_the_saved_server_without_credentials(self):
+        self.addon.ui.settings_dialog = Mock(return_value=None)
+        self.addon.open_settings()
+        manage = self.addon.ui.settings_dialog.call_args.kwargs["on_manage"]
+        manage()
+        self.addon.openLink.assert_called_once_with("https://example.test/settings")
+
+        self.api.base = "https://member:password@example.test"
+        manage()
+        self.addon.openLink.assert_called_once()
 
     def remember(self, mode="cards", value=100, since=None, chosen=True):
         since = self.home.server_day() if since is None else since
