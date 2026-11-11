@@ -19,6 +19,7 @@ pub(crate) const FEATURES: &[&str] = &[
     "cookie_session",
     "deck_share",
     "devices",
+    "global_leaderboard_hide",
     "goal_backlog_days",
     "mute",
     "reactions",

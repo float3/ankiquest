@@ -769,6 +769,17 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+    // Hiding a stranger keeps their place in the ranking and changes only Hill's view.
+    examples.push((
+        "leaderboard_hide",
+        f.call(
+            "POST",
+            "/api/leaderboard/hidden/hill",
+            Some("hill-secret"),
+            json!({"action": "hide", "user": "ana"}),
+        )
+        .await,
+    ));
 
     // Friends and groups come after everything above, whose circles they would otherwise change.
     // Hill is friends with Friend, waits for Cerro, has a request from Ana, owns a group Ana joined
