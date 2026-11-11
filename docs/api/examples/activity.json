@@ -1,0 +1,58 @@
+{
+  "action_count": 1,
+  "attention": [
+    {
+      "action_required": true,
+      "body": "friend invited you to Fifty reviews each.",
+      "challenge_id": 4,
+      "created_at": 1793179800,
+      "day": 20754,
+      "id": 15,
+      "kind": "challenge_invite",
+      "read_at": null,
+      "replied": false,
+      "route": "/community#challenge-4",
+      "sender": "friend",
+      "title": "Challenge invitation"
+    }
+  ],
+  "items": [
+    {
+      "action_required": false,
+      "body": "You reached the goal in Spanish sprint.",
+      "challenge_id": 2,
+      "created_at": 1793183400,
+      "day": 20754,
+      "id": 17,
+      "kind": "challenge_complete",
+      "moment": "challenge:2",
+      "read_at": null,
+      "replied": false,
+      "route": "/community#challenge-2",
+      "sender": "",
+      "share_body": "I reached the goal in Spanish sprint.",
+      "share_title": "Challenge complete",
+      "title": "Challenge complete",
+      "win": 5
+    },
+    {
+      "action_required": true,
+      "body": "friend invited you to Fifty reviews each.",
+      "challenge_id": 4,
+      "created_at": 1793179800,
+      "day": 20754,
+      "id": 15,
+      "kind": "challenge_invite",
+      "read_at": null,
+      "replied": false,
+      "route": "/community#challenge-4",
+      "sender": "friend",
+      "title": "Challenge invitation"
+    }
+  ],
+  "latest_id": 17,
+  "next_before": 15,
+  "retention_days": 90,
+  "unread_count": 7,
+  "window_days": 90
+}

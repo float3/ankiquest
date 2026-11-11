@@ -486,6 +486,27 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+    // Activity pages share counts and retain invitations beyond the current page.
+    let activity = f
+        .call(
+            "GET",
+            "/api/activity/hill?limit=2",
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await;
+    let before = activity["next_before"].as_i64().unwrap();
+    examples.push(("activity", activity));
+    examples.push((
+        "activity_older",
+        f.call(
+            "GET",
+            &format!("/api/activity/hill?limit=2&before={before}"),
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
     examples.push((
         "challenge_action",
         f.call(

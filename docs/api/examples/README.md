@@ -28,6 +28,7 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `player_profile.json` | `GET /api/profile/{user}` for another player, as the leaderboard opens it: no `goal` |
 | `rank.json` | `POST /api/rank/{user}` |
 | `notifications.json` | `GET /api/notifications/{user}`: a celebration with `win`, a friend's `share` with `image` and `reacted`, a `reaction` |
+| `activity.json`, `activity_older.json` | `GET /api/activity/{user}?limit=2`, then its `next_before`: unread/action counts, attention rows and pagination |
 | `goal.json` | `GET /api/goal/{user}` |
 | `sharing.json` | `GET /api/sharing/{user}` |
 | `wins.json` | `GET /api/wins/{user}` |

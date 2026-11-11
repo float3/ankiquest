@@ -15,7 +15,7 @@ from aqt import gui_hooks, mw
 from aqt.qt import QAction, QKeySequence, QMenu, QTimer
 from aqt.utils import openLink, tooltip
 
-from . import board, heatmap_ui, home, notify, ui, updates, web
+from . import activity, board, heatmap_ui, home, notify, ui, updates, web
 from . import inbox_ui, moments, moments_ui, share, share_ui, sharing
 from .inbox import CHALLENGE_ROUTE, answerable, shareable
 from .language import tr
@@ -145,6 +145,7 @@ state = {
     "companion": "aki",
     "companion_account": None,
     "inbox": [],
+    "activity": None,
 }
 
 mw.addonManager.setWebExports(__name__, r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png")
@@ -461,7 +462,7 @@ def poll(quiet=False):
     week = prefs.get(ORDER_WEEK_KEY)
 
     def work():
-        rank, profile, notifications = api.rank(previous, week), api.profile(), api.notifications()
+        rank, profile, notifications = api.rank(previous, week), api.profile(), activity._load(api)
         try:
             companion = api.companion()
         except Exception:
@@ -480,7 +481,7 @@ def poll(quiet=False):
         except Exception as e:
             # Keep a direct sign-in link on the deck list for a revoked credential.
             if isinstance(e, ServerError) and e.status == HTTPStatus.UNAUTHORIZED:
-                state.update(reauth=account, profile=None, place=None, inbox=[])
+                state.update(reauth=account, profile=None, place=None, inbox=[], activity=None)
                 redraw()
                 return
             print("ankiquest poll:", e)
@@ -491,9 +492,9 @@ def poll(quiet=False):
         state["poll_failure"] = None
         order = rank.get("order") or []
         state["place"] = order.index(api.name) + 1 if api.name in order else None
-        state["profile"], state["inbox"] = profile, inbox
+        state["profile"], state["activity"], state["inbox"] = profile, inbox, inbox.items
         state["companion"], state["companion_account"] = companion, account
-        announce(rank, profile, inbox, quiet)
+        announce(rank, profile, inbox.items, quiet)
         redraw()
 
     mw.taskman.run_in_background(work, done)
@@ -560,12 +561,13 @@ def on_deck_browser(deck_browser, content):
     failure = state["poll_failure"]
     if state["profile"] is None and not state["polling"] and (failure is None or time.monotonic() >= failure.retry_at):
         poll(quiet=True)
-    waiting = sum(1 for entry in state["inbox"] if answerable(entry))
+    page = state["activity"]
+    waiting, actions = (page.unread, page.actions) if page is not None else (0, 0)
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
     today = home.today_view(deck_browser, companion)
     profile = today["profile"] if today is not None else home._profile_for_display(state["profile"])
-    content.stats += board.html(profile, state["place"], waiting, tr, mascot, today)
+    content.stats += board.html(profile, state["place"], waiting, tr, mascot, today, actions=actions)
     content.stats += board._connection_note(state["profile"], state["poll_failure"], tr)
     content.stats += '<p style="text-align:center;font-size:12px">%s</p>' % html.escape(_upload_status(api))
 
@@ -693,7 +695,7 @@ def _save_account_config(values):
         for key in (ORDER_KEY, ORDER_WEEK_KEY, INBOX_KEY, STREAK_DAY_KEY, copies_ui.SEEN_KEY):
             profile.pop(key, None)
     state.update(
-        upload=None, polling=None, poll_failure=None, reauth=None, profile=None, place=None, inbox=[],
+        upload=None, polling=None, poll_failure=None, reauth=None, profile=None, place=None, inbox=[], activity=None,
         companion="aki", companion_account=None,
     )
     _moments._clear()
@@ -996,6 +998,8 @@ gui_hooks.sync_did_finish.append(on_sync)
 gui_hooks.profile_did_open.append(on_profile_open)
 gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
+if hasattr(gui_hooks, "profile_will_close"):
+    gui_hooks.profile_will_close.append(inbox_ui.clear_account)
 
 
 def current_companion():
@@ -1008,7 +1012,8 @@ def open_native_inbox():
     if not api.configured:
         tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
-    inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, _open_inbox_path, on_replied)
+    dialog = inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, _open_inbox_path, on_replied)
+    dialog.context._after_change = lambda: poll(quiet=True)
 
 
 def _open_inbox_path(path):
