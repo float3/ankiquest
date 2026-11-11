@@ -741,7 +741,7 @@ class HomeTests(unittest.TestCase):
         self.served_today()
         self.session(2)
         card = self.addon._moments._card
-        self.assertEqual("Streak secured! 🔥", card._items[0]["title"])
+        self.assertEqual("Streak minimum reached — syncing", card._items[0]["title"])
         self.assertIn("once your reviews upload", card._items[0]["body"])
         self.assertEqual(2, card._summary["reviews"])
         self.assertEqual("aki_streak", self.addon.moments._pose(card._items[0], "aki"))
@@ -778,7 +778,7 @@ class HomeTests(unittest.TestCase):
         self.api.server_info = Mock(return_value=(frozenset({"wins"}), None))
         self.session(2)
         item = self.addon._moments._card._items[0]
-        self.assertEqual("Streak secured! 🔥", item["title"])
+        self.assertEqual("Streak minimum reached — syncing", item["title"])
         self.assertNotIn("goal", item["body"].lower())
         self.api.server_info.assert_called_once_with()
 
