@@ -1,6 +1,6 @@
 # AnkiQuest
 
-XP, streaks, daily quests, friends and leaderboards for Anki. only the timing of your reviews is sent, never the content of your cards, unless you choose to show off a hard card you finally learned.
+XP, streaks, daily quests, friends and leaderboards for Anki. Clients send review history without card content. Sharing a conquered card label or a deck copy is an explicit choice.
 
 ## use it
 
@@ -12,19 +12,13 @@ XP, streaks, daily quests, friends and leaderboards for Anki. only the timing of
 
 ## run your own server
 
-```sh
-rustup target add wasm32-unknown-unknown
-npm ci
-cargo run -- ankiquest.json
-```
+Follow the [installation and deployment guide](docs/install.md) for prerequisites,
+a local build, NixOS with HTTPS, health checks, backups and updates. AnkiQuest
+does not replace AnkiWeb or an Anki sync server.
 
-```json
-{ "addr": "127.0.0.1:8097", "state_dir": "state", "registration": true }
-```
-
-on NixOS, import `inputs.ankiquest.nixosModules.default` and set `services.ankiquest = { enable = true; domain = "anki.example.com"; registration = true; };`.
-
-configuration, administration, the API and development: [docs/server.md](docs/server.md).
+- [Server configuration and administration](docs/server.md)
+- [Client API and compatibility](docs/mobile-api.md)
+- [Development and tests](docs/server.md#development)
 
 ## license
 
