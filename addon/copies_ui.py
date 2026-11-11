@@ -30,15 +30,15 @@ def clear_account():
     _set_count(0)
 
 
-def setup(mw, client, companion):
+def setup(mw, client, companion, menu):
     """`client()` gives the current account; `companion()` the mascot to show."""
     state.update(mw=mw, client=client, companion=companion)
-    send = QAction(tr("AnkiQuest: send a deck to friends…"), mw)
+    send = QAction(tr("Send a deck"), mw)
     send.triggered.connect(open_send)
     offered = QAction(copies.menu_title(0, tr), mw)
     offered.triggered.connect(open_offers)
-    mw.form.menuTools.addAction(send)
-    mw.form.menuTools.addAction(offered)
+    menu.addAction(send)
+    menu.addAction(offered)
     state["action"] = offered
 
 
@@ -100,7 +100,7 @@ def announce(offers, names, quiet):
         return
     for offer in fresh:
         tooltip(
-            "%s<br><i>%s</i>" % (copies.offer_html(offer, names, tr), html.escape(tr("Tools → AnkiQuest: decks offered to me…"))),
+            "%s<br><i>%s</i>" % (copies.offer_html(offer, names, tr), html.escape(tr("Tools → AnkiQuest → Decks offered to me"))),
             period=6000,
         )
 
