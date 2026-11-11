@@ -1,10 +1,11 @@
 """Every desktop label has a translation in every language, with the same placeholders."""
 
 import ast
+import json
 import re
 import unittest
 
-from addon_loader import ADDON, load_module
+from addon_loader import ADDON, load_in_package, load_module
 
 PLACEHOLDER = re.compile(r"%[sd]")
 
@@ -18,12 +19,15 @@ def literals(node):
 
 
 def labels():
-    """Every literal passed to `tr` or `translate` anywhere in the add-on."""
+    """Every literal label, including both forms passed to the plural helper."""
     found = set()
     for path in ADDON.glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text("utf-8"))):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) in ("tr", "translate") and node.args:
-                found.update(literals(node.args[0]))
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None)
+                count = 2 if name == "_plural" else 1 if name in ("tr", "translate") else 0
+                for argument in node.args[:count]:
+                    found.update(literals(argument))
     return found
 
 
@@ -43,6 +47,13 @@ language = load_module("aq_language_tables", "language.py")
 
 
 class TranslationTables(unittest.TestCase):
+    def test_shared_screens_match_the_reviewed_android_wording(self):
+        fixture = json.loads((ADDON.parent / "tests/fixtures/desktop-wording.json").read_text("utf-8"))
+        for row in fixture["strings"]:
+            for code, expected in row["translations"].items():
+                with self.subTest(resource=row["android_resource"], language=code):
+                    self.assertEqual(expected, language.tr(row["source"], code))
+
     def test_languages(self):
         self.assertEqual(sorted(language.TABLES), ["de", "es", "fr", "pt"])
 
@@ -77,7 +88,7 @@ class TranslationTables(unittest.TestCase):
         self.assertEqual(language.tr("Not a label", "de"), "Not a label")
 
     def test_labels_are_translated_before_names_are_filled_in(self):
-        board = load_module("aq_language_board", "board.py")
+        board = load_in_package("aq_language_board", "board")
         spanish = lambda value: language.tr(value, "es-AR")
         self.assertIn("Clasificación", board.html({"level": 4, "streak": 3}, 2, 1, spanish))
         self.assertIn("Puesto 2 esta semana", board.html({}, 2, 0, spanish))

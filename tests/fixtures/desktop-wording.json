@@ -1,0 +1,186 @@
+{
+  "android_commit": "54908f4ad3f4fac3fe2fcbc58f59b435e1d82bd5",
+  "purpose": "Reviewed wording for the same settings groups, moments and sharing screens; Android positional placeholders are normalized to Python placeholders.",
+  "strings": [
+    {
+      "android_resource": "aki_welcome",
+      "source": "Aki is here to help. One card, one small step.",
+      "translations": {
+        "es": "Aki está aquí para ayudarte. Una tarjeta, un pequeño paso.",
+        "de": "Aki hilft dir. Eine Karte, ein kleiner Schritt.",
+        "fr": "Aki est là pour t’aider. Une carte, un petit pas.",
+        "pt": "Aki está aqui para te ajudar. Um cartão, um pequeno passo."
+      }
+    },
+    {
+      "android_resource": "aki_review",
+      "source": "A small step starts with one card.",
+      "translations": {
+        "es": "Un pequeño paso empieza con una tarjeta.",
+        "de": "Ein kleiner Schritt beginnt mit einer Karte.",
+        "fr": "Un petit pas commence par une carte.",
+        "pt": "Um pequeno passo começa com um cartão."
+      }
+    },
+    {
+      "android_resource": "aki_complete",
+      "source": "Your cards are done for now. Nice work!",
+      "translations": {
+        "es": "Ya terminaste tus tarjetas por ahora. ¡Buen trabajo!",
+        "de": "Fürs Erste sind deine Karten geschafft. Gut gemacht!",
+        "fr": "Tu as terminé tes cartes pour le moment. Bravo !",
+        "pt": "Já terminaste os cartões por agora. Bom trabalho!"
+      }
+    },
+    {
+      "android_resource": "aki_streak",
+      "source": "You showed up today. That is progress worth keeping.",
+      "translations": {
+        "es": "Hoy estuviste presente. Ese progreso vale la pena.",
+        "de": "Du hast heute gelernt. Diesen Fortschritt lohnt es sich zu bewahren.",
+        "fr": "Tu as étudié aujourd’hui. Ce progrès mérite d’être préservé.",
+        "pt": "Estudaste hoje. Vale a pena preservar esse progresso."
+      }
+    },
+    {
+      "android_resource": "aki_protected",
+      "source": "Your streak is protected by a freeze. A fresh start is waiting.",
+      "translations": {
+        "es": "Un protector mantiene tu racha. Te espera un nuevo comienzo.",
+        "de": "Deine Lernserie ist geschützt. Ein neuer Anfang wartet auf dich.",
+        "fr": "Ta série est protégée par un gel. Un nouveau départ t’attend.",
+        "pt": "Uma proteção salvou a tua sequência. Um novo começo espera por ti."
+      }
+    },
+    {
+      "android_resource": "ankiquest_group_account",
+      "source": "Account",
+      "translations": {
+        "es": "Cuenta",
+        "de": "Konto",
+        "fr": "Compte",
+        "pt": "Conta"
+      }
+    },
+    {
+      "android_resource": "ankiquest_group_notify",
+      "source": "Notify me about",
+      "translations": {
+        "es": "Avísame de",
+        "de": "Benachrichtige mich über",
+        "fr": "Me prévenir pour",
+        "pt": "Avisar-me sobre"
+      }
+    },
+    {
+      "android_resource": "ankiquest_group_sharing",
+      "source": "Sharing",
+      "translations": {
+        "es": "Compartir",
+        "de": "Teilen",
+        "fr": "Partage",
+        "pt": "Partilha"
+      }
+    },
+    {
+      "android_resource": "ankiquest_group_app",
+      "source": "App and privacy",
+      "translations": {
+        "es": "App y privacidad",
+        "de": "App und Datenschutz",
+        "fr": "Appli et confidentialité",
+        "pt": "App e privacidade"
+      }
+    },
+    {
+      "android_resource": "ankiquest_quiet_hours_title",
+      "source": "Quiet hours",
+      "translations": {
+        "es": "Horas de silencio",
+        "de": "Ruhezeiten",
+        "fr": "Heures calmes",
+        "pt": "Horas de silêncio"
+      }
+    },
+    {
+      "android_resource": "ankiquest_show_global_title",
+      "source": "Show me on the global leaderboard",
+      "translations": {
+        "es": "Mostrarme en la clasificación global",
+        "de": "Mich in der globalen Rangliste zeigen",
+        "fr": "M’afficher au classement mondial",
+        "pt": "Mostrar-me na classificação global"
+      }
+    },
+    {
+      "android_resource": "ankiquest_share_title",
+      "source": "Share this win",
+      "translations": {
+        "es": "Compartir este logro",
+        "de": "Diesen Erfolg teilen",
+        "fr": "Partager cette réussite",
+        "pt": "Partilhar esta conquista"
+      }
+    },
+    {
+      "android_resource": "ankiquest_share_text",
+      "source": "%s: %s\nStudy with me on AnkiQuest: %s",
+      "translations": {
+        "es": "%s: %s\nEstudiá conmigo en AnkiQuest: %s",
+        "de": "%s: %s\nLern mit mir auf AnkiQuest: %s",
+        "fr": "%s : %s\nRévise avec moi sur AnkiQuest : %s",
+        "pt": "%s: %s\nEstuda comigo no AnkiQuest: %s"
+      }
+    },
+    {
+      "android_resource": "ankiquest_share_text_offline",
+      "source": "%s: %s\nI study with AnkiQuest.",
+      "translations": {
+        "es": "%s: %s\nEstudio con AnkiQuest.",
+        "de": "%s: %s\nIch lerne mit AnkiQuest.",
+        "fr": "%s : %s\nJe révise avec AnkiQuest.",
+        "pt": "%s: %s\nEstudo com o AnkiQuest."
+      }
+    },
+    {
+      "android_resource": "ankiquest_share_nobody",
+      "source": "Nobody new got it: your friends already have it, or you have no friends in AnkiQuest yet.",
+      "translations": {
+        "es": "Nadie nuevo lo recibió: tus amigos ya lo tienen, o todavía no tenés amigos en AnkiQuest.",
+        "de": "Niemand Neues hat es bekommen: Deine Freunde haben es schon, oder du hast noch keine Freunde in AnkiQuest.",
+        "fr": "Personne de nouveau ne l’a reçu : tes amis l’ont déjà, ou tu n’as pas encore d’amis sur AnkiQuest.",
+        "pt": "Ninguém novo recebeu: os teus amigos já têm, ou ainda não tens amigos no AnkiQuest."
+      }
+    },
+    {
+      "android_resource": "ankiquest_share_account_changed",
+      "source": "This win belongs to an AnkiQuest account that is no longer signed in.",
+      "translations": {
+        "es": "Este logro es de una cuenta de AnkiQuest que ya no tiene la sesión iniciada.",
+        "de": "Dieser Erfolg gehört zu einem AnkiQuest-Konto, das nicht mehr angemeldet ist.",
+        "fr": "Cette victoire appartient à un compte AnkiQuest qui n’est plus connecté.",
+        "pt": "Esta conquista pertence a uma conta AnkiQuest que já não tem sessão iniciada."
+      }
+    },
+    {
+      "android_resource": "ankiquest_summary_progress",
+      "source": "View progress",
+      "translations": {
+        "es": "Ver progreso",
+        "de": "Fortschritt ansehen",
+        "fr": "Voir la progression",
+        "pt": "Ver progresso"
+      }
+    },
+    {
+      "android_resource": "ankiquest_summary_dont_show_again",
+      "source": "Don’t show this again",
+      "translations": {
+        "es": "No volver a mostrar esto",
+        "de": "Nicht mehr anzeigen",
+        "fr": "Ne plus afficher ceci",
+        "pt": "Não voltar a mostrar"
+      }
+    }
+  ]
+}

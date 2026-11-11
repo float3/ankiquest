@@ -96,6 +96,20 @@ class Settings(unittest.TestCase):
         self.assertIsNone(self.open(inspect))
         self.assertEqual([], self.posts)
 
+    def test_reminder_hours_follow_language_and_keep_numeric_values(self):
+        for code, clock in (("en_US", "8:00"), ("de_DE", "20:00")):
+            def inspect(dialog):
+                box = dialog.findChild(QComboBox, "ankiquest_reminder_hour")
+                self.assertIn(clock, box.currentText())
+                self.assertEqual(20, box.currentData())
+                if code == "en_US":
+                    self.assertIn("PM", box.currentText())
+                dialog.reject()
+
+            with self.subTest(language=code), patch("anki.lang.current_lang", code):
+                self.open(inspect)
+        self.assertEqual([], self.posts)
+
     def test_installed_version_is_visible_and_ankiweb_hides_github_channels(self):
         def inspect(dialog):
             labels = [widget.text() for widget in dialog.findChildren(QLabel)]

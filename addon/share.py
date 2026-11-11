@@ -6,6 +6,7 @@ Plain Python, so the tests load it without Anki; share_ui.py shows it."""
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from .language import _plural
 
 MAX_IMAGE = 4 * 1024 * 1024
 IMAGE_TIMEOUT = 15
@@ -128,7 +129,7 @@ def podium(previous, order, me):
 def sent_text(recipients, translate=lambda value: value):
     if recipients <= 0:
         return translate("Nobody new got it: your friends already have it, or you have no friends in AnkiQuest yet.")
-    return (translate("Shared with %d friend") if recipients == 1 else translate("Shared with %d friends")) % recipients
+    return _plural("Shared with %d friend", "Shared with %d friends", recipients, translate) % recipients
 
 
 def invitation(win, server, translate=lambda value: value):
