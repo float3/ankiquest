@@ -626,6 +626,8 @@ class HomeTests(unittest.TestCase):
             rank=Mock(return_value={"order": ["hill"]}), notifications=Mock(return_value=[]),
             profile=Mock(return_value={"level": 2, "streak": 1, "today": {"streak_minutes": 0, "reviews": 0}}),
             companion=Mock(return_value="ankilope"),
+            deck_settings=Mock(return_value={}), server_info=Mock(return_value=(frozenset(), None)),
+            _request=Mock(return_value={}),
         )
         col = collection(self.db, self.tree, 100, self.cutoff)
         col.get_config = lambda *args: 4
@@ -668,6 +670,9 @@ class HomeTests(unittest.TestCase):
         self.addon = load_module("ankiquest_home_addon", "__init__.py", package=True)
         self.addon.client = lambda: self.api
         self.home = sys.modules["ankiquest_home_addon.home"]
+        pictures = patch.object(self.home.board_pictures.share, "download_image", return_value=None)
+        pictures.start()
+        self.addCleanup(pictures.stop)
         self.home.today_ui = SimpleNamespace(session_dialog=Mock())
         from moment_fixture import cards
         self.cards = cards(self)
