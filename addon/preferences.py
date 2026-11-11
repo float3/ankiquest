@@ -76,7 +76,7 @@ def save(api, loaded, wanted):
     api._request(subscriptions_path(api), subscription_body(fresh, wanted["alerts"], before, wanted["after"]))
 
 
-def section(dialog, layout, mw, api, upload_status=None):
+def section(dialog, groups, mw, api, upload_status=None, on_saved=None):
     """Appends the server-side preferences to the settings dialog and returns the function to run
     when it is saved. Nothing is shown for an account without a token."""
     from aqt.qt import QCheckBox, QLabel, Qt
@@ -86,7 +86,7 @@ def section(dialog, layout, mw, api, upload_status=None):
     status = QLabel(upload_status or last_upload_text(mw.pm.profile.get(LAST_UPLOAD_KEY)))
     status.setTextFormat(Qt.TextFormat.PlainText)
     status.setWordWrap(True)
-    layout.addWidget(status)
+    groups["data"].addWidget(status)
     if not api.configured:
         return None
     freeze = QCheckBox(tr("Streak protection"))
@@ -98,11 +98,14 @@ def section(dialog, layout, mw, api, upload_status=None):
     holder.setMaximumHeight(140)
     note = _note("")
     status = _note(tr("Loading your notification choices…"))
-    for widget in (freeze, freeze_help, alerts, people_title, holder, note, status):
-        layout.addWidget(widget)
+    for widget in (freeze, freeze_help):
+        groups["app"].addWidget(widget)
+    for widget in (alerts, people_title, holder, note, status):
+        groups["notify"].addWidget(widget)
     for widget in (freeze, freeze_help, alerts, people_title, holder, note):
         widget.setVisible(False)
     loaded = {}
+    finish_choices = _account_choices(groups, mw, api, on_saved)
 
     def shown(future):
         try:
@@ -114,6 +117,7 @@ def section(dialog, layout, mw, api, upload_status=None):
     mw.taskman.run_in_background(lambda: load(api), shown)
 
     def finish():
+        finish_choices()
         if not loaded:
             return
         wanted = {
@@ -176,3 +180,97 @@ def _saved(future):
         future.result()
     except Exception as error:
         tooltip(tr("Could not save your notification settings (%s).") % html.escape(str(error)))
+
+
+# These account switches share /api/decks, but saving them must not replace deck recipients.
+_DECK_CHOICES = (
+    ("nudges", "Nudge me when a place, my best day or the next level is within reach", "notify"),
+    ("celebrations", "Celebrate achievements, streak milestones and personal bests", "notify"),
+    ("global_leaderboard", "Show me on the global leaderboard", "sharing"),
+)
+
+
+def _load_choices(api):
+    found = {}
+    for key, read in (("decks", api.deck_settings), ("companion", api.companion)):
+        try:
+            found[key] = read()
+        except Exception as error:
+            print("ankiquest %s:" % key, error)
+    return found
+
+
+def _save_choices(api, loaded, wanted, companion):
+    before = loaded.get("decks") or {}
+    changes = {key: value for key, value in wanted.items() if key in before and value != before[key]}
+    if changes:
+        api._request("/api/decks/" + api.user, changes)
+    changed_companion = companion is not None and "companion" in loaded and companion != loaded["companion"]
+    if changed_companion:
+        api.set_companion(companion)
+    return bool(changes) or changed_companion
+
+
+def _account_choices(groups, mw, api, on_saved):
+    """Load account choices into their groups; absent server fields stay hidden."""
+    from aqt.qt import QCheckBox, QComboBox, QLabel
+
+    toggles = {}
+    for key, title, group in _DECK_CHOICES:
+        box = QCheckBox(tr(title))
+        box.hide()
+        groups[group].addWidget(box)
+        toggles[key] = box
+    label = QLabel(tr("Study companion"))
+    companion = QComboBox()
+    companion.setObjectName("ankiquest_companion")
+    for value, title in (("aki", "Aki"), ("ankilope", "Ankilope"), ("none", tr("No companion"))):
+        companion.addItem(title, value)
+    for widget in (label, companion):
+        widget.hide()
+        groups["account"].addWidget(widget)
+    loaded = {}
+
+    def arrived(future):
+        try:
+            loaded.update(future.result())
+            settings = loaded.get("decks") or {}
+            for key, box in toggles.items():
+                if isinstance(settings.get(key), bool):
+                    box.setChecked(settings[key])
+                    box.show()
+            selected = companion.findData(loaded.get("companion"))
+            if selected >= 0:
+                companion.setCurrentIndex(selected)
+                label.show()
+                companion.show()
+        except RuntimeError:
+            return
+
+    mw.taskman.run_in_background(lambda: _load_choices(api), arrived)
+
+    def finish():
+        before = dict(loaded)
+        if not before:
+            return
+        settings = before.get("decks") or {}
+        wanted = {key: box.isChecked() for key, box in toggles.items() if isinstance(settings.get(key), bool)}
+        selected = companion.currentData() if companion.findData(before.get("companion")) >= 0 else None
+        mw.taskman.run_in_background(
+            lambda: _save_choices(api, before, wanted, selected),
+            lambda future: _choices_saved(future, on_saved),
+        )
+
+    return finish
+
+
+def _choices_saved(future, on_saved):
+    from aqt.utils import tooltip
+
+    try:
+        changed = future.result()
+    except Exception as error:
+        tooltip(tr("Could not save your account choices (%s).") % html.escape(str(error)))
+        return
+    if changed and on_saved is not None:
+        on_saved()

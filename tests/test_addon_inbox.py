@@ -320,7 +320,7 @@ class TranslationTests(unittest.TestCase):
             wanted.update(translated_literals(ADDON / (name + ".py")))
         for group in inbox.QUICK.values():
             wanted.update(group)
-        wanted.add("Tools → AnkiQuest inbox… to reply")
+        wanted.add("Tools → AnkiQuest → Inbox to reply")
         self.assertEqual([], sorted(label for label in wanted if label not in language.SPANISH))
 
     def test_formatted_translations_keep_their_placeholders(self):
@@ -388,7 +388,7 @@ class CelebrationHookTests(unittest.TestCase):
     def test_the_reply_hint_points_at_the_native_inbox(self):
         self.offered()
         self.addon.poll()
-        self.assertIn("Tools → AnkiQuest inbox… to reply", self.addon.tooltip.call_args.args[0])
+        self.assertIn("Tools → AnkiQuest → Inbox to reply", self.addon.tooltip.call_args.args[0])
 
 
 if __name__ == "__main__":

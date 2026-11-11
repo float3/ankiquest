@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 import anki.lang
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction, QKeySequence, QTimer
+from aqt.qt import QAction, QKeySequence, QMenu, QTimer
 from aqt.utils import openLink, tooltip
 
 from . import board, heatmap_ui, home, notify, ui, updates, web
@@ -21,6 +21,7 @@ from .inbox import answerable, shareable
 from .language import tr
 from .client import (
     COUNT_SQL,
+    DEFAULT_SERVER,
     MAX_PENDING,
     PENDING_SQL,
     UNDO_WINDOW_MS,
@@ -516,7 +517,7 @@ def announce(rank, profile, inbox, quiet):
     for entry in fresh:
         text = notify.notice(entry)
         if answerable(entry):
-            text += "<br><i>%s</i>" % html.escape(tr("Tools → AnkiQuest inbox… to reply"))
+            text += "<br><i>%s</i>" % html.escape(tr("Tools → AnkiQuest → Inbox to reply"))
         tooltip(text, period=6000)
     celebrate_latest(previous, rank, fresh, settings)
 
@@ -710,6 +711,7 @@ def open_settings():
     values = ui.settings_dialog(
         mw, config(), test_connection, upload_everything, state["companion"], ask_account,
         extra=settings_sections, on_goal=home.open_goal_dialog, on_manage=_manage_account,
+        on_decks=open_deck_notifications, on_privacy=_open_privacy,
     )
     if values is None:
         return
@@ -732,20 +734,37 @@ def _manage_account(base=None):
         if not api.configured:
             return
         base = api.base
+    _open_site_page(base, "/settings")
+
+
+def _open_privacy():
+    _open_site_page(client().base or DEFAULT_SERVER, "/privacy")
+
+
+def _open_site_page(base, path):
     try:
         server = urlsplit(base)
     except ValueError:
         return
     if server.scheme in ("https", "http") and server.hostname and server.username is None and not (server.query or server.fragment):
-        openLink(web.page_url(base, "/settings"))
+        openLink(web.page_url(base, path))
 
 
-def settings_sections(dialog, layout):
-    """The server-side settings below the local ones; answers what to run once they are saved."""
+def settings_sections(dialog, groups):
+    """Load account choices into their groups and return their Save callbacks."""
     api = client()
+    target = UploadTarget(mw.col, mw.pm.profile, (api.base, api.user, api.token))
+
+    def changed():
+        # A poll started before Save must not overwrite the newly saved companion.
+        if not target.current(client()):
+            return
+        state["polling"] = None
+        poll(quiet=True)
+
     finishes = [found for found in (
-        preferences.section(dialog, layout, mw, api, upload_status=_upload_status(api)),
-        sharing.section(layout, mw, api),
+        preferences.section(dialog, groups, mw, api, upload_status=_upload_status(api), on_saved=changed),
+        sharing.section(groups["sharing"], mw, api),
     ) if found]
     if not finishes:
         return None
@@ -771,41 +790,6 @@ def test_connection(values):
 
 def upload_everything():
     _request_upload(Refresh(False, UploadMode.HISTORY))
-
-
-def open_companion():
-    api = client()
-    if not api.configured:
-        tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
-        return
-
-    def loaded(future):
-        try:
-            current = future.result()
-        except Exception as error:
-            failed("AnkiQuest: %s", error)
-            return
-        if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
-            return
-        selected = ui.companion_dialog(mw, current)
-        if selected is None or selected == current:
-            return
-
-        def saved(future):
-            try:
-                companion = future.result()
-            except Exception as error:
-                failed("AnkiQuest: %s", error)
-                return
-            if [client().base, client().user, client().token] != [api.base, api.user, api.token]:
-                return
-            state["companion"], state["companion_account"] = companion, [api.base, api.user, api.token]
-            redraw()
-            tooltip(tr("Study companion saved across your devices."))
-
-        mw.taskman.run_in_background(lambda: api.set_companion(selected), saved)
-
-    mw.taskman.run_in_background(api.companion, loaded)
 
 
 def open_deck_notifications():
@@ -971,18 +955,20 @@ def add_action(title, handler, shortcut=None):
     action.triggered.connect(handler)
     if shortcut:
         action.setShortcut(QKeySequence(shortcut))
-    mw.form.menuTools.addAction(action)
+    _tools.addAction(action)
     return action
 
 
-add_action(tr("AnkiQuest: sign in or create account…"), open_account)
-add_action(tr("AnkiQuest settings…"), open_settings)
-add_action(tr("AnkiQuest study companion…"), open_companion)
-add_action(tr("AnkiQuest deck notifications…"), open_deck_notifications)
-add_action(tr("AnkiQuest inbox…"), open_inbox, inbox_ui.SHORTCUT)
-add_action(tr("AnkiQuest on the web…"), open_website, WEBSITE_SHORTCUT)
-add_action(tr("AnkiQuest: check for updates…"), lambda: check_updates(quiet=False))
-copies_ui.setup(mw, lambda: client(), lambda: state["companion"])
+# Keep one Tools entry; deck-copy counts update their action inside the same submenu.
+_tools = QMenu("AnkiQuest", mw)
+mw.form.menuTools.addAction(_tools.menuAction())
+add_action(tr("Today"), lambda: open_page(board.PAGES["today"]))
+add_action(tr("Inbox"), open_inbox, inbox_ui.SHORTCUT)
+add_action(tr("Friends"), lambda: open_page("/friends"))
+copies_ui.setup(mw, lambda: client(), lambda: state["companion"], _tools)
+add_action(tr("Website"), open_website, WEBSITE_SHORTCUT)
+add_action(tr("Settings"), open_settings)
+add_action(tr("Check for updates"), lambda: check_updates(quiet=False))
 
 
 gui_hooks.reviewer_did_answer_card.append(on_answer)

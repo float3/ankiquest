@@ -6,6 +6,7 @@ from aqt.qt import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QGroupBox,
     QHBoxLayout,
     QIcon,
     QLabel,
@@ -158,24 +159,51 @@ def account_dialog(parent, url, on_submit, companion="aki", dismiss=None):
     return result
 
 
+def _folded(title, layout):
+    """Keep occasional controls reachable without making the main dialog longer."""
+    toggle = QPushButton(title)
+    toggle.setCheckable(True)
+    holder = QWidget()
+    contents = QVBoxLayout(holder)
+    contents.setContentsMargins(0, 0, 0, 0)
+    toggle.toggled.connect(holder.setVisible)
+    holder.hide()
+    layout.addWidget(toggle)
+    layout.addWidget(holder)
+    return contents
+
+
 def settings_dialog(
     parent, config, on_test, on_upload_all, companion="aki", on_account=None, *,
-    extra=None, on_goal=None, on_manage=None,
+    extra=None, on_goal=None, on_manage=None, on_decks=None, on_privacy=None,
 ):
-    """Everything the phone keeps in its ankiquest preference screen. `extra(dialog, layout)` may append
-    a section and return what to run once the dialog is saved; `on_goal()` opens the daily goal dialog."""
+    """One scrollable dialog. Server sections save only for the account they loaded."""
     dialog = QDialog(parent)
     dialog.setWindowTitle("AnkiQuest")
+    screen = dialog.screen().availableGeometry()
+    dialog.resize(min(640, screen.width() - 80), min(640, screen.height() - 80))
     layout = QVBoxLayout(dialog)
     _brand(dialog, layout, companion)
+    scroll = _scroller([])
+    scroll.setObjectName("ankiquest_settings_scroll")
+    layout.addWidget(scroll, 1)
+    contents = scroll.widget().layout()
+    groups = {}
+    for key, title in (
+        ("account", tr("Account")), ("notify", tr("Notify me about")),
+        ("sharing", tr("Sharing")), ("app", tr("App and privacy")),
+    ):
+        group = QGroupBox(title)
+        groups[key] = QVBoxLayout(group)
+        contents.insertWidget(contents.count() - 1, group)
+    account_layout = groups["account"]
 
+    # Connection edits are staged until Save; server choices keep their original owner.
     url = QLineEdit(config.get("url", ""))
     url.setPlaceholderText(DEFAULT_SERVER)
     user = QLineEdit(config.get("user", ""))
     token = QLineEdit(config.get("token", ""))
     token.setEchoMode(QLineEdit.EchoMode.Password)
-
-    # Keep account actions first. Manual fields still support existing token-only setups.
     original = tuple(field.text().strip() for field in (url, user, token))
     signed_in = all(original)
     signed_server = url.text().strip() if signed_in else None
@@ -183,7 +211,7 @@ def settings_dialog(
     identity.setTextFormat(Qt.TextFormat.PlainText)
     identity.setWordWrap(True)
     identity.setVisible(signed_in)
-    layout.addWidget(identity)
+    account_layout.addWidget(identity)
     manage = QPushButton(tr("Manage account on the website…")) if on_manage is not None else None
     sign_out = QPushButton(tr("Sign out"))
     if on_account is not None:
@@ -206,11 +234,11 @@ def settings_dialog(
                 manage.show()
 
         account.clicked.connect(change_account)
-        layout.addWidget(account)
+        account_layout.addWidget(account)
     if manage is not None:
         manage.clicked.connect(lambda: on_manage(signed_server))
         manage.setVisible(signed_in)
-        layout.addWidget(manage)
+        account_layout.addWidget(manage)
 
     def forget_account():
         for field in (url, user, token):
@@ -219,45 +247,72 @@ def settings_dialog(
 
     sign_out.clicked.connect(forget_account)
     sign_out.setVisible(signed_in)
-    layout.addWidget(sign_out)
-
-    manual = QWidget()
-    fields = QVBoxLayout(manual)
-    fields.setContentsMargins(0, 0, 0, 0)
+    account_layout.addWidget(sign_out)
+    fields = _folded(tr("Manual connection"), account_layout)
     for title, field in ((tr("Server"), url), (tr("Player"), user), (tr("Token"), token)):
         fields.addWidget(QLabel(title))
         fields.addWidget(field)
-    more = QPushButton(tr("Manual connection"))
-    more.setCheckable(True)
-    more.toggled.connect(manual.setVisible)
-    manual.hide()
-    layout.addWidget(more)
-    layout.addWidget(manual)
+    data = _folded(tr("Data"), account_layout)
+    upload = QPushButton(tr("Upload everything again"))
+    upload.clicked.connect(on_upload_all)
+    data.addWidget(upload)
 
     rank = QCheckBox(tr("Tell me when my place on the leaderboard changes"))
     rank.setChecked(bool(config.get("notify_rank", True)))
-    layout.addWidget(rank)
-
+    groups["notify"].addWidget(rank)
     hours = QSpinBox()
     hours.setRange(0, 12)
     hours.setValue(int(config.get("streak_hours", 2) or 0))
     hours.setSuffix(" h")
-    layout.addWidget(_row(QLabel(tr("Warn me before my streak ends")), hours))
+    groups["notify"].addWidget(_row(QLabel(tr("Warn me before my streak ends")), hours))
 
     channel = QComboBox()
     for value, title in (("stable", tr("Stable releases")), ("nightly", tr("Nightly builds (untested)"))):
         channel.addItem(title, value)
     channel.setCurrentIndex(1 if config.get("update_channel") == "nightly" else 0)
-    layout.addWidget(_row(QLabel(tr("Update channel")), channel))
-    today_values = settings_section(layout, config, on_goal)
+    groups["app"].addWidget(_row(QLabel(tr("Update channel")), channel))
+    today_values = settings_section(groups["app"], config, notify_layout=groups["notify"])
+    if on_privacy is not None:
+        privacy = QPushButton(tr("Privacy notice"))
+        privacy.clicked.connect(on_privacy)
+        groups["app"].addWidget(privacy)
 
+    # Local settings stay editable while account-bound sections wait for a saved connection.
+    server_groups = {"data": data}
+    server_panels = []
+    for key, group_layout in groups.items():
+        panel = QWidget()
+        server_panels.append(panel)
+        server_groups[key] = QVBoxLayout(panel)
+        server_groups[key].setContentsMargins(0, 0, 0, 0)
+        group_layout.addWidget(panel)
+    for key, title, callback in (
+        ("sharing", tr("Deck completion notifications"), on_decks),
+        ("app", tr("Daily goal…"), on_goal),
+    ):
+        if callback is not None:
+            button = QPushButton(title)
+            button.clicked.connect(callback)
+            server_groups[key].addWidget(button)
+    finish = extra(dialog, server_groups) if extra else None
+    account_note = QLabel(tr("Save this account, then reopen settings to load its choices."))
+    account_note.setWordWrap(True)
+    account_layout.addWidget(account_note)
+
+    def account_changed():
+        changed = original != tuple(field.text().strip() for field in (url, user, token))
+        for panel in server_panels:
+            panel.setEnabled(signed_in and not changed)
+        upload.setEnabled(signed_in and not changed)
+        account_note.setVisible(changed)
+
+    for field in (url, user, token):
+        field.textChanged.connect(account_changed)
+    account_changed()
     test = QPushButton(tr("Test connection"))
     test.clicked.connect(lambda: on_test(_values(url, user, token, rank, hours, channel)))
     fields.addWidget(test)
-    upload = QPushButton(tr("Upload everything again"))
-    upload.clicked.connect(on_upload_all)
-    finish = extra(dialog, layout) if extra else None
-    layout.addLayout(_buttons(dialog, tr("Save"), (upload,)))
+    layout.addLayout(_buttons(dialog, tr("Save")))
 
     if not dialog.exec():
         return None
@@ -345,13 +400,6 @@ def deck_dialog(parent, settings, companion="aki"):
     )
     layout.addLayout(columns)
 
-    nudges = QCheckBox(tr("Nudge me when a place, my best day or the next level is within reach"))
-    nudges.setChecked(bool(settings.get("nudges")))
-    layout.addWidget(nudges)
-    celebrations = QCheckBox(tr("Celebrate achievements, streak milestones and personal bests"))
-    celebrations.setChecked(settings.get("celebrations") is not False)
-    layout.addWidget(celebrations)
-
     every = QPushButton(tr("All / none"))
 
     def toggle_all():
@@ -369,7 +417,7 @@ def deck_dialog(parent, settings, companion="aki"):
     shared = [deck["id"] for deck, item in zip(decks, items) if item.checkState(0) == checked]
     unshared = [deck["id"] for deck, item in zip(decks, items) if item.checkState(0) != checked]
     picked = [user for user, box in recipients.items() if box.isChecked()]
-    return shared, unshared, picked, nudges.isChecked(), celebrations.isChecked()
+    return shared, unshared, picked, None, None
 
 
 def _titled(title, widget):
@@ -380,35 +428,3 @@ def _titled(title, widget):
     layout.addWidget(label)
     layout.addWidget(widget)
     return holder
-
-
-def companion_dialog(parent, selected):
-    """A native picker; the caller saves the answer to the current account."""
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(tr("Study companion"))
-    layout = QVBoxLayout(dialog)
-    layout.addWidget(QLabel(tr("Choose who cheers you on. This choice follows your account across devices.")))
-    choice = QComboBox()
-    options = (("Aki", "aki"), ("Ankilope", "ankilope"), (tr("No companion"), "none"))
-    for name, value in options:
-        choice.addItem(name, value)
-    choice.setCurrentIndex(next((i for i, (_, value) in enumerate(options) if value == selected), 0))
-    layout.addWidget(choice)
-    preview = QLabel()
-    preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    layout.addWidget(preview)
-
-    def update_preview():
-        value = choice.currentData()
-        if value == "none":
-            preview.clear()
-        else:
-            preview.setPixmap(QPixmap(face_path(value)).scaled(
-                96, 96, Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
-
-    choice.currentIndexChanged.connect(update_preview)
-    update_preview()
-    layout.addLayout(_buttons(dialog, tr("Save")))
-    return choice.currentData() if dialog.exec() else None
