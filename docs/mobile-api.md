@@ -209,6 +209,8 @@ A client may judge one thing itself: today, with reviews it holds but has not up
 
 `tests/fixtures/day_verdicts.json` holds cases worked out by the server (`src/day_verdicts.rs`); clients test their copy of the rule against it.
 
+The desktop Today panel uses this same verdict for its streak pill, companion mood, warning and own leaderboard row. A locally met day says “Syncing” until the server confirms it; an expired day hides the old streak and daily XP. Session cards and the review heatmap name the server's historical states explicitly, including the difference between a frozen and a skipped day. A session without a known server day stays unknown instead of treating its review count as proof that the minimum was met.
+
 ## records and study history
 
 the app's native records and study history screens read the same JSON as the website's `/records` and `/history` pages.

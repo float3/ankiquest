@@ -42,6 +42,7 @@ class Colours(unittest.TestCase):
             day(-2): heatmap.Verdict(heatmap.FROZEN, 1, 10),
             day(-3): heatmap.Verdict(heatmap.NONE),
             day(-4): heatmap.Verdict(heatmap.MET, 12, 10),
+            day(-5): heatmap.Verdict(heatmap.SKIPPED),
         }
         reviews = {day(-1): 50, day(-2): 50, day(-3): 50, day(-4): 50}
         data = heatmap.summarize(TODAY, reviews, {}, {day(-2)}, verdicts)
@@ -49,20 +50,30 @@ class Colours(unittest.TestCase):
         self.assertEqual("z k", ui.colour(data, day(-2)))
         self.assertEqual("l0", ui.colour(data, day(-3)))
         self.assertEqual("l2", ui.colour(data, day(-4)))
+        self.assertEqual("z k", ui.colour(data, day(-5)))
 
 
 class Texts(unittest.TestCase):
     def test_each_kind_of_day(self):
         data = heatmap.summarize(
             TODAY, {day(0): 1, day(-1): 4, day(-2): 2}, {day(1): 3}, {day(-2)},
-            {day(0): heatmap.Verdict(heatmap.SHORT, 4, 10), day(-1): heatmap.Verdict(heatmap.SHORT, 12, 10)},
+            {day(0): heatmap.Verdict(heatmap.SHORT, 4, 10), day(-1): heatmap.Verdict(heatmap.SHORT, 12, 10),
+             day(-2): heatmap.Verdict(heatmap.FROZEN), day(-3): heatmap.Verdict(heatmap.NONE),
+             day(-4): heatmap.Verdict(heatmap.SKIPPED), day(-5): heatmap.Verdict(heatmap.MET, 10, 10)},
         )
         self.assertEqual("1 review · 4 of 10 minutes for the streak so far", ui.describe(data, day(0), english))
         self.assertEqual("4 reviews · 10 of 10 minutes, short of the streak minimum", ui.describe(data, day(-1), english))
-        self.assertEqual("2 reviews · AnkiQuest kept your streak", ui.describe(data, day(-2), english))
-        self.assertEqual("0 reviews", ui.describe(data, day(-3), english))
+        self.assertEqual("2 reviews · Frozen — streak kept", ui.describe(data, day(-2), english))
+        self.assertEqual("0 reviews · No study counted", ui.describe(data, day(-3), english))
+        self.assertEqual("0 reviews · Skipped day — streak kept", ui.describe(data, day(-4), english))
+        self.assertEqual("0 reviews · Streak minimum met", ui.describe(data, day(-5), english))
         self.assertEqual("3 review cards due (estimate)", ui.describe(data, day(1), english))
         self.assertEqual("Forecast is available for the next 90 days.", ui.describe(data, day(91), english))
+
+    def test_unjudged_reviews_are_not_called_a_met_day(self):
+        data = heatmap.summarize(TODAY, {day(-1): 20}, {}, {day(-2)})
+        self.assertEqual("20 reviews", ui.describe(data, day(-1), english))
+        self.assertEqual("0 reviews · Protected — streak kept", ui.describe(data, day(-2), english))
 
 
 class Block(unittest.TestCase):

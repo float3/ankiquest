@@ -201,6 +201,8 @@ class _Card:
         layout.addWidget(self._choices)
         self._session = share_ui._plain("")
         layout.addWidget(self._session)
+        self._day = share_ui._plain("")
+        layout.addWidget(self._day)
         self._status = share_ui._plain("")
         layout.addWidget(self._status)
         self._actions = QVBoxLayout()
@@ -272,6 +274,16 @@ class _Card:
         self._session.setVisible(self._summary is not None and not key.startswith("session:"))
         self._quiet.setVisible(self._summary is not None)
         self._continue.setVisible(bool(self._summary and self._summary.get("remaining", 0) > 0))
+        self._day.setVisible(self._summary is not None)
+        if self._summary:
+            day = self._addon.home._session_day(self._summary)
+            self._day.setText(day["label"])
+            colours = {
+                "met": "background:#dff1c9;color:#254a12;",
+                "short": "background:#e9d8a6;color:#534619;",
+                **{state: "background:#def0ff;color:#16527b;" for state in ("syncing", "protected", "frozen", "skipped")},
+            }
+            self._day.setStyleSheet("padding:6px;border-radius:6px;" + colours.get(day["state"], ""))
 
     def _render(self, _index=None):
         key = self._choices.currentData()
@@ -279,7 +291,8 @@ class _Card:
         if item is None:
             return
         self._rendered = object()
-        self._title.setText(item["title"])
+        title = self._addon.home._streak_title(item["summary"]) if item["topic"] == "secured" and item.get("local") and item.get("summary") else item["title"]
+        self._title.setText(title)
         self._body.setText(item["body"])
         self._date.setText(inbox.when(item["at"] // 1000))
         self._status.clear()
