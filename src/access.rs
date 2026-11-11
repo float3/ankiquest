@@ -1163,6 +1163,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_password_keeps_full_default_board_rows() {
+        let (app, path) = fixture(true);
+        crate::test_support::with_reviews(&app, "alice", 2);
+        let cookie = session_header(&sign_in(&app, "shared-master").await);
+        let response = request(&app, "GET", "/api/leaderboard", &[("cookie", &cookie)], "").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let board: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(board[0]["user"], "alice");
+        assert!(board[0]["today_reviews"].is_u64(), "{board}");
+        assert!(board[0].get("rank").is_none(), "{board}");
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
     async fn master_secret_and_ambiguous_tokens_never_select_an_owner() {
         let (mut app, path) = fixture(true);
         Arc::get_mut(&mut app)
