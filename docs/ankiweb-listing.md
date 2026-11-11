@@ -1,9 +1,10 @@
-# AnkiWeb listing draft
+# AnkiWeb listing
 
-Prepared for the publishing owner. This is not a published AnkiWeb listing.
-Use the checked `.ankiaddon` artifact from the intended release commit and
-upload the screenshots below. Record the resulting listing ID in the
-compatibility documentation before directing users to install it.
+Published on 2026-11-11: [AnkiQuest on AnkiWeb](https://ankiweb.net/shared/info/414948448).
+Installation code: **414948448**. The content below is the listing copy.
+For updates, use the checked `ankiquest-ankiweb-addon` CI artifact from the
+intended commit. Its numeric package ID and conflicts differ from the
+GitHub archive. Upload it through **Update** on the listing owner's account.
 
 ## Title
 
@@ -14,6 +15,7 @@ AnkiQuest — study progress, streaks and friends
 Give your regular Anki study sessions a little company. AnkiQuest adds a
 study companion, XP, streaks, daily goals, quests and optional social features
 to Anki. It works with Anki 23.10 or newer using Qt 6.
+Use a current Anki release for everyday study; 23.10 is the compatibility floor.
 
 - **Today:** see your study progress, next deck, streak status and daily goal
   under the deck list.
@@ -73,9 +75,21 @@ your account.
 
 ![AnkiQuest Inbox](screenshots/desktop-inbox.png)
 
-## Publication handoff
+## Updating the listing
 
-The publishing owner still needs to choose the AnkiWeb account, create the
-listing, upload the verified package and screenshots, and provide its numeric
-ID. Then test an AnkiWeb installation and its update path, add package
-conflicts for the known ID, and link the live listing from the README.
+1. Review and merge the intended change after both desktop CI jobs pass.
+2. Download that commit's `ankiquest-ankiweb-addon` artifact. For a local
+   build, run `python .github/scripts/package-addon.py --ankiweb --output ankiquest-ankiweb.ankiaddon` from the reviewed checkout.
+3. Sign in to the owner account, open the listing, choose **Update**, attach
+   the package to the appropriate version branch and save. Keep the actual
+   oldest/current tested Anki versions in the branch fields.
+4. Download with Anki's **Get Add-ons** code, check the installed version,
+   open Settings, and use **Check for Updates** to verify update ownership.
+
+The listing embeds the three screenshots from a pinned public GitHub
+commit. Update those URLs when the pictured screens change. AnkiWeb's
+package conflicts with `ankiquest`; GitHub's package conflicts with
+`414948448`. Anki preserves disabled installations on update. Remove the
+other copy before switching channels, restart, and sign in to the same
+account on the same server. Account upload checkpoints stay in the Anki
+profile and are independent of the installation directory.

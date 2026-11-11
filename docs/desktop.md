@@ -80,12 +80,17 @@ installations never query or install a GitHub update, even when packaged
 to Anki's **Tools → Add-ons → Check for Updates**.
 
 GitHub packages retain the stable/nightly choice and daily checks. Local
-source copies do not self-update. Before publishing, use the
-[AnkiWeb listing draft](ankiweb-listing.md), supply the owner account and
-listing ID, and test installation from that listing. Do not install both
-copies together: Anki's numeric AnkiWeb directory and the GitHub package
-directory are different. Once the listing ID exists, add the corresponding
-package conflicts and test migration before recommending a channel switch.
+source copies do not self-update. The live [AnkiWeb listing](https://ankiweb.net/shared/info/414948448)
+uses code **414948448**. CI publishes an `ankiquest-ankiweb-addon` artifact
+with that numeric package ID and a conflict with the GitHub `ankiquest`
+package; the GitHub artifact declares the reverse conflict. Repeat updates
+never declare their own package as a conflict.
+
+Anki preserves a disabled installation when updating it. Remove the other
+copy before switching channels, restart, and sign in with the same account
+and server. Account upload checkpoints live in the Anki profile, so they
+survive the installation-directory change. Keep a collection backup.
+See the [listing update procedure](ankiweb-listing.md#updating-the-listing).
 
 References: [Anki add-on sharing](https://docs.ankiweb.net/addons/sharing.html),
 [Anki 26.09.4](https://github.com/ankitects/anki/releases/tag/26.09.4),

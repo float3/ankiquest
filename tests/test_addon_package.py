@@ -13,6 +13,25 @@ spec.loader.exec_module(packaging)
 
 
 class Package(unittest.TestCase):
+    def test_github_archive_conflicts_with_the_published_ankiweb_id(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "addon.ankiaddon"
+            packaging._build(ROOT / "addon", output, {"release": 13, "nightly": 0, "commit": "abc1234"})
+            with ZipFile(output) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+                self.assertEqual(["414948448"], manifest.get("conflicts"))
+                self.assertNotIn(manifest["package"], manifest["conflicts"])
+
+    def test_ankiweb_archive_uses_its_numeric_id_and_conflicts_only_with_github(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "addon.ankiaddon"
+            packaging._build(ROOT / "addon", output, {"release": 13, "nightly": 0, "commit": "abc1234"}, ankiweb=True)
+            with ZipFile(output) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+                self.assertEqual("414948448", manifest["package"])
+                self.assertEqual(["ankiquest"], manifest["conflicts"])
+                self.assertNotIn(manifest["package"], manifest["conflicts"])
+
     def test_archive_excludes_local_state_and_shows_its_installed_version(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source"
