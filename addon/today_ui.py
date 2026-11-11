@@ -76,19 +76,11 @@ def session_dialog(parent, title, text, art, on_continue, on_progress, never_aga
     return dialog
 
 
-def settings_section(layout, config, on_goal=None, *, notify_layout=None):
-    """Appends the Today settings to a settings dialog; returns a function that reads them back.
-    `on_goal()` opens the daily goal dialog, which saves on its own."""
+def settings_section(layout, config, *, notify_layout=None):
+    """Appends the Today settings and returns a function that reads them back."""
     heading = QLabel(tr("Today"))
     heading.setStyleSheet("font-weight:bold;margin-top:8px")
     layout.addWidget(heading)
-    if on_goal is not None:
-        goal = QPushButton(tr("Daily goal…"))
-        goal.clicked.connect(on_goal)
-        row = QHBoxLayout()
-        row.addWidget(goal)
-        row.addStretch(1)
-        layout.addLayout(row)
     toggles = {}
     for key, text in (
         ("deck_status", "Mark decks finished today, and learning due later today"),
