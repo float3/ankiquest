@@ -335,7 +335,7 @@ def focus_view(day):
     }
 
 
-def board_view(api):
+def board_view(api, profile=None):
     if local["board_account"] != account(api):
         local["board"] = None
     if local["board"] is None:
@@ -344,7 +344,24 @@ def board_view(api):
         retry = local["board_retry"]
         return {"retry": True} if retry is not None and retry.request.owns(api) else None
     chosen = today.period(mw.pm.profile.get(PERIOD_KEY))
-    return {"period": chosen, "rows": today.standings(local["board"], chosen, api.name)}
+    rows = []
+    for place, entry, mine in today.standings(local["board"], chosen, api.name):
+        if mine:
+            entry = dict(entry, day=profile or {"_day_status": "unknown"})
+            if chosen == "day" and entry["day"].get("_day_status") == "unknown":
+                entry["xp"] = None
+        rows.append((place, entry, mine))
+    return {"period": chosen, "rows": rows}
+
+
+def _profile_for_display(profile, now=None):
+    moment = now_ms() if now is None else now
+    try:
+        found = day_verdict.verdict(profile, day_verdict.unsent(mw.col, profile), moment)
+    except Exception as error:
+        print("ankiquest day verdict:", error)
+        found = None
+    return day_verdict._for_display(profile, found)
 
 
 def last_session(api):
@@ -364,14 +381,16 @@ def today_view(deck_browser, chosen_companion):
         print("ankiquest today:", e)
         return None
     api = addon().client()
-    mood = moods.mood([day.due for day in days], focus.due if focus else 0, addon().state["profile"], now_ms())
+    profile = day_verdict._for_display(addon().state["profile"], status.verdict)
+    mood = moods.mood([day.due for day in days], focus.due if focus else 0, profile, now_ms())
     return {
+        "profile": profile,
         "art": art_url(chosen_companion, mood),
         "mood": tr(moods.message(chosen_companion, mood)) if chosen_companion != "none" else None,
         "winner": art_url(chosen_companion, moods.WINNER),
         "focus": focus_view(focus),
         "goal": goal_view(status),
-        "board": board_view(api),
+        "board": board_view(api, profile),
         "session": last_session(api),
     }
 

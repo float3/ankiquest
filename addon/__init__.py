@@ -500,7 +500,7 @@ def announce(rank, profile, inbox, quiet):
     fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
     mw.pm.profile[INBOX_KEY] = cursor
     warning = notify.streak_warning(
-        profile,
+        home._profile_for_display(profile, now_ms) or {},
         int(settings.get("streak_hours", 2) or 0),
         now_ms,
         mw.pm.profile.get(STREAK_DAY_KEY),
@@ -545,7 +545,9 @@ def on_deck_browser(deck_browser, content):
     waiting = sum(1 for entry in state["inbox"] if answerable(entry))
     companion = state["companion"] if state["companion_account"] == [api.base, api.user, api.token] else "aki"
     mascot = None if companion == "none" else "/_addons/%s/%s_face.png" % (mw.addonManager.addonFromModule(__name__), companion)
-    content.stats += board.html(state["profile"], state["place"], waiting, tr, mascot, home.today_view(deck_browser, companion))
+    today = home.today_view(deck_browser, companion)
+    profile = today["profile"] if today is not None else home._profile_for_display(state["profile"])
+    content.stats += board.html(profile, state["place"], waiting, tr, mascot, today)
     content.stats += '<p style="text-align:center;font-size:12px">%s</p>' % html.escape(_upload_status(api))
 
 
