@@ -239,7 +239,7 @@ class Preferences(unittest.TestCase):
 
 class Preview(unittest.TestCase):
     def setUp(self):
-        preview.state.update(account=None, baseline=0, at=0, seen=None, busy=False)
+        preview.clear_account()
 
     def test_only_a_server_and_player_without_a_token_preview(self):
         self.assertTrue(preview.wanted(SimpleNamespace(base="https://x", user="ana", token="")))
@@ -271,7 +271,7 @@ class Preview(unittest.TestCase):
         mw = SimpleNamespace(col=object(), taskman=SimpleNamespace(run_in_background=run))
         preview.refresh(mw, SimpleNamespace(base="https://x", user="ana", token=""), True, say)
         say.assert_not_called()
-        self.assertFalse(preview.state["busy"])
+        self.assertIsNone(preview.state["request"])
 
 
 if __name__ == "__main__":

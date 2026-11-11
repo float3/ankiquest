@@ -126,3 +126,25 @@ add-on's English keys are not interchangeable. A JSON runtime catalog
 alone would still duplicate the other two. The small shared-wording
 fixture makes deliberate alignment reviewable without changing package
 loading or replacing every translation key.
+
+## Background request ownership
+
+Every callback must still own its starting profile and account before it
+changes UI or saved state. A newer request owns its own slot, so an old
+completion cannot clear it. Profile close and sign-out invalidate pending
+work; collection work keeps the original collection instead of reading a
+new `mw.col` when its queued worker starts.
+
+Home shares its private request owner across goal, capability and address
+requests. Copies shares one owner across polling, sending and offer actions,
+with a dialog lifetime for imports and dismissals. Preview owns both its
+collection and its cache. Inbox additionally owns a filter/row revision.
+Keep these private implementations separate: one cross-module helper would
+need optional dialog, cache, query and row-revision rules and would hide the
+different lifetimes it is meant to protect.
+
+Regressions in `test_home_request_ownership.py`, `qt_copies.py`,
+`test_addon_preview_lifecycle.py` and `qt_activity.py` delay replies through
+account/profile changes, overlapping requests and closed/deleted windows.
+Cancelled downloads remove their temporary package and never open an
+importer in a different profile.

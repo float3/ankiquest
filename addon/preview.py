@@ -2,6 +2,7 @@
 Only servers that show this player publicly answer; anything else stays quiet."""
 
 import time
+from dataclasses import dataclass
 
 from . import notify
 from .client import PENDING_SQL, rows_to_reviews
@@ -9,7 +10,18 @@ from .client import PENDING_SQL, rows_to_reviews
 BASELINE_MAX_AGE_MS = 10 * 60 * 1000
 
 def _empty_cache():
-    return {"account": None, "baseline": 0, "at": 0, "seen": None, "busy": False}
+    return {"account": None, "baseline": 0, "at": 0, "seen": None, "owner": None, "request": None}
+
+
+@dataclass(frozen=True)
+class _Owner:
+    collection: object
+    profile: object
+    account: tuple
+
+    def _owns(self, mw, api):
+        return (self.collection is mw.col and self.profile is getattr(getattr(mw, "pm", None), "profile", None)
+                and self.account == (api.base, api.user, api.token))
 
 
 state = _empty_cache()
@@ -50,19 +62,27 @@ def _fetch(api, rows_after, now_ms, cache):
 
 def refresh(mw, api, show_feedback, say):
     """Shows what an upload would have said; 401 and 404 mean the server keeps this player private."""
-    if mw.col is None or not wanted(api) or state["busy"]:
+    if mw.col is None or not wanted(api):
+        return
+    owner = state["owner"]
+    if owner is None or not owner._owns(mw, api):
+        clear_account()
+        owner = state["owner"] = _Owner(mw.col, getattr(getattr(mw, "pm", None), "profile", None),
+                                       (api.base, api.user, api.token))
+    if state["request"] is not None:
         return
     collection, cache = mw.col, state
-    cache["busy"] = True
+    request = cache["request"] = object()
 
     def work():
-        if cache is not state or mw.col is not collection:
+        if cache is not state or not owner._owns(mw, api):
             return None
         return _fetch(api, lambda since: collection.db.all(PENDING_SQL, since), int(time.time() * 1000), cache)
 
     def done(future):
-        cache["busy"] = False
-        if cache is not state or mw.col is not collection:
+        if cache["request"] is request:
+            cache["request"] = None
+        if cache is not state or not owner._owns(mw, api):
             return
         try:
             answer = future.result()
