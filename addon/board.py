@@ -25,6 +25,7 @@ PERIOD_LABELS = (
 MEDALS = {1: "👑", 2: "🥈", 3: "🥉"}
 STATUS_CLASS = {"done": "aq-done-today", "learning_later": "aq-learning-later"}
 AVATAR_COLOURS = ("#58cc02", "#1cb0f6", "#ff9600", "#ce82ff", "#ff4b4b", "#2b70c9", "#ffc800")
+_FRIENDS, _GLOBAL = "friends", "global"
 
 STYLE = """<style>
 #ankiquest.aq-today{--aq-bg:#fff;--aq-line:#e5e5e5;--aq-text:#3c3c3c;--aq-muted:#777;--aq-soft:#f7f7f7;
@@ -48,6 +49,10 @@ font-weight:800;font-size:13px;color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.
 #ankiquest .aq-pill.aq-level{background:var(--aq-purple)}
 #ankiquest .aq-pill.aq-rank{background:var(--aq-gold);color:#5c4400}
 #ankiquest .aq-pill.aq-risk{background:var(--aq-red)}
+#ankiquest .aq-pill.aq-met{background:#dff1c9;color:#254a12}
+#ankiquest .aq-pill.aq-syncing,#ankiquest .aq-pill.aq-protected,#ankiquest .aq-pill.aq-frozen,#ankiquest .aq-pill.aq-skipped{background:#def0ff;color:#16527b}
+#ankiquest .aq-pill.aq-short{background:#e9d8a6;color:#534619}
+#ankiquest .aq-row-day{display:block;white-space:normal;font-size:11px;color:var(--aq-muted);font-weight:600}
 #ankiquest .aq-pill.aq-ghost{background:var(--aq-soft);color:var(--aq-muted);box-shadow:inset 0 -3px 0 var(--aq-line)}
 #ankiquest .aq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-items:start}
 #ankiquest .aq-card{background:var(--aq-bg);border:2px solid var(--aq-line);border-bottom-width:5px;border-radius:18px;padding:14px 16px}
@@ -85,7 +90,7 @@ box-shadow:inset 0 -4px 0 rgba(0,0,0,.12);position:relative;min-width:16px}
 background:var(--aq-soft);box-shadow:inset 0 -3px 0 var(--aq-line)}
 #ankiquest .aq-quest-body{flex:1;min-width:0}
 #ankiquest .aq-winner{float:right;width:56px;height:56px;object-fit:contain;margin:-6px -4px 0 6px}
-#ankiquest .aq-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+#ankiquest .aq-board-head{display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;margin-bottom:8px}
 #ankiquest .aq-board-head h3{margin:0}
 #ankiquest select{font-family:inherit;font-weight:800;font-size:12px;color:var(--aq-text);background:var(--aq-soft);border:2px solid var(--aq-line);
 border-radius:999px;padding:3px 8px}
@@ -93,10 +98,11 @@ border-radius:999px;padding:3px 8px}
 #ankiquest .aq-player.aq-me{background:var(--aq-me);box-shadow:inset 0 0 0 2px var(--aq-blue)}
 #ankiquest .aq-place{width:26px;text-align:center;font-weight:800;color:var(--aq-muted)}
 #ankiquest .aq-avatar{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;
-font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18)}
+font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18);object-fit:cover}
 #ankiquest .aq-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}
 #ankiquest .aq-xp{font-weight:800;color:var(--aq-orange);white-space:nowrap}
 #ankiquest .aq-empty-note{color:var(--aq-muted);padding:6px 8px}
+#ankiquest .aq-empty-note a{color:var(--aq-blue)}
 #ankiquest .aq-session{margin-top:12px;text-align:center}
 #ankiquest .aq-links{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px}
 #ankiquest .aq-links a{text-decoration:none;font-weight:800;font-size:13px;color:var(--aq-blue);background:var(--aq-bg);
@@ -157,6 +163,9 @@ def summary_parts(profile, place, translate):
             parts.append(translate("\U0001f525 %d day streak") % profile["streak"])
         if profile.get("at_risk"):
             parts.append(translate("streak at risk today"))
+        label = _day_label(profile, translate)
+        if label:
+            parts.append(label)
     return parts
 
 
@@ -238,14 +247,63 @@ def pills(profile, place, translate):
         found += pill("\U0001f3c6 " + translate("#%d this week") % place, "rank")
     if profile and profile.get("at_risk"):
         found += pill(translate("streak at risk today"), "risk")
+    label = _day_label(profile, translate)
+    if label:
+        state = (profile or {}).get("_day_status") or "unknown"
+        found += pill(label, state if state in ("met", "syncing", "protected") else "ghost")
     return "<div class=aq-pills>%s</div>" % found if found else ""
+
+
+def _day_label(profile, translate):
+    state = (profile or {}).get("_day_status")
+    if state == "syncing":
+        return translate("Syncing — today counts after upload")
+    if state == "met":
+        return translate("Streak secured")
+    if state == "protected":
+        return translate("Protected by a freeze")
+    if state == "unknown" or profile is None:
+        return translate("Streak unknown")
+    return ""
 
 
 def head(today, profile, place, translate):
     art = today.get("art")
     image = '<img src="%s" alt="">' % escape(art) if art else ""
     mood = "<div class=aq-bubble>%s</div>" % escape(today["mood"]) if today.get("mood") else ""
-    return "<div class=aq-hero>%s<div>%s%s</div></div>" % (image, mood, pills(profile, place, translate))
+    return "<div class=aq-hero>%s<div>%s%s%s</div></div>" % (image, mood, pills(profile, place, translate), _freeze_pills(profile, translate))
+
+
+def _freeze_pills(profile, translate):
+    if not profile or "freezes_enabled" not in profile:
+        return ""
+    if not profile["freezes_enabled"]:
+        return pill(translate("Streak freezes off"), "ghost")
+    stock = pill(translate("%d freezes saved") % max(0, int(profile.get("stored_freezes") or 0)), "protected")
+    if profile.get("freeze_earned_today") and profile.get("_day_status") != "unknown":
+        stock += " " + pill(translate("Freeze earned today"), "protected")
+    return "<div class=aq-pills>%s</div>" % stock
+
+
+def _connection_note(profile, failure, translate):
+    if failure:
+        text = translate("Could not refresh AnkiQuest. Your reviews stay on this device until they can upload.")
+        if profile:
+            text += " " + translate("Showing the last received profile.")
+    elif profile is None:
+        text = translate("Loading your AnkiQuest profile…")
+    else:
+        return ""
+    retry = '<button type=button onclick="pycmd(\'ankiquest:retry-connection\')">%s</button>' % escape(translate("Retry connection")) if failure else ""
+    return '<div style="max-width:680px;margin:12px auto;text-align:center">%s %s</div>' % (escape(text), retry)
+
+
+def _weekly_card(today, translate):
+    recap = today.get("weekly")
+    if not recap:
+        return ""
+    lines = "".join("<p>%s</p>" % escape(line) for line in (recap.get("body") or "").splitlines() if line.strip())
+    return card(translate("Weekly recap"), lines)
 
 
 def counts(deck, translate):
@@ -336,17 +394,34 @@ def avatar(name):
     return "<span class=aq-avatar style='background:%s'>%s</span>" % (colour, escape(initial))
 
 
-def board_row(place, entry, mine):
+def _scope_picker(standing, translate):
+    options = "".join('<option value="%s"%s>%s</option>' % (
+        escape(key, True), " selected" if key == standing.get("scope", _FRIENDS) else "",
+        escape(translate(title) if key in (_FRIENDS, _GLOBAL) else title),
+    ) for key, title in standing.get("scopes", [(_FRIENDS, "Friends")]))
+    return '<select aria-label="%s" onchange="pycmd(\'ankiquest:scope:\'+this.value)">%s</select>' % (
+        escape(translate("Leaderboard scope"), True), options,
+    )
+
+
+def board_row(place, entry, mine, translate=lambda value: value):
     name = str(entry.get("display") or entry.get("user") or "")
+    day = _day_label(entry["day"], translate) if "day" in entry else ""
+    day_html = "<span class=aq-row-day>%s</span>" % escape(day) if day else ""
+    if mine and entry.get("shown") is False:
+        day_html += "<span class=aq-row-day>%s</span>" % escape(translate("you, not shown to others"))
+    picture = entry.get("avatar")
+    face = '<img class=aq-avatar src="%s" alt="">' % escape(picture, True) if picture and picture.startswith("data:image/png;base64,") else avatar(name)
+    xp = "—" if "xp" in entry and entry["xp"] is None else "{:,}".format(int(entry.get("xp") or 0))
     return (
-        "<div class='aq-player%s'><span class=aq-place>%s</span>%s<span class=aq-name>%s</span>"
+        "<div class='aq-player%s'><span class=aq-place>%s</span>%s<span class=aq-name>%s%s</span>"
         "<span class=aq-xp>%s XP</span></div>"
     ) % (
         " aq-me" if mine else "",
         MEDALS.get(place, "#%d" % place),
-        avatar(name),
+        face,
         escape(name),
-        "{:,}".format(int(entry.get("xp") or 0)),
+        day_html, xp,
     )
 
 
@@ -363,24 +438,31 @@ def board_card(today, translate, profile=None):
                 escape(translate("Retry leaderboard")),
             )
         )
-    rows = "".join(board_row(*row) for row in standing["rows"])
+    rows = "".join(board_row(*row, translate) for row in standing["rows"])
     if not rows:
         rows = "<div class=aq-empty-note>%s</div>" % escape(translate("Nobody else plays yet."))
+    if not any(not mine for _, _, mine in standing["rows"]):
+        rows += "<div class=aq-empty-note>%s</div>" % link("challenges", translate("Add friends to study together"))
     closing = closing_week(profile, translate)
     if closing:
         rows += "<div class='aq-note aq-closing-week'>%s</div>" % escape(closing)
-    title = "<div class=aq-board-head><h3>%s</h3>%s</div>" % (escape(translate("Leaderboard")), period_picker(standing["period"], translate))
+    title = "<div class=aq-board-head><h3>%s</h3>%s%s</div>" % (
+        escape(translate("Leaderboard")), _scope_picker(standing, translate), period_picker(standing["period"], translate),
+    )
     return "<div class=aq-card>%s%s</div>" % (title, rows)
 
 
 def session_line(today, translate):
     if not today.get("session"):
         return ""
-    return "<div class=aq-session>%s</div>" % pill("%s: %s" % (translate("Your last study session"), today["session"]), "ghost")
+    day = today.get("session_day")
+    status = pill(day["label"], day["state"] if day["state"] in ("met", "syncing", "protected", "short", "frozen", "skipped") else "ghost") if day else ""
+    return "<div class=aq-session>%s %s</div>" % (pill("%s: %s" % (translate("Your last study session"), today["session"]), "ghost"), status)
 
 
 def panel(profile, place, unread, translate, today):
     cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate, profile)
+    cards += _weekly_card(today, translate)
     moments = ('<button type=button onclick="pycmd(\'ankiquest:moments\')">%s</button>'
                % escape(translate("Your moments (%d)") % today["moments"])) if today.get("moments") else ""
     return (
