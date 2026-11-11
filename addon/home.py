@@ -50,6 +50,7 @@ local = {
     "progress": None,
     "browser_buttons": set(),
     "board_window": None,
+    "friends_window": None,
     "pictures": None,
 }
 
@@ -806,10 +807,38 @@ def _clear_boards():
     local.update(board=None, board_account=None, board_request=None, board_retry=None, pictures=None)
 
 
+def _open_friends(goal=None):
+    from . import social_ui
+
+    if not addon().client().configured:
+        addon().open_account()
+        return
+    opened = local["friends_window"]
+    if opened is not None and opened._owns():
+        if goal is not None:
+            opened._goals._wanted = goal
+            opened._tabs.setCurrentIndex(2)
+            opened._goals._load()
+        opened._dialog.raise_()
+        opened._dialog.activateWindow()
+        return
+    _close_friends()
+    opened = local["friends_window"] = social_ui._Window(addon(), refresh_board, goal)
+    opened._dialog.finished.connect(lambda _result: local.update(friends_window=None) if local["friends_window"] is opened else None)
+    opened._dialog.show()
+
+
+def _close_friends():
+    opened, local["friends_window"] = local["friends_window"], None
+    if opened is not None:
+        opened._close()
+
+
 def clear_account():
     """Drop the previous account's Home data while keeping the periodic refresh."""
     _close_progress()
     _clear_boards()
+    _close_friends()
     local.update(
         goal_request=None, days=None, session=None, capabilities=None, restarted=None,
     )
@@ -822,6 +851,7 @@ def clear_account():
 def on_profile_open():
     _close_progress()
     _clear_boards()
+    _close_friends()
     local["days"], local["session"] = None, None
     if local["timer"] is None:
         try:
@@ -843,6 +873,7 @@ def install(module):
     gui_hooks.sync_did_finish.append(refresh_board)
     for name, callback in (("top_toolbar_did_init_links", _toolbar_links), ("top_toolbar_did_redraw", _refresh_toolbar),
                            ("profile_will_close", _close_progress), ("profile_will_close", _clear_boards),
+                           ("profile_will_close", _close_friends),
                            ("browser_will_show", _browser_entry)):
         hook = getattr(gui_hooks, name, None)
         if hook is not None:

@@ -389,6 +389,16 @@ class RefreshTests(unittest.TestCase):
         self.addon.open_website()
         self.assertEqual("/#cerro", self.addon.web.open_page.call_args.args[2])
 
+    def test_friend_goals_and_challenge_inbox_routes_open_natively(self):
+        with patch.object(self.addon.home, "_open_friends") as opened:
+            self.addon.on_js_message(False, "ankiquest:web:challenges", None)
+            opened.assert_called_once_with()
+            self.addon._open_inbox_path("/community#challenge-8")
+            self.assertEqual((8,), opened.call_args.args)
+            self.addon.web.open_page.assert_not_called()
+            self.addon._open_inbox_path("/community#activity")
+            self.assertEqual("/community#activity", self.addon.web.open_page.call_args.args[2])
+
     def test_snapshot_uses_same_clock_as_upload(self):
         self.addon.refresh(False)
         self.assertEqual(self.api.upload.call_args.kwargs, {"decks": self.decks, "clock_offset": -120})

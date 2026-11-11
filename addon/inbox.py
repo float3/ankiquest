@@ -56,7 +56,7 @@ def challenge_target(entry):
 
 
 def answerable(entry):
-    """A friend's message that has not been answered; challenge rows are answered on the website."""
+    """A friend's message that has not been answered; challenge rows open Friend goals."""
     return bool(entry.get("sender")) and not entry.get("replied") and challenge_target(entry) is None
 
 
