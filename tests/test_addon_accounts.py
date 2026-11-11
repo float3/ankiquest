@@ -7,11 +7,11 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
 
-from addon_loader import ADDON, load_module
+from addon_loader import ADDON, load_in_package
 
 
 def load(name):
-    return load_module("aq_accounts_" + name, name + ".py")
+    return load_in_package("aq_accounts", name)
 
 
 class Server(BaseHTTPRequestHandler):

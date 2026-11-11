@@ -65,7 +65,7 @@ Checked against the installed 23.10 and 26.09.4 APIs:
 
 | API | Finding |
 | --- | --- |
-| `QNetworkCookie` | Neither `aqt.qt` exports it. Keep the direct `PyQt6.QtNetwork` import; Qt 6 is already required. The whole-add-on smoke imports it on both versions. |
+| `QNetworkCookie` | Neither `aqt.qt` exports it. Keep the direct `PyQt6.QtNetwork` import; Qt 6 is already required. The Qt import test checks it on both versions. |
 | `mw.progress.timer` | Both accept `repeat` and `parent`. The smoke calls that signature; the old `TypeError` fallbacks are removed. |
 | `mw.col.startTimebox()` | Both expose this collection API; the smoke calls it on a real collection. |
 | `col.get_config("rollover", 4)` | Both map this legacy key to scheduling preferences. The smoke sets a non-default rollover of 7 through `set_preferences()` and reads 7 through this call. |
@@ -95,3 +95,34 @@ See the [listing update procedure](ankiweb-listing.md#updating-the-listing).
 References: [Anki add-on sharing](https://docs.ankiweb.net/addons/sharing.html),
 [Anki 26.09.4](https://github.com/ankitects/anki/releases/tag/26.09.4),
 [aqt package metadata](https://pypi.org/project/aqt/26.9.4/).
+
+## Language and shared wording
+
+Desktop follows Anki's selected language, including Qt's localized short
+date and time formats for inbox messages, last upload, reminder-hour
+pickers and closing-week clocks. Timestamps still use the computer's local time zone. Integer
+counts share a private plural helper: French uses the singular for zero
+and one; English, Spanish, German and European Portuguese use it for one.
+These are the [CLDR integer rules](https://unicode.org/cldr/charts/50/supplemental/language_plural_rules.html).
+
+The Portuguese table uses European Portuguese (`Guardar`, `Partilhar`,
+`tu`), matching the server and Android settings/sharing wording. Anki's
+Brazilian Portuguese selection continues to use this table; date and time
+formats follow its selected region. A separate Brazilian catalog would
+need a complete translation, not isolated switches to `Salvar`.
+
+`tests/fixtures/desktop-wording.json` records reviewed Android strings for
+the same settings groups, moments and sharing screens, with the source
+commit. The translation test checks these across all four languages.
+Update the fixture and desktop wording together after reviewing Android
+changes; CI does not fetch a moving Android branch. Positional Android
+placeholders are normalized to Python placeholders. Identical English
+labels in different contexts (such as a noun versus a reply button) are
+not automatically copied.
+
+One generated catalog was considered. Keep the per-feature Python tables
+for now: Android resource keys/plurals, server message contexts and the
+add-on's English keys are not interchangeable. A JSON runtime catalog
+alone would still duplicate the other two. The small shared-wording
+fixture makes deliberate alignment reviewable without changing package
+loading or replacing every translation key.

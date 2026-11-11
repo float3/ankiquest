@@ -9,7 +9,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from addon_loader import load_in_package
 
@@ -232,7 +232,9 @@ class Preferences(unittest.TestCase):
 
     def test_the_last_upload_line(self):
         self.assertEqual(preferences.last_upload_text(None, english), "Last upload: never")
-        self.assertRegex(preferences.last_upload_text(1_700_000_000_000, english), r"^Last upload: \d{4}-\d\d-\d\d \d\d:\d\d$")
+        with patch("anki.lang.current_lang", "de_DE"):
+            self.assertRegex(preferences.last_upload_text(1_700_000_000_000, english),
+                             r"^Last upload: \d\d\.\d\d\.\d\d[, ]+\d\d:\d\d$")
 
 
 class Preview(unittest.TestCase):

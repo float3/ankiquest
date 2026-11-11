@@ -5,14 +5,14 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from addon_loader import ADDON, load_module
+from addon_loader import ADDON, load_in_package
 import test_deck_completion as base
 
-inbox = load_module("aq_inbox_inbox", "inbox.py")
-share = load_module("aq_inbox_share", "share.py")
-language = load_module("aq_inbox_language", "language.py")
+inbox = load_in_package("aq_inbox", "inbox")
+share = load_in_package("aq_inbox", "share")
+language = load_in_package("aq_inbox", "language")
 
 
 class Refused(Exception):
@@ -102,7 +102,8 @@ class ActionTests(unittest.TestCase):
         self.assertFalse(inbox.unread({"id": 1, "read_at": 1790000000}))
 
     def test_times_are_local_and_missing_ones_are_blank(self):
-        self.assertRegex(inbox.when(1790000000), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
+        with patch("anki.lang.current_lang", "de_DE"):
+            self.assertRegex(inbox.when(1790000000), r"^\d\d\.\d\d\.\d\d[, ]+\d\d:\d\d$")
         self.assertEqual("", inbox.when(None))
         self.assertEqual("", inbox.when("soon"))
 

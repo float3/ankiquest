@@ -2,6 +2,7 @@
 
 import time
 from html import escape
+from .language import _clock
 
 PAGES = {
     "board": "/week",
@@ -129,7 +130,7 @@ def welcome(translate=lambda value: value, *, text=None):
 
 
 def clock(ms):
-    return time.strftime("%H:%M", time.localtime(ms / 1000))
+    return _clock(ms)
 
 
 def closing_week(profile, translate, now_ms=None, show_time=clock):

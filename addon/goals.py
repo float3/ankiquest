@@ -6,11 +6,12 @@
   or the backlog plan, which only the collection can work out: today's due cards plus enough of
   the overdue backlog that it is gone `value` days after the plan started.
 
-Plain Python, so the tests load it without Anki; callers hand in the collection and the client.
+Callers hand in the collection and the client; language.py owns display formatting.
 """
 
 import math
 from collections import namedtuple
+from .language import _plural
 
 OFF, BACKLOG, CARDS, MINUTES = "off", "backlog", "cards", "minutes"
 MODES = (BACKLOG, CARDS, MINUTES, OFF)
@@ -377,10 +378,9 @@ def backlog_text(current, translate=lambda value: value):
     if current.mode != BACKLOG or fixed is None or not fixed.backlog:
         return None
     left = fixed.days_left or 1
-    template = translate(
-        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d day."
-        if left == 1 else
-        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d days."
+    template = _plural(
+        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d day.",
+        "Today’s due cards plus %d of your %d overdue cards, so the backlog is gone in %d days.", left, translate,
     )
     return template % (fixed.extra, fixed.backlog, left)
 
@@ -418,7 +418,7 @@ def time_text(seconds, translate=lambda value: value):
     minutes = int(round(seconds / 60))
     if minutes < 1:
         return translate("Time today: less than a minute")
-    return (translate("Time today: about %d minute") if minutes == 1 else translate("Time today: about %d minutes")) % minutes
+    return _plural("Time today: about %d minute", "Time today: about %d minutes", minutes, translate) % minutes
 
 
 def cleared_text(days, translate=lambda value: value):
@@ -426,7 +426,7 @@ def cleared_text(days, translate=lambda value: value):
         return translate("Nothing overdue")
     if days is None:
         return translate("At this pace your backlog is never cleared.")
-    return (translate("Backlog cleared in %d day") if days == 1 else translate("Backlog cleared in %d days")) % days
+    return _plural("Backlog cleared in %d day", "Backlog cleared in %d days", days, translate) % days
 
 
 def pace_text(forecast, translate=lambda value: value):
