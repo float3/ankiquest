@@ -335,7 +335,7 @@ class RefreshTests(unittest.TestCase):
             "ankiquest_test_addon", r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png"
         )
 
-    def test_a_quiet_poll_only_remembers_what_a_loud_one_would_have_said(self):
+    def test_a_quiet_poll_remembers_messages_without_showing_them(self):
         self.with_board()
         self.addon.poll(quiet=True)
         self.addon.tooltip.assert_not_called()
@@ -362,6 +362,9 @@ class RefreshTests(unittest.TestCase):
         self.with_board()
         self.addon.poll(quiet=True)
         self.addon.poll()
+        self.assertIn("Hill finished Spanish", self.addon.tooltip.call_args.args[0])
+        self.addon.tooltip.reset_mock()
+        self.addon.poll()
         self.addon.tooltip.assert_not_called()
         self.inbox.append({"id": 5, "title": "\U0001f4ac Hill", "body": "Good job!",
                            "created_at": int(time.time()), "sender": "hill", "replied": False})
@@ -371,7 +374,7 @@ class RefreshTests(unittest.TestCase):
 
     def test_challenge_rows_count_as_unread_and_actions_but_not_replies(self):
         self.with_board()
-        self.addon.poll(quiet=True)
+        self.addon.poll()
         self.inbox.append({"id": 5, "title": "⚔️ Hill", "body": "Hill challenged you.",
                            "created_at": int(time.time()), "sender": "hill", "replied": False,
                            "route": "/community#challenge-3", "action_required": True})

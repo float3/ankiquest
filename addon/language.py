@@ -1749,3 +1749,45 @@ PORTUGUESE.update({
     "This server shows all activity without filters.": "Este servidor mostra toda a atividade sem filtros.",
     "Unread only": "Apenas por ler", "View invitation": "Ver convite",
 })
+
+# Desktop messages wait for quiet hours and share one reminders switch.
+SPANISH.update({
+    "%d new deck offers": "%d barajas nuevas ofrecidas",
+    "Server reminders are unavailable. You can still use the local streak warning.": "Los recordatorios del servidor no están disponibles. Puedes seguir usando el aviso local de racha.",
+    "%d new messages": "%d mensajes nuevos",
+    "Open Tools → AnkiQuest → Inbox to catch up.": "Abre Herramientas → AnkiQuest → Bandeja de entrada para verlos.",
+    "Could not load your current reminders. Please try again.": "No se pudieron cargar tus recordatorios actuales. Inténtalo de nuevo.",
+    "Daily reminder time": "Hora del recordatorio diario", "Quiet hours": "Horas de silencio", "to": "a",
+    "Equal start and end times turn quiet hours off. Quiet hours also hold desktop messages.": "Si las dos horas coinciden, el silencio se desactiva. Durante el silencio también se aplazan los mensajes del ordenador.",
+    "Show system notifications when Anki is in the background": "Mostrar notificaciones del sistema cuando Anki esté en segundo plano",
+})
+GERMAN.update({
+    "%d new messages": "%d neue Nachrichten",
+    "%d new deck offers": "%d neue Stapelangebote",
+    "Server reminders are unavailable. You can still use the local streak warning.": "Server-Erinnerungen sind nicht verfügbar. Du kannst weiterhin die lokale Serienwarnung nutzen.",
+    "Open Tools → AnkiQuest → Inbox to catch up.": "Öffne Extras → AnkiQuest → Posteingang, um sie zu lesen.",
+    "Could not load your current reminders. Please try again.": "Deine aktuellen Erinnerungen konnten nicht geladen werden. Bitte versuche es erneut.",
+    "Daily reminder time": "Uhrzeit der täglichen Erinnerung", "Quiet hours": "Ruhezeiten", "to": "bis",
+    "Equal start and end times turn quiet hours off. Quiet hours also hold desktop messages.": "Gleiche Anfangs- und Endzeiten schalten die Ruhezeit aus. Während der Ruhezeit warten auch Desktop-Nachrichten.",
+    "Show system notifications when Anki is in the background": "Systembenachrichtigungen anzeigen, wenn Anki im Hintergrund ist",
+})
+FRENCH.update({
+    "%d new messages": "%d nouveaux messages",
+    "%d new deck offers": "%d nouveaux paquets proposés",
+    "Server reminders are unavailable. You can still use the local streak warning.": "Les rappels du serveur sont indisponibles. Tu peux toujours utiliser l’avertissement local de série.",
+    "Open Tools → AnkiQuest → Inbox to catch up.": "Ouvre Outils → AnkiQuest → Boîte de réception pour les lire.",
+    "Could not load your current reminders. Please try again.": "Impossible de charger tes rappels actuels. Réessaie.",
+    "Daily reminder time": "Heure du rappel quotidien", "Quiet hours": "Heures silencieuses", "to": "à",
+    "Equal start and end times turn quiet hours off. Quiet hours also hold desktop messages.": "Des heures de début et de fin identiques désactivent le silence. Le silence diffère aussi les messages sur ordinateur.",
+    "Show system notifications when Anki is in the background": "Afficher les notifications du système quand Anki est en arrière-plan",
+})
+PORTUGUESE.update({
+    "%d new messages": "%d mensagens novas",
+    "%d new deck offers": "%d novas ofertas de baralhos",
+    "Server reminders are unavailable. You can still use the local streak warning.": "Os lembretes do servidor estão indisponíveis. Ainda podes usar o aviso local de sequência.",
+    "Open Tools → AnkiQuest → Inbox to catch up.": "Abre Ferramentas → AnkiQuest → Caixa de entrada para as ler.",
+    "Could not load your current reminders. Please try again.": "Não foi possível carregar os teus lembretes atuais. Tenta novamente.",
+    "Daily reminder time": "Hora do lembrete diário", "Quiet hours": "Horas de silêncio", "to": "até",
+    "Equal start and end times turn quiet hours off. Quiet hours also hold desktop messages.": "Horas de início e fim iguais desativam o silêncio. Durante o silêncio, as mensagens no computador também ficam à espera.",
+    "Show system notifications when Anki is in the background": "Mostrar notificações do sistema quando o Anki está em segundo plano",
+})

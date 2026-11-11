@@ -4,6 +4,7 @@
     "token": "",
     "notify_rank": true,
     "streak_hours": 2,
+    "system_notifications": false,
     "update_channel": "stable",
     "deck_status": true,
     "session_summary": true,

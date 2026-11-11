@@ -13,7 +13,6 @@ from aqt.qt import (
     QLineEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -28,6 +27,7 @@ from .decks import label, ordered
 from .language import tr
 from .share import face_path
 from .today_ui import settings_section
+from . import reminders_ui
 
 
 def _scroller(widgets):
@@ -260,11 +260,8 @@ def settings_dialog(
     rank = QCheckBox(tr("Tell me when my place on the leaderboard changes"))
     rank.setChecked(bool(config.get("notify_rank", True)))
     groups["notify"].addWidget(rank)
-    hours = QSpinBox()
-    hours.setRange(0, 12)
-    hours.setValue(int(config.get("streak_hours", 2) or 0))
-    hours.setSuffix(" h")
-    groups["notify"].addWidget(_row(QLabel(tr("Warn me before my streak ends")), hours))
+    reminders = reminders_ui._Controls(groups["notify"], config)
+    hours = reminders._hours
 
     channel = QComboBox()
     for value, title in (("stable", tr("Stable releases")), ("nightly", tr("Nightly builds (untested)"))):
@@ -290,6 +287,7 @@ def settings_dialog(
         button = QPushButton(tr("Deck completion notifications"))
         button.clicked.connect(on_decks)
         server_groups["sharing"].addWidget(button)
+    server_groups["reminders"] = reminders
     finish = extra(dialog, server_groups) if extra else None
     account_note = QLabel(tr("Save this account, then reopen settings to load its choices."))
     account_note.setWordWrap(True)
@@ -299,6 +297,7 @@ def settings_dialog(
         changed = original != tuple(field.text().strip() for field in (url, user, token))
         for panel in server_panels:
             panel.setEnabled(signed_in and not changed)
+        reminders._set_account(reminders_ui._Account.SAVED if signed_in and not changed else reminders_ui._Account.STAGED)
         upload.setEnabled(signed_in and not changed)
         account_note.setVisible(changed)
 
@@ -314,7 +313,7 @@ def settings_dialog(
         return None
     if finish and original == tuple(field.text().strip() for field in (url, user, token)):
         finish()
-    return dict(_values(url, user, token, rank, hours, channel), **today_values())
+    return dict(_values(url, user, token, rank, hours, channel), **today_values(), **reminders._values())
 
 
 def _values(url, user, token, rank, hours, channel):
