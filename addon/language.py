@@ -1387,3 +1387,49 @@ PORTUGUESE.update({
     "Protected — streak kept": "Dia protegido: sequência mantida",
     "Streak minimum reached — syncing": "Mínimo da sequência atingido: a sincronizar",
 })
+
+# Scoped boards and private hiding.
+SPANISH.update({
+    "Global": "Global", "Leaderboard scope": "Grupo de la clasificación",
+    "you, not shown to others": "tú, no visible para los demás",
+    "Place": "Puesto", "Level": "Nivel", "Streak": "Racha",
+    "Hidden players": "Jugadores ocultos", "Hide for me": "Ocultar para mí", "Show again": "Volver a mostrar",
+    "Loading leaderboard…": "Cargando clasificación…",
+    "Could not load the leaderboard (%s).": "No se pudo cargar la clasificación (%s).",
+    "No uploaded players on this board yet.": "Todavía no hay jugadores con datos enviados en esta clasificación.",
+    "Hidden only from your Global board. Select a player to show them again.": "Ocultos solo en tu clasificación global. Selecciona un jugador para volver a mostrarlo.",
+    "Saving…": "Guardando…", "Could not save this choice (%s).": "No se pudo guardar esta opción (%s).",
+})
+GERMAN.update({
+    "Global": "Global", "Leaderboard scope": "Gruppe der Rangliste",
+    "you, not shown to others": "du, für andere unsichtbar",
+    "Place": "Platz", "Level": "Stufe", "Streak": "Serie",
+    "Hidden players": "Ausgeblendete Spieler", "Hide for me": "Für mich ausblenden", "Show again": "Wieder anzeigen",
+    "Loading leaderboard…": "Rangliste wird geladen…",
+    "Could not load the leaderboard (%s).": "Die Rangliste konnte nicht geladen werden (%s).",
+    "No uploaded players on this board yet.": "Für diese Rangliste haben noch keine Spieler Daten hochgeladen.",
+    "Hidden only from your Global board. Select a player to show them again.": "Nur in deiner globalen Rangliste ausgeblendet. Wähle einen Spieler, um ihn wieder anzuzeigen.",
+    "Saving…": "Wird gespeichert…", "Could not save this choice (%s).": "Diese Auswahl konnte nicht gespeichert werden (%s).",
+})
+FRENCH.update({
+    "Global": "Mondial", "Leaderboard scope": "Groupe du classement",
+    "you, not shown to others": "vous, invisible pour les autres",
+    "Place": "Place", "Level": "Niveau", "Streak": "Série",
+    "Hidden players": "Joueurs masqués", "Hide for me": "Masquer pour moi", "Show again": "Afficher à nouveau",
+    "Loading leaderboard…": "Chargement du classement…",
+    "Could not load the leaderboard (%s).": "Impossible de charger le classement (%s).",
+    "No uploaded players on this board yet.": "Aucun joueur n’a encore envoyé de données pour ce classement.",
+    "Hidden only from your Global board. Select a player to show them again.": "Masqués uniquement dans votre classement mondial. Sélectionnez un joueur pour l’afficher à nouveau.",
+    "Saving…": "Enregistrement…", "Could not save this choice (%s).": "Impossible d’enregistrer ce choix (%s).",
+})
+PORTUGUESE.update({
+    "Global": "Global", "Leaderboard scope": "Grupo da classificação",
+    "you, not shown to others": "tu, invisível para os outros",
+    "Place": "Posição", "Level": "Nível", "Streak": "Sequência",
+    "Hidden players": "Jogadores ocultos", "Hide for me": "Ocultar para mim", "Show again": "Mostrar novamente",
+    "Loading leaderboard…": "A carregar a classificação…",
+    "Could not load the leaderboard (%s).": "Não foi possível carregar a classificação (%s).",
+    "No uploaded players on this board yet.": "Ainda não há jogadores com dados enviados nesta classificação.",
+    "Hidden only from your Global board. Select a player to show them again.": "Ocultos apenas na tua classificação global. Seleciona um jogador para o mostrar novamente.",
+    "Saving…": "A guardar…", "Could not save this choice (%s).": "Não foi possível guardar esta escolha (%s).",
+})

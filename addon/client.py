@@ -172,9 +172,9 @@ class Client:
         """This player's signed-in devices; answers only with a working token, so it also checks one."""
         return self._request("/api/devices/" + self.user)
 
-    def leaderboard(self):
-        """Every visible player's standing, with XP for each period."""
-        return self._request("/api/leaderboard")
+    def leaderboard(self, period="week", scope="friends"):
+        """The server's order and XP for this board and period."""
+        return self._request("/api/leaderboard?" + urllib.parse.urlencode({"period": period, "scope": scope}))
 
     def companion(self):
         return _companion(self._request("/api/companion/" + self.user))

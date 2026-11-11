@@ -582,6 +582,9 @@ def on_js_message(handled, message, context):
         if page == "history":
             home.open_progress()
             return (True, None)
+        if page == "board":
+            home._open_board()
+            return (True, None)
         if page in board.PAGES:
             open_page(board.PAGES[page])
         return (True, None)
