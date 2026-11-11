@@ -21,6 +21,10 @@ branding works offline.
 
 the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi`. after changing a PNG in `static/`, run `python tools/export_android_art.py <android-checkout>` (Pillow) to rewrite them, and `--check` to confirm every drawable exists at its size.
 
+The [mascot source plan](mascot-source.md) moves `aki-prompts.json` with the
+PNG masters to `art/mascots/aki/` and verifies Android's generated WebPs against
+that source.
+
 ## pose and voice rules
 
 | Asset | Use |
@@ -56,12 +60,16 @@ yet: they are not embedded in the server binary and are not public paths.
 | `minimum.png` | `aki_minimum` | Daily minimum reached; today counts |
 | `goal.png` | `aki_goal` | Daily goal reached |
 | `achievement.png` | `aki_achievement` | An achievement unlocked |
+| `level_up.png` | `aki_level_up` | A level reached |
 | `deck_conquered.png` | `aki_deck_conquered` | A deck conquered |
+| `leech.png` | `aki_leech` | A leech tamed |
+| `at_risk.png` | `aki_at_risk` | Still time to secure the streak |
 | `sleeping.png` | `aki_sleeping` | Rest day, notifications off |
 | `../duo/friends.png` | `duo_friends` | Aki and Ankilope together: sharing, challenges, nudges |
 
-the prompts for the moment art were not recorded, so `aki-prompts.json` has no
-entries for them yet.
+`aki-prompts.json` records the prompts for new and replaced art. Prompts for
+earlier poses without a generation record were reconstructed from the shipped
+PNG masters. Each client-sized copy uses the prompt for its master pose.
 
 Aki encourages small steps and celebrates confirmed progress. avoid guilt,
 threats, fake rewards or implying a streak is protected merely because a user

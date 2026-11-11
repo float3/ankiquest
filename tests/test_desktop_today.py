@@ -866,6 +866,59 @@ class HomeTests(unittest.TestCase):
         self.home.sync_goal(prompt=False)
         self.home.goal_ui.goal_dialog.assert_called_once()
 
+    def test_goal_setup_joins_a_pending_silent_read(self):
+        calls = self.serve({"mode": "backlog", "value": 30, "since": 20000, "chosen": False})
+        tasks = []
+        self.mw.taskman.run_in_background = lambda work, done: tasks.append((work, done))
+        self.home.sync_goal()
+        self.home.sync_goal(prompt=True)
+        self.assertEqual(1, len(tasks))
+        self.run_task(*tasks.pop())
+        self.assertEqual(1, len(calls))
+        self.home.goal_ui.goal_dialog.assert_called_once()
+
+    def test_board_renders_back_off_after_a_failed_fetch(self):
+        self.api.leaderboard.side_effect = OSError("offline")
+        clock = 100
+        self.home.time = SimpleNamespace(time=self.home.time.time, monotonic=lambda: clock)
+        for _ in range(3):
+            self.home.board_view(self.api)
+        self.api.leaderboard.assert_called_once()
+
+        clock += self.home.BOARD_RETRY_MS / 1000
+        self.api.leaderboard.side_effect = None
+        board = self.home.board_view(self.api)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        self.assertEqual("week", board["period"])
+
+    def test_board_wait_doubles_after_consecutive_failures(self):
+        self.api.leaderboard.side_effect = OSError("offline")
+        clock = 100
+        self.home.time = SimpleNamespace(time=self.home.time.time, monotonic=lambda: clock)
+        self.home.board_view(self.api)
+        clock += 30
+        self.home.board_view(self.api)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        clock += 30
+        self.home.board_view(self.api)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        clock += 30
+        self.api.leaderboard.side_effect = None
+        self.home.board_view(self.api)
+        self.assertEqual(3, self.api.leaderboard.call_count)
+
+    def test_the_deck_list_can_retry_a_failed_board_now(self):
+        self.api.leaderboard.side_effect = OSError("offline")
+        rendered = self.render().stats
+        self.assertIn("The leaderboard could not be loaded.", rendered)
+        self.assertIn("ankiquest:retry-board", rendered)
+        self.api.leaderboard.side_effect = None
+
+        result = self.home.on_js_message(False, "ankiquest:retry-board", self.mw.deckBrowser)
+        self.assertEqual((True, None), result)
+        self.assertEqual(2, self.api.leaderboard.call_count)
+        self.assertIn("aq-player aq-me", self.render().stats)
+
     def test_a_dismissed_setup_counts_as_shown_and_a_chosen_goal_needs_none(self):
         self.serve({"mode": "backlog", "value": 30, "since": 20000, "chosen": True})
         self.home.sync_goal(prompt=True)

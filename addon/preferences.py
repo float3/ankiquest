@@ -76,14 +76,17 @@ def save(api, loaded, wanted):
     api._request(subscriptions_path(api), subscription_body(fresh, wanted["alerts"], before, wanted["after"]))
 
 
-def section(dialog, layout, mw, api):
+def section(dialog, layout, mw, api, upload_status=None):
     """Appends the server-side preferences to the settings dialog and returns the function to run
     when it is saved. Nothing is shown for an account without a token."""
-    from aqt.qt import QCheckBox, QLabel
+    from aqt.qt import QCheckBox, QLabel, Qt
 
     from .ui import _scroller
 
-    layout.addWidget(QLabel(last_upload_text(mw.pm.profile.get(LAST_UPLOAD_KEY))))
+    status = QLabel(upload_status or last_upload_text(mw.pm.profile.get(LAST_UPLOAD_KEY)))
+    status.setTextFormat(Qt.TextFormat.PlainText)
+    status.setWordWrap(True)
+    layout.addWidget(status)
     if not api.configured:
         return None
     freeze = QCheckBox(tr("Streak protection"))
