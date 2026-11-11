@@ -193,7 +193,7 @@ class RefreshTests(unittest.TestCase):
         self.settings = {"url": "https://example.test", "user": "cerro", "token": "secret"}
         self.mw = SimpleNamespace(
             col=SimpleNamespace(get_config=lambda *args: 4, db=SimpleNamespace(all=self.read_rows)),
-            pm=SimpleNamespace(profile={"ankiquestUploadedThrough": 100, "ankiquestSharedDecks": ["1"]}),
+            pm=SimpleNamespace(profile={"ankiquestUploadedThrough": 100}),
             taskman=SimpleNamespace(run_in_background=self.run_task),
             form=SimpleNamespace(menuTools=SimpleNamespace(addAction=Mock())),
             addonManager=SimpleNamespace(
@@ -226,6 +226,7 @@ class RefreshTests(unittest.TestCase):
         self.addon.ui = SimpleNamespace(settings_dialog=Mock(return_value=None), deck_dialog=Mock())
         self.addon.web = SimpleNamespace(open_page=Mock())
         self.addon.client = lambda: self.api
+        self.mw.pm.profile[self.addon.UPLOADS_KEY] = {self.api.base: {self.api.user: {"shared": ["1"]}}}
         self.addon.offset_west_min = lambda: -120
         self.decks = [{"id": "1", "name": "Spanish", "remaining": 0, "reviewed_today": 1, "day": 20000}]
         self.addon.deck_snapshots = Mock(return_value=self.decks)
@@ -261,7 +262,7 @@ class RefreshTests(unittest.TestCase):
         done(future)
 
     def test_no_shared_decks_skips_deck_progress(self):
-        self.mw.pm.profile["ankiquestSharedDecks"] = []
+        self.addon._upload_prefs(self.api)["shared"] = []
         self.addon.refresh(False)
         self.addon.deck_snapshots.assert_not_called()
         self.assertIsNone(self.api.upload.call_args.kwargs["decks"])
@@ -280,7 +281,7 @@ class RefreshTests(unittest.TestCase):
         self.assertTrue(self.api.upload.call_args.kwargs["catalog"])
         self.assertTrue(self.api.upload.call_args.args[2], "a catalog upload never announces")
         self.api.save_deck_settings.assert_called_once_with(["1", "3"], ["2"], ["hill"], True, False)
-        self.assertEqual(self.mw.pm.profile["ankiquestSharedDecks"], ["1", "3"])
+        self.assertEqual(self.addon._upload_prefs(self.api)["shared"], ["1", "3"])
 
     def test_sharing_without_anyone_to_tell_is_refused(self):
         self.api.deck_settings = Mock(return_value={"decks": [], "recipients": []})
@@ -395,7 +396,7 @@ class RefreshTests(unittest.TestCase):
         self.pending = []
         self.addon.refresh(False, resync=True)
         self.assertTrue(self.api.upload.call_args.args[2])
-        self.assertEqual(self.mw.pm.profile["ankiquestUploadedThrough"], 0)
+        self.assertEqual(self.addon._upload_prefs(self.api)["through"], 0)
         self.pending = [[(101, 1, 1, 3, 1000, 1)]]
         self.addon.refresh(False)
         self.assertFalse(self.api.upload.call_args.args[2])
@@ -414,11 +415,12 @@ class RefreshTests(unittest.TestCase):
         with patch("builtins.print"):
             self.addon.refresh(False)
         self.assertIsNone(self.api.upload.call_args.kwargs["decks"])
-        self.assertEqual(self.mw.pm.profile["ankiquestUploadedThrough"], 101)
+        self.assertEqual(self.addon._upload_prefs(self.api)["through"], 101)
 
     def test_rollover_during_snapshot_omits_inconsistent_progress(self):
         start = 20000 * progress.DAY_MS + 2 * 3_600_000
-        with patch.object(self.addon.time, "time", side_effect=[start / 1000 - 1, start / 1000 - 1, start / 1000]):
+        before, after = start / 1000 - 1, start / 1000
+        with patch.object(self.addon.time, "time", side_effect=[before, before, after, after]):
             self.addon.refresh(False)
         self.assertIsNone(self.api.upload.call_args.kwargs["decks"])
 
