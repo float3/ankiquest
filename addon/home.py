@@ -1,6 +1,8 @@
 """Connects the Today panel, deck list badges, the daily goal and session recaps to Anki."""
 
 import time
+from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 
 from aqt import gui_hooks, mw
@@ -21,19 +23,22 @@ PERIOD_KEY = "ankiquestBoardPeriod"
 SESSION_KEY = "ankiquestLastStudySession"
 ART = Path(__file__).resolve().parent / "art"
 BOARD_MS = 5 * 60 * 1000
+BOARD_RETRY_MS = 30_000
+BOARD_RETRY_CAP_MS = BOARD_MS
 CACHE_MS = 2000
 
 local = {
     "addon": None,
     "board": None,
     "board_account": None,
-    "board_loading": False,
+    "board_request": None,
+    "board_retry": None,
     "session": None,
     "timer": None,
     "days": None,
     "restarted": None,
     "reporting": False,
-    "goal_loading": False,
+    "goal_request": None,
     "capabilities": None,
     "capabilities_loading": False,
     "moving": False,
@@ -50,6 +55,37 @@ def addon():
 
 def account(api):
     return [api.base, api.user, api.token]
+
+
+@dataclass
+class _Request:
+    who: list
+    profile: dict
+
+    def owns(self, api):
+        return self.who == account(api) and self.profile is mw.pm.profile
+
+
+class _GoalMode(Enum):
+    SILENT = auto()
+    OFFER_SETUP = auto()
+
+
+@dataclass
+class _GoalRequest(_Request):
+    mode: _GoalMode
+
+
+@dataclass
+class _BoardRetry:
+    request: _Request
+    at: int
+    delay: int
+
+
+class _BoardFetch(Enum):
+    AUTOMATIC = auto()
+    MANUAL = auto()
 
 
 def companion():
@@ -184,9 +220,17 @@ def sync_goal(prompt=False):
     """Reads the server's goal, moves an older add-on's local goal there if none was chosen yet,
     and with `prompt` asks for a goal once per account while none is chosen."""
     api = addon().client()
-    if not api.configured or local["goal_loading"]:
+    if not api.configured:
         return
-    local["goal_loading"] = True
+    # An explicit setup joins a silent read for the same profile.
+    mode = _GoalMode.OFFER_SETUP if prompt else _GoalMode.SILENT
+    pending = local["goal_request"]
+    if pending is not None and pending.owns(api):
+        if mode is _GoalMode.OFFER_SETUP:
+            pending.mode = mode
+        return
+    request = _GoalRequest(account(api), mw.pm.profile, mode)
+    local["goal_request"] = request
     legacy = goals.legacy_goal(addon().config())
 
     def work():
@@ -196,18 +240,20 @@ def sync_goal(prompt=False):
         return answer
 
     def done(future):
-        local["goal_loading"] = False
+        if local["goal_request"] is not request:
+            return
+        local["goal_request"] = None
         try:
             answer = future.result()
         except Exception as e:
             print("ankiquest goal:", e)
             return
-        if account(addon().client()) != account(api):
+        if not request.owns(addon().client()):
             return
         addon().drop_config(goals.LEGACY_KEYS)
         remember_plan(answer)
         addon().redraw()
-        if prompt:
+        if request.mode is _GoalMode.OFFER_SETUP:
             setup_prompt(api, answer)
 
     mw.taskman.run_in_background(work, done)
@@ -295,7 +341,8 @@ def board_view(api):
     if local["board"] is None:
         refresh_board()
     if local["board"] is None:
-        return None
+        retry = local["board_retry"]
+        return {"retry": True} if retry is not None and retry.request.owns(api) else None
     chosen = today.period(mw.pm.profile.get(PERIOD_KEY))
     return {"period": chosen, "rows": today.standings(local["board"], chosen, api.name)}
 
@@ -340,23 +387,39 @@ def on_deck_browser(deck_browser, content):
         print("ankiquest deck status:", e)
 
 
-def refresh_board():
+def refresh_board(mode=_BoardFetch.AUTOMATIC):
     api = addon().client()
-    if not api.configured or local["board_loading"]:
+    if not api.configured:
         return
-    local["board_loading"] = True
-    who = account(api)
+    # Only the same account and profile share a flight or its retry delay.
+    pending = local["board_request"]
+    if pending is not None and pending.owns(api):
+        return
+    retry = local["board_retry"]
+    delay = BOARD_RETRY_MS
+    if retry is not None and retry.request.owns(api):
+        if mode is _BoardFetch.AUTOMATIC and time.monotonic() * 1000 < retry.at:
+            return
+        delay = min(retry.delay * 2, BOARD_RETRY_CAP_MS)
+    request = _Request(account(api), mw.pm.profile)
+    local["board_request"] = request
 
     def done(future):
-        local["board_loading"] = False
+        if local["board_request"] is not request:
+            return
+        local["board_request"] = None
+        if not request.owns(addon().client()):
+            return
         try:
             board = future.result()
         except Exception as e:
+            local["board_retry"] = _BoardRetry(request, int(time.monotonic() * 1000) + delay, delay)
             print("ankiquest leaderboard:", e)
+            if local["board"] is None or local["board_account"] != request.who:
+                addon().redraw()
             return
-        if account(addon().client()) != who:
-            return
-        local["board"], local["board_account"] = board, who
+        local["board_retry"] = None
+        local["board"], local["board_account"] = board, request.who
         addon().redraw()
 
     mw.taskman.run_in_background(api.leaderboard, done)
@@ -379,6 +442,9 @@ def on_js_message(handled, message, context):
         return (True, None)
     if message == "ankiquest:goal":
         open_goal_dialog()
+        return (True, None)
+    if message == "ankiquest:retry-board":
+        refresh_board(_BoardFetch.MANUAL)
         return (True, None)
     if message.startswith("ankiquest:period:"):
         mw.pm.profile[PERIOD_KEY] = today.period(message.rsplit(":", 1)[1])
@@ -543,7 +609,10 @@ def open_progress():
 
 def clear_account():
     """Drop the previous account's Home data while keeping the periodic refresh."""
-    local.update(board=None, board_account=None, days=None, session=None, capabilities=None, restarted=None)
+    local.update(
+        board=None, board_account=None, board_request=None, board_retry=None, goal_request=None,
+        days=None, session=None, capabilities=None, restarted=None,
+    )
     profile = mw.pm.profile
     if profile is not None:
         for key in (GOAL_KEY, PLAN_KEY, REACHED_KEY, STREAK_MINUTES_KEY, CELEBRATED_KEY, SESSION_KEY):

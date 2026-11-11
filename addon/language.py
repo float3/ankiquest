@@ -34,9 +34,9 @@ SPANISH = {
     "Fill in the server, player and token first.": "Rellena primero el servidor, el jugador y el token.",
     "Connected as %s, level %d.": "Conectado como %s, nivel %d.",
     "Uploading your whole review history…": "Subiendo todo tu historial de repasos…",
-    "Full history upload is queued.": "La subida del historial completo está en cola.",
     "Set the server, player and token in AnkiQuest settings first.": "Configura primero el servidor, el jugador y el token en los ajustes de AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: no se pudieron cargar tus mazos (%s)",
+    "Full history upload is queued.": "La subida del historial completo está en cola.",
     "Pick at least one person to notify, or share no decks.": "Elige al menos una persona a la que avisar o desactiva el envío de mazos.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: no se pudieron guardar tus mazos (%s)",
     "%d deck shared.": "Se comparte %d mazo.", "%d decks shared.": "Se comparten %d mazos.",
@@ -157,9 +157,9 @@ GERMAN = {
     "Fill in the server, player and token first.": "Gib zuerst Server, Spieler und Token ein.",
     "Connected as %s, level %d.": "Verbunden als %s, Stufe %d.",
     "Uploading your whole review history…": "Dein gesamter Wiederholungsverlauf wird hochgeladen…",
-    "Full history upload is queued.": "Der vollständige Verlauf steht zum Hochladen bereit.",
     "Set the server, player and token in AnkiQuest settings first.": "Richte zuerst Server, Spieler und Token in den AnkiQuest-Einstellungen ein.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: Deine Stapel konnten nicht geladen werden (%s)",
+    "Full history upload is queued.": "Der vollständige Verlauf steht zum Hochladen bereit.",
     "Pick at least one person to notify, or share no decks.": "Wähle mindestens eine Person zum Benachrichtigen aus oder teile keine Stapel.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: Deine Stapel konnten nicht gespeichert werden (%s)",
     "%d deck shared.": "%d Stapel geteilt.", "%d decks shared.": "%d Stapel geteilt.",
@@ -247,9 +247,9 @@ FRENCH = {
     "Fill in the server, player and token first.": "Renseigne d’abord le serveur, le joueur et le jeton.",
     "Connected as %s, level %d.": "Connecté en tant que %s, niveau %d.",
     "Uploading your whole review history…": "Envoi de tout ton historique de révisions…",
-    "Full history upload is queued.": "L’envoi de tout ton historique est en attente.",
     "Set the server, player and token in AnkiQuest settings first.": "Configure d’abord le serveur, le joueur et le jeton dans les réglages AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest : impossible de charger tes paquets (%s)",
+    "Full history upload is queued.": "L’envoi de tout ton historique est en attente.",
     "Pick at least one person to notify, or share no decks.": "Choisis au moins une personne à prévenir, ou ne partage aucun paquet.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest : impossible d’enregistrer tes paquets (%s)",
     "%d deck shared.": "%d paquet partagé.", "%d decks shared.": "%d paquets partagés.",
@@ -337,9 +337,9 @@ PORTUGUESE = {
     "Fill in the server, player and token first.": "Preenche primeiro o servidor, o jogador e o token.",
     "Connected as %s, level %d.": "Ligado como %s, nível %d.",
     "Uploading your whole review history…": "A enviar todo o teu histórico de revisões…",
-    "Full history upload is queued.": "O envio de todo o histórico está em fila de espera.",
     "Set the server, player and token in AnkiQuest settings first.": "Configura primeiro o servidor, o jogador e o token nas definições do AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: não foi possível carregar os teus baralhos (%s)",
+    "Full history upload is queued.": "O envio de todo o histórico está em fila de espera.",
     "Pick at least one person to notify, or share no decks.": "Escolhe pelo menos uma pessoa a avisar ou não partilhes nenhum baralho.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: não foi possível guardar os teus baralhos (%s)",
     "%d deck shared.": "%d baralho partilhado.", "%d decks shared.": "%d baralhos partilhados.",
@@ -1059,3 +1059,23 @@ SPANISH.update({"Sign out": "Cerrar sesión"})
 GERMAN.update({"Sign out": "Abmelden"})
 FRENCH.update({"Sign out": "Se déconnecter"})
 PORTUGUESE.update({"Sign out": "Terminar sessão"})
+
+SPANISH.update({
+    "Retry leaderboard": "Volver a cargar la clasificación",
+    "The leaderboard could not be loaded.": "No se pudo cargar la clasificación.",
+})
+
+GERMAN.update({
+    "Retry leaderboard": "Rangliste erneut laden",
+    "The leaderboard could not be loaded.": "Die Rangliste konnte nicht geladen werden.",
+})
+
+FRENCH.update({
+    "Retry leaderboard": "Recharger le classement",
+    "The leaderboard could not be loaded.": "Impossible de charger le classement.",
+})
+
+PORTUGUESE.update({
+    "Retry leaderboard": "Voltar a carregar a classificação",
+    "The leaderboard could not be loaded.": "Não foi possível carregar a classificação.",
+})

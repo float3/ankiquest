@@ -33,6 +33,8 @@ class SignOut(_HeldTasks):
         self.profile[self.addon.INBOX_KEY] = 4
         self.profile[self.home.PLAN_KEY] = {"target": 42}
         self.home.local["board"] = [{"user": "hill"}]
+        for key in ("board_request", "board_retry", "goal_request"):
+            self.home.local[key] = object()
 
         self.sign_out()
 
@@ -42,6 +44,8 @@ class SignOut(_HeldTasks):
         self.assertNotIn(self.addon.INBOX_KEY, self.profile)
         self.assertNotIn(self.home.PLAN_KEY, self.profile)
         self.assertIsNone(self.home.local["board"])
+        for key in ("board_request", "board_retry", "goal_request"):
+            self.assertIsNone(self.home.local[key])
         self.assertNotIn("shared", self.checkpoint)
         self.assertEqual(self.now - 1000, self.checkpoint["through"])
 
