@@ -30,7 +30,10 @@ jobs:
           cache: npm
 
       - name: Install Playwright
-        run: npm ci && npx playwright install --with-deps chromium
+        run: |
+          # Use the signed Ubuntu archive directly; the runner's Azure mirror stalls.
+          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          npm ci && npx playwright install --with-deps chromium
 
       - name: Type check
         run: npm run typecheck
@@ -61,7 +64,9 @@ jobs:
 
       - name: Test desktop deck completion
         run: |
-          sudo apt-get update -qq
+          # Use the same signed archive as the browser job.
+          sudo sed -i 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update -qq -o APT::Update::Error-Mode=any
           sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
           python3 -m venv "$RUNNER_TEMP/aqt"
           "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqt
