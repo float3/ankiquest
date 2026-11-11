@@ -8,6 +8,7 @@ Plain Python, so the tests load it without Anki.
 """
 
 MINUTE_MS = 60_000
+_UNKNOWN, _SYNCING, _MET, _PROTECTED, _PENDING = "unknown", "syncing", "met", "protected", "pending"
 
 # The reviews the uploader sends (client.PENDING_SQL), with only what the verdict needs.
 UNSENT_SQL = "select id, time from revlog where id > ? and ease > 0 and type < 4 order by id"
@@ -83,3 +84,28 @@ def unsent(col, server):
     if last is None:
         return []
     return [{"id": row[0], "time_ms": row[1] or 0} for row in col.db.all(UNSENT_SQL, last)]
+
+
+def _for_display(server, found):
+    """Keep lifetime facts; replace today's claims with the already computed verdict."""
+    if not isinstance(server, dict):
+        return None
+    view = dict(server)
+    if found is None:
+        view.update(streak=None, streak_state=None, today={}, quests=[], at_risk=False,
+                    streak_warning=None, _day_status=_UNKNOWN)
+        return view
+    view.update(streak=found["streak"], streak_state=found["streak_state"],
+                today=dict(server.get("today") or {}, reviews=found["reviews"], time_ms=found["time_ms"], minutes=found["minutes"]))
+    if found["waiting"]:
+        status = _SYNCING
+    elif found["met"]:
+        status = _MET
+    elif found["streak_state"] == _PROTECTED:
+        status = _PROTECTED
+    else:
+        status = _UNKNOWN if found["streak"] is None else _PENDING
+    view["_day_status"] = status
+    if found["met"] or found["streak"] is None:
+        view.update(at_risk=False, streak_warning=None)
+    return view
