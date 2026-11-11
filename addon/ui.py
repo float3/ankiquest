@@ -175,7 +175,7 @@ def _folded(title, layout):
 
 def settings_dialog(
     parent, config, on_test, on_upload_all, companion="aki", on_account=None, *,
-    extra=None, on_goal=None, on_manage=None, on_decks=None, on_privacy=None,
+    extra=None, on_manage=None, on_decks=None, on_privacy=None,
 ):
     """One scrollable dialog. Server sections save only for the account they loaded."""
     dialog = QDialog(parent)
@@ -286,14 +286,10 @@ def settings_dialog(
         server_groups[key] = QVBoxLayout(panel)
         server_groups[key].setContentsMargins(0, 0, 0, 0)
         group_layout.addWidget(panel)
-    for key, title, callback in (
-        ("sharing", tr("Deck completion notifications"), on_decks),
-        ("app", tr("Daily goal…"), on_goal),
-    ):
-        if callback is not None:
-            button = QPushButton(title)
-            button.clicked.connect(callback)
-            server_groups[key].addWidget(button)
+    if on_decks is not None:
+        button = QPushButton(tr("Deck completion notifications"))
+        button.clicked.connect(on_decks)
+        server_groups["sharing"].addWidget(button)
     finish = extra(dialog, server_groups) if extra else None
     account_note = QLabel(tr("Save this account, then reopen settings to load its choices."))
     account_note.setWordWrap(True)
