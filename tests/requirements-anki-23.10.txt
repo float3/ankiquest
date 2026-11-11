@@ -1,4 +1,4 @@
-aqt[qt6]==23.10
+aqt[qt6]==25.9.4
 PyQt6==6.5.3
 PyQt6-Qt6==6.5.3
 PyQt6-WebEngine==6.5.0
