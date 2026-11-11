@@ -3,7 +3,7 @@ from enum import Enum, auto
 
 from aqt.qt import QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox, QWidget
 
-from .language import tr
+from .language import _hour, tr
 from .preferences import _REMINDERS
 
 
@@ -26,7 +26,7 @@ def _hours(name):
     box = QComboBox()
     box.setObjectName(name)
     for hour in range(24):
-        box.addItem("%02d:00" % hour, hour)
+        box.addItem(_hour(hour), hour)
     return box
 
 

@@ -16,6 +16,7 @@ from datetime import date
 from html import escape
 
 from . import heatmap
+from .language import _plural as _plural_text
 
 CONFIG_KEY = "review_heatmap"
 EXPANDED_KEY = "ankiquestHeatmapExpanded"
@@ -156,7 +157,7 @@ draw();
 
 
 def _plural(tr, count, one, other):
-    return tr(one) % count if count == 1 else tr(other) % count
+    return _plural_text(one, other, count, tr) % count
 
 
 def _reviews(tr, count):

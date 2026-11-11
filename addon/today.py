@@ -1,11 +1,12 @@
 """Local study for the Today panel: daily deck states, the next deck, the leaderboard and sessions.
 
-Nothing here imports Anki, so tests can load it alone; callers hand in the collection.
+Callers hand in the collection; language.py owns display formatting.
 """
 
 import re
 from collections import namedtuple
 from html import escape
+from .language import _clock, _plural
 
 REVIEW_NOW, LEARNING_LATER, DONE, NOTHING = "review_now", "learning_later", "done", "nothing"
 PERIODS = ("hour", "day", "week", "month", "year", "all")
@@ -116,16 +117,14 @@ def focus(days, selected):
 
 
 def clock(ms):
-    import time
-
-    return time.strftime("%H:%M", time.localtime(ms / 1000))
+    return _clock(ms)
 
 
 def label(day, translate=lambda value: value, show_time=clock):
     """The phone app's daily line for a deck."""
     if day.status == REVIEW_NOW:
         count = day.ready_count
-        return (translate("%d card ready") if count == 1 else translate("%d cards ready")) % count
+        return _plural("%d card ready", "%d cards ready", count, translate) % count
     if day.status == LEARNING_LATER:
         return translate("Learning later today · next at %s") % show_time(day.next_at)
     if day.status == DONE:
@@ -214,7 +213,7 @@ def session(col, started_ms, now_ms, remaining):
 def duration(minutes, translate=lambda value: value):
     if minutes <= 0:
         return translate("less than a minute")
-    return (translate("%d minute") if minutes == 1 else translate("%d minutes")) % minutes
+    return _plural("%d minute", "%d minutes", minutes, translate) % minutes
 
 
 def session_text(summary, translate=lambda value: value):

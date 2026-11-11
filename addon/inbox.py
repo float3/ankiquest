@@ -1,9 +1,9 @@
 """The native inbox's rules: which rows get which buttons, what a reply may say, and the server calls.
 
-Plain Python, so the tests load it without Anki. `api` is a client.Client; `translate` is language.tr."""
+`api` is a client.Client; `translate` is language.tr, which also owns date formatting."""
 
 import re
-from datetime import datetime
+from .language import _date_time
 
 MAX_MESSAGE = 200
 READ_BATCH = 200
@@ -106,7 +106,7 @@ def web_path(entry):
 def when(created_at):
     """A row's local time; empty when the server sent none."""
     try:
-        return datetime.fromtimestamp(int(created_at)).strftime("%Y-%m-%d %H:%M") if created_at else ""
+        return _date_time(int(created_at)) if created_at else ""
     except (OverflowError, OSError, TypeError, ValueError):
         return ""
 

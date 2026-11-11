@@ -7,9 +7,9 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from addon_loader import load_module
+from addon_loader import load_in_package, load_module
 
-board = load_module("ankiquest_board", "board.py")
+board = load_in_package("ankiquest_board_test", "board")
 notify = load_module("ankiquest_notify", "notify.py")
 tree = load_module("ankiquest_decks", "decks.py")
 web = load_module("ankiquest_web", "web.py")
