@@ -51,7 +51,7 @@ async function fixture(browser: Browser, width = 390, prepare = (_: ReturnType<t
         if (body.action === 'hide') data.hidden = [body.user];
         if (body.action === 'unhide') data.hidden = [];
       }
-      return route.fulfill({json: data.hidden});
+      return route.fulfill({json: data.hidden.map(user => people[user as keyof typeof people])});
     }
     if (pathname === '/api/leaderboard' || pathname === '/api/records') {
       data.boards.push(url.search);
@@ -161,8 +161,9 @@ test('the leaderboard and records follow the chosen scope', async () => {
     await f.page.locator('#board-scope').waitFor();
     assert.deepEqual(await f.page.locator('#board-scope option').allTextContents(), ['Friends and groups', 'Everyone', 'Spanish club']);
     assert.equal(f.data.boards.at(-1), '?period=week', 'the server picks the default scope');
+    const groupBoard = f.page.waitForResponse(response => response.url().endsWith('/api/leaderboard?period=week&scope=group%3A3'));
     await f.page.locator('#board-scope').selectOption('group:3');
-    await f.page.waitForFunction(() => (document.getElementById('board-scope') as HTMLSelectElement | null)?.value === 'group:3');
+    await groupBoard;
     assert.equal(f.data.boards.at(-1), '?period=week&scope=group%3A3');
     await f.page.goto('http://ankiquest.test/records');
     await f.page.locator('#board-scope').waitFor();
@@ -189,7 +190,8 @@ test('hide and restore a stranger without changing the ranks on Global', async (
     assert.equal(await f.page.getByRole('button', {name: 'Hide Alice for me'}).count(), 0);
     await noOverflow(f.page);
 
-    await f.page.getByRole('button', {name: 'Show bob again'}).click();
+    assert.equal(await f.page.locator('#hidden-players li span').textContent(), 'Bob (bob)');
+    await f.page.getByRole('button', {name: 'Show Bob again'}).click();
     await f.page.getByRole('link', {name: 'Bob', exact: true}).waitFor();
     assert.deepEqual(f.data.writes.at(-1), {action: 'unhide', user: 'bob'});
     assert.deepEqual(f.errors, []);
@@ -206,7 +208,7 @@ test('switching accounts clears the private hidden list immediately', async () =
     await f.page.goto('http://ankiquest.test/week');
     await f.page.locator('#board-scope').selectOption('global');
     await f.page.locator('#hidden-players summary').click();
-    await f.page.getByRole('button', {name: 'Show bob again'}).waitFor();
+    await f.page.getByRole('button', {name: 'Show Bob again'}).waitFor();
 
     const gone = await f.page.evaluate(() => {
       window.ankiquestSession = {user: 'cleo'};

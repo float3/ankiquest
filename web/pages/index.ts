@@ -114,6 +114,7 @@ addEventListener("pagehide",()=>{
 });
 addEventListener("pageshow",event=>{
   privatePageHidden=false;
+  // A cached page may resume after another tab changed accounts; rebuild private hide controls.
   if (event.persisted) void render();
 });
 const winnerState: {data: WinnerHistory | null; scope: WinScope; metric: WinMetric; error: boolean; request: number} = { data: null, scope: "shared", metric: "day", error: false, request: 0 };
@@ -323,7 +324,8 @@ function board(rows: Standing[], me: string, hideFor?: string) {
   const lead = Math.max(1, rows[0].xp);
   return aqHtml`<ol class="board">${rows.map((r, i) => {
     const rank = r.rank ?? i + 1;
-    const hide = hideFor && r.user !== hideFor && r.today_reviews == null;
+    // The server always includes today_reviews on a full Standing; only stranger summaries omit it.
+    const hide = hideFor && r.user !== hideFor && r.today_reviews === undefined;
     return aqHtml`
     <li class="${[r.user === me && "me", rank === 1 && r.xp > 0 && "lead"].filter(Boolean).join(" ")}">
       <span class="rank">${["👑", "🥈", "🥉"][rank - 1] ?? num(rank)}</span>
@@ -344,9 +346,9 @@ function board(rows: Standing[], me: string, hideFor?: string) {
 
 const hiddenPath = (session: OwnerSession) => "/api/leaderboard/hidden/" + encodeURIComponent(session.user);
 
-function hiddenPanel(hidden: string[]) {
+function hiddenPanel(hidden: Person[]) {
   const open = app.querySelector<HTMLDetailsElement>("#hidden-players")?.open;
-  const restore = hidden.map(user => aqHtml`<li><span>${esc(user)}</span><button type="button" data-global-unhide="${esc(user)}" aria-label="${esc(aqText`Show ${user} again`)}">Show again</button></li>`).join("");
+  const restore = hidden.map(({user, display}) => aqHtml`<li><span>${esc(display)} (${esc(user)})</span><button type="button" data-global-unhide="${esc(user)}" aria-label="${esc(aqText`Show ${display} again`)}">Show again</button></li>`).join("");
   return aqHtml`<details id="hidden-players"${open ? " open" : ""}><summary>Hidden players</summary>
     ${restore ? aqHtml`<ul>${restore}</ul>` : aqHtml`<p>No hidden players.</p>`}
   </details><p id="hide-status" role="status"></p>`;
@@ -366,7 +368,7 @@ function bindGlobalHides(session: OwnerSession, id: number) {
     // The URL binds the action to the account that rendered this button.
     try {
       const action = button?.dataset.globalHide ? "hide" : "unhide";
-      await request<string[]>(hiddenPath(session), {session, json: {action, user}, gate: false});
+      await request<Person[]>(hiddenPath(session), {session, json: {action, user}, gate: false});
     } catch (_) {
       controls.forEach(control => { control.disabled = false; });
       status.textContent = aqText("Could not update hidden players. Try again.");
@@ -614,7 +616,7 @@ async function render() {
       request<Standing[]>(scoped("/api/leaderboard?period=" + period), auth),
       request<WeekInfo>("/api/week").catch(() => null),
       session && globalHideOwner
-        ? request<string[]>(hiddenPath(session), {session, gate: false}).catch(() => null)
+        ? request<Person[]>(hiddenPath(session), {session, gate: false}).catch(() => null)
         : null,
     ]);
     weekEnds = week?.ends_at ?? 0;
@@ -638,7 +640,7 @@ async function render() {
     document.title = aqText("Leaderboard · AnkiQuest");
     AnkiQuestSite.setProfile(me);
     const owner = hidden && session ? session : null;
-    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + (newcomer ? welcome() : "") + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card" id="leaderboard-rows"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, session?.user ?? me, owner?.user)}${hidden ? hiddenPanel(hidden) : ""}</section>` + winnerSection() + receivingNotificationsEntry();
+    app.innerHTML = pageHero(aqText("Every session counts."), aqText("A little friendly competition, a little more motivation. See how your study community is growing together."), aqHtml`<strong>Made for steady progress</strong>Standings update as members sync.`) + (newcomer ? welcome() : "") + leaderboardKpis(rows, period) + tabs(period) + scopePicker(choices, scope) + aqHtml`<section class="card" id="leaderboard-rows"><div class="card-head"><div><h2>${boardTitle(period)}</h2><p>XP earned together, one study session at a time.</p></div><span class="chip blue">${num(rows.length)} players</span></div>${board(rows, me, owner?.user)}${hidden ? hiddenPanel(hidden) : ""}</section>` + winnerSection() + receivingNotificationsEntry();
     if (owner) bindGlobalHides(owner, id);
   } catch (e) {
     if (!canRender()) return;

@@ -169,13 +169,41 @@ fn hidden_players(store: &Store, member: &str) -> rusqlite::Result<BTreeSet<Stri
         .collect()
 }
 
+#[derive(Serialize)]
+struct HiddenPlayer {
+    user: String,
+    display: String,
+}
+
+fn hidden_summary(
+    app: &App,
+    store: &Store,
+    viewer: &social::Viewer,
+    member: &str,
+) -> Result<Vec<HiddenPlayer>, crate::Error> {
+    let (visible, _) = global_users(app, store, viewer)?;
+    Ok(hidden_players(store, member)?
+        .into_iter()
+        .map(|user| {
+            // A hide must not reveal a new display name after a player leaves the visible board.
+            let display = if visible.contains(&user) {
+                app.display(&user)
+            } else {
+                user.clone()
+            };
+            HiddenPlayer { user, display }
+        })
+        .collect())
+}
+
 async fn global_hidden(
     State(app): State<Arc<App>>,
     UrlPath(member): UrlPath<String>,
     headers: HeaderMap,
-) -> Result<Json<BTreeSet<String>>, StatusCode> {
+) -> Result<Json<Vec<HiddenPlayer>>, StatusCode> {
     access::require_owner(&app, &member, &headers)?;
-    hidden_players(&app.store.lock().unwrap(), &member)
+    let viewer = access::viewer(&app, &headers);
+    hidden_summary(&app, &app.store.lock().unwrap(), &viewer, &member)
         .map(Json)
         .map_err(store_error)
 }
@@ -192,13 +220,10 @@ async fn change_global_hidden(
     UrlPath(owner): UrlPath<String>,
     headers: HeaderMap,
     Json(action): Json<HiddenAction>,
-) -> Result<Json<BTreeSet<String>>, StatusCode> {
+) -> Result<Json<Vec<HiddenPlayer>>, StatusCode> {
+    access::require_owner(&app, &owner, &headers)?;
     let viewer = access::viewer(&app, &headers);
-    let member = viewer
-        .member
-        .as_deref()
-        .filter(|member| *member == owner)
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let member = viewer.member.as_deref().ok_or(StatusCode::UNAUTHORIZED)?;
     let store = app.store.lock().unwrap();
 
     match action {
@@ -209,7 +234,9 @@ async fn change_global_hidden(
             }
             let hidden = hidden_players(&store, member).map_err(store_error)?;
             if hidden.contains(&target) {
-                return Ok(Json(hidden));
+                return hidden_summary(&app, &store, &viewer, member)
+                    .map(Json)
+                    .map_err(store_error);
             }
 
             // Only a stranger this member could already see on Global can be hidden.
@@ -238,7 +265,7 @@ async fn change_global_hidden(
                 .map_err(store_error)?;
         }
     }
-    hidden_players(&store, member)
+    hidden_summary(&app, &store, &viewer, member)
         .map(Json)
         .map_err(store_error)
 }
@@ -506,7 +533,24 @@ async fn records(
 ) -> Result<Json<Vec<RecordBoard>>, StatusCode> {
     let scope = query.scope()?;
     let viewer = access::viewer(&app, &headers);
-    let profiles = app.standings_among(&board_users(&app, &viewer, scope)?);
+    let global = scope == Some(social::Scope::Global);
+    let mut users = board_users(&app, &viewer, scope)?;
+    if let Some(member) = viewer.member.as_deref().filter(|_| global) {
+        // Records keep the public-profile rule and respect this viewer's Global exclusions.
+        let store = app.store.lock().unwrap();
+        let mut excluded = hidden_players(&store, member).map_err(store_error)?;
+        let muted = store
+            .conn
+            .prepare("select sender from muted_people where recipient = ?1")
+            .map_err(store_error)?
+            .query_map([member], |row| row.get::<_, String>(0))
+            .map_err(store_error)?
+            .collect::<Result<BTreeSet<_>, _>>()
+            .map_err(store_error)?;
+        excluded.extend(muted);
+        users.retain(|user| !excluded.contains(user));
+    }
+    let profiles = app.standings_among(&users);
     let mut board: Vec<RecordBoard> = Records::NAMES
         .iter()
         .map(|window| {
@@ -1223,7 +1267,10 @@ mod tests {
 
         let (status, hidden) = set_hidden(&app, Some(&ana), "hide", "bobby").await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(hidden, serde_json::json!(["bobby"]));
+        assert_eq!(
+            hidden,
+            serde_json::json!([{"user": "bobby", "display": "Bobby"}])
+        );
         assert_eq!(
             set_hidden(&app, Some(&ana), "hide", "bobby").await.1,
             hidden
@@ -1281,6 +1328,60 @@ mod tests {
         let (status, hidden) = set_hidden(&app, Some(&ana), "unhide", "bobby").await;
         assert_eq!((status, hidden), (StatusCode::OK, serde_json::json!([])));
         assert_eq!(users(&get(&app, url, Some(&ana)).await.1), users(&before));
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn global_records_respect_the_viewers_hides_and_mutes() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        let bobby = account(&app, "bobby", 8);
+        account(&app, "carla", 6);
+        account(&app, "private", 10);
+        make_private(&app, "private");
+        opt_in(&app, "private");
+        let url = "/api/records?scope=global";
+        let (_, before) = get(&app, url, Some(&ana)).await;
+        assert!(before.to_string().contains("bobby"));
+        assert!(!before.to_string().contains("private"));
+        assert_eq!(
+            set_hidden(&app, Some(&ana), "hide", "bobby").await.0,
+            StatusCode::OK
+        );
+        app.store
+            .lock()
+            .unwrap()
+            .conn
+            .execute("insert into muted_people values ('ana', 'carla', 0)", [])
+            .unwrap();
+
+        let (_, after) = get(&app, url, Some(&ana)).await;
+        for board in after.as_array().unwrap() {
+            assert!(
+                board["holders"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|holder| holder["user"] == "ana")
+            );
+        }
+        assert!(after.to_string().contains("ana"));
+        for token in [Some(bobby.as_str()), None] {
+            assert_eq!(get(&app, url, token).await.1, before);
+        }
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn a_hidden_name_follows_global_visibility() {
+        let (app, path) = app_with(serde_json::json!({"registration": true}));
+        let ana = account(&app, "ana", 4);
+        account(&app, "bobby", 8);
+        let (_, hidden) = set_hidden(&app, Some(&ana), "hide", "bobby").await;
+        assert_eq!(hidden[0]["display"], "Bobby");
+        make_private(&app, "bobby");
+        let (_, hidden) = get(&app, "/api/leaderboard/hidden/ana", Some(&ana)).await;
+        assert_eq!(hidden[0]["display"], "bobby");
         cleanup(app, path);
     }
 
