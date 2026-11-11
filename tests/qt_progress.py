@@ -4,9 +4,9 @@ from copy import deepcopy
 from http import HTTPStatus
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from aqt.qt import QApplication, QPushButton, QWidget
+from aqt.qt import QApplication, QCoreApplication, QEvent, QGridLayout, QPushButton, QToolButton, QWidget
 from addon_loader import load_in_package
 
 app = QApplication.instance() or QApplication([])
@@ -57,6 +57,7 @@ class Progress(unittest.TestCase):
         self.assertEqual(2, history.topLevelItemCount())
         self.assertEqual("Streak minimum met", history.topLevelItem(0).text(1))
         self.assertEqual("Skipped day — streak kept", history.topLevelItem(1).text(1))
+        self.assertEqual("0 minutes", history.topLevelItem(1).text(3))
         self.assertNotEqual(history.topLevelItem(0).background(1), history.topLevelItem(1).background(1))
         records = self.window._tables[ui._Section.RECORDS]
         self.assertEqual("Sam", records.topLevelItem(0).text(1))
@@ -94,6 +95,23 @@ class Progress(unittest.TestCase):
         self.finish()
         self.assertEqual(2, self.window._tables[ui._Section.HISTORY].topLevelItemCount())
         self.assertEqual(1, self.window._tables[ui._Section.RECORDS].topLevelItemCount())
+
+    def test_browse_has_a_live_entry_and_removes_it_when_closed(self):
+        home = load_in_package("progress_qt", "home")
+        browser = QWidget()
+        browser.form = SimpleNamespace(gridLayout=QGridLayout(browser))
+        with patch.object(home, "mw", SimpleNamespace()), patch.object(home, "_toolbar_values", return_value=("AnkiQuest · 7 · Secured", "Open Today")) as labels, patch.object(home, "_open_today") as opened:
+            home._browser_entry(browser)
+            button = browser.findChild(QToolButton)
+            self.assertEqual("AnkiQuest · 7 · Secured", button.text())
+            button.click()
+            opened.assert_called_once()
+            labels.return_value = ("AnkiQuest · Streak unknown", "Open Today")
+            home._refresh_toolbar()
+            self.assertEqual("AnkiQuest · Streak unknown", button.text())
+            browser.deleteLater()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            self.assertFalse(home.local["browser_buttons"])
 
 
 class SimpleServerError(Exception):

@@ -101,6 +101,7 @@ font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18)}
 #ankiquest .aq-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}
 #ankiquest .aq-xp{font-weight:800;color:var(--aq-orange);white-space:nowrap}
 #ankiquest .aq-empty-note{color:var(--aq-muted);padding:6px 8px}
+#ankiquest .aq-empty-note a{color:var(--aq-blue)}
 #ankiquest .aq-session{margin-top:12px;text-align:center}
 #ankiquest .aq-links{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px}
 #ankiquest .aq-links a{text-decoration:none;font-weight:800;font-size:13px;color:var(--aq-blue);background:var(--aq-bg);

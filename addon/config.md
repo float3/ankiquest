@@ -41,6 +41,10 @@ your wins wait in a queue for this account and profile. they appear after studyi
 
 with a server set, the block under the deck list is a Today panel: your companion's mood, streak and level, the next deck with a Study button, today's streak minimum and daily goal, the daily quests, a top-5 leaderboard for the period you pick (your own row is always there), and links to Today, History, Reminders and the website's settings.
 
+Today also shows saved freezes, a freeze earned today and your latest weekly recap for seven days, with one sentence per line. An AnkiQuest entry in the top toolbar and beside Browse's search shows the current streak and day state; click it to return to Today. If the server is unreachable, Today keeps the cached profile, explains what is waiting, and offers **Retry connection**.
+
+**History** and **View progress** open a native Progress window: choose a year of uploaded study days or inspect records in the other tab. Each day keeps the server's met, short, frozen, skipped or no-study label. Refresh retries a failed read; **Open website** remains available for older servers. Changing accounts or closing the Anki profile closes the window and discards late replies.
+
 the daily goal lives on the server, so every device agrees. pick it with **Change goal** on Today: clear your overdue backlog in a number of days (on top of what is due), a number of cards or minutes a day, or no goal. the dialog estimates each choice from your own collection: cards and time today, and when the backlog would be gone. it opens once by itself while you have not picked a goal. a goal from an older version of the add-on moves to the server the first time.
 
 - `deck_status`: mark decks in the deck list as done today, learning later today, or ready

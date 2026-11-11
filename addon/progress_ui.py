@@ -132,8 +132,10 @@ class _Progress:
         self._years.blockSignals(False)
         table = self._tables[_Section.HISTORY]
         for day in sorted(data.get("days", []), key=lambda day: day["date"], reverse=True):
+            milliseconds = int(day.get("time_ms", 0))
+            duration = today.duration(milliseconds // 60_000, tr) if milliseconds > 0 else tr("%d minutes") % 0
             row = QTreeWidgetItem([day["date"], heatmap_ui._state_label(day.get("state"), tr),
-                                  str(day.get("reviews", 0)), today.duration(int(day.get("time_ms", 0)) // 60_000, tr), str(day.get("xp", 0))])
+                                  str(day.get("reviews", 0)), duration, str(day.get("xp", 0))])
             colours = _COLOURS.get(day.get("state"))
             if colours:
                 row.setBackground(1, QBrush(QColor(colours[0])))

@@ -70,7 +70,7 @@ class TodayDetails(unittest.TestCase):
         self.addon.state["profile"]["day_ends_at"] = int(time.time() * 1000) - 1
         self.addon.redraw()
         self.assertIn("Streak unknown", toolbar.web.eval.call_args.args[0])
-        self.assertNotIn("7", toolbar.web.eval.call_args.args[0])
+        self.assertEqual("AnkiQuest · Streak unknown", self.home._toolbar_values()[0])
 
     def test_an_own_only_board_explains_how_to_add_friends(self):
         self.assertIn("Add friends to study together", self.render().stats)
