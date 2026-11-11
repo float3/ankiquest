@@ -21,6 +21,10 @@ branding works offline.
 
 the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi`. after changing a PNG in `static/`, run `python tools/export_android_art.py <android-checkout>` (Pillow) to rewrite them, and `--check` to confirm every drawable exists at its size.
 
+The [mascot source plan](mascot-source.md) moves `aki-prompts.json` with the
+PNG masters to `art/mascots/aki/` and verifies Android's generated WebPs against
+that source.
+
 ## pose and voice rules
 
 | Asset | Use |
