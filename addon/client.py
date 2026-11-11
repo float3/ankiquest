@@ -3,6 +3,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from http import HTTPStatus
 from ipaddress import ip_address, ip_network
 
 DEFAULT_SERVER = "https://ankiquest.rationality-munich.com"
@@ -72,6 +73,8 @@ def request_json(url, body=None, headers=None, timeout=20, method=None):
     headers = dict(headers or {}, **{"Content-Type": "application/json"})
     data = None if body is None else json.dumps(body).encode()
     with open_url(url, data, headers, method=method, timeout=timeout) as response:
+        if response.status == HTTPStatus.NO_CONTENT:
+            return None
         return json.load(response)
 
 

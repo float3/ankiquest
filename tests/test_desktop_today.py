@@ -669,6 +669,8 @@ class HomeTests(unittest.TestCase):
         self.addon.client = lambda: self.api
         self.home = sys.modules["ankiquest_home_addon.home"]
         self.home.today_ui = SimpleNamespace(session_dialog=Mock())
+        from moment_fixture import cards
+        self.cards = cards(self)
         self.hooks = aqt.gui_hooks
 
     def run_task(self, work, done, uses_collection=False):
@@ -714,12 +716,14 @@ class HomeTests(unittest.TestCase):
         self.assertEqual("month", self.mw.pm.profile[self.home.PERIOD_KEY])
 
     def session(self, reviews):
+        self.mw.state = "review"
         for hook in self.hooks.state_did_change:
             hook("review", "overview")
         self.home.local["session"]["started"] -= 60_000
         started = self.home.local["session"]["started"]
         for index in range(reviews):
             self.review(started + index + 1, 30)
+        self.mw.state = "overview"
         for hook in self.hooks.state_did_change:
             hook("overview", "review")
 
@@ -736,29 +740,32 @@ class HomeTests(unittest.TestCase):
         self.remember("cards", 100)
         self.served_today()
         self.session(2)
-        dialog = self.home.today_ui.session_dialog
-        self.assertEqual("Streak secured! 🔥", dialog.call_args.args[1])
-        self.assertIn("once your reviews upload", dialog.call_args.args[2])
-        self.assertIn("2 reviews · 1 minute", dialog.call_args.args[2])
-        self.assertTrue(dialog.call_args.args[3].endswith("aki_streak.png"))
+        card = self.addon._moments._card
+        self.assertEqual("Streak secured! 🔥", card._items[0]["title"])
+        self.assertIn("once your reviews upload", card._items[0]["body"])
+        self.assertEqual(2, card._summary["reviews"])
+        self.assertEqual("aki_streak", self.addon.moments._pose(card._items[0], "aki"))
+        card._dialog.close()
         self.session(1)
-        self.assertEqual("Your study session", dialog.call_args.args[1])
-        dialog.call_args.kwargs["never_again"]()
+        card = self.addon._moments._card
+        self.assertEqual("Your study session", card._items[0]["title"])
+        card._dialog.close()
+        self.addon.save_config({"session_summary": False})
         self.assertFalse(self.settings["session_summary"])
         self.session(1)
-        self.assertEqual(2, dialog.call_count)
+        self.assertEqual(2, self.cards.call_count)
         self.assertEqual(3, self.mw.pm.profile[self.home.SESSION_KEY]["remaining"])
 
     def test_the_streak_is_not_celebrated_without_the_servers_word(self):
         self.remember("cards", 100)
         self.session(2)
-        self.assertEqual("Your study session", self.home.today_ui.session_dialog.call_args.args[1])
+        self.assertEqual("Your study session", self.addon._moments._card._items[0]["title"])
 
     def test_unsent_reviews_short_of_the_servers_minimum_do_not_secure_the_streak(self):
         self.remember("cards", 100)
         self.served_today(streak_minutes=5, reviews=1, time_ms=180_000, minutes=3)
         self.session(2)
-        self.assertEqual("Your study session", self.home.today_ui.session_dialog.call_args.args[1])
+        self.assertEqual("Your study session", self.addon._moments._card._items[0]["title"])
         self.served_today(streak_minutes=5, reviews=1, time_ms=240_000, minutes=4)
         self.home.local["days"] = None
         goal = self.home.goal_status()
@@ -770,9 +777,9 @@ class HomeTests(unittest.TestCase):
         self.served_today()
         self.api.server_info = Mock(return_value=(frozenset({"wins"}), None))
         self.session(2)
-        dialog = self.home.today_ui.session_dialog
-        self.assertEqual("Streak secured! 🔥", dialog.call_args.args[1])
-        self.assertNotIn("goal", dialog.call_args.args[2].lower())
+        item = self.addon._moments._card._items[0]
+        self.assertEqual("Streak secured! 🔥", item["title"])
+        self.assertNotIn("goal", item["body"].lower())
         self.api.server_info.assert_called_once_with()
 
     def test_an_older_server_without_wins_keeps_the_goal_popup(self):
@@ -780,7 +787,7 @@ class HomeTests(unittest.TestCase):
         self.api.server_info = Mock(return_value=(frozenset(), None))
         self.home.load_capabilities(self.api)
         self.session(2)
-        self.assertEqual("Daily goal reached! 🎉", self.home.today_ui.session_dialog.call_args.args[1])
+        self.assertEqual("Daily goal reached! 🎉", self.addon._moments._card._items[0]["title"])
 
     def moving_to(self, main, works=True):
         """Loads capabilities naming `main`, with the token working there when `works`."""

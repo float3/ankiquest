@@ -392,6 +392,7 @@ def today_view(deck_browser, chosen_companion):
         "goal": goal_view(status),
         "board": board_view(api, profile),
         "session": last_session(api),
+        "moments": addon()._moments._count(),
     }
 
 
@@ -454,6 +455,9 @@ def open_deck(deck_id):
 def on_js_message(handled, message, context):
     if context is not mw.deckBrowser:
         return handled
+    if message == "ankiquest:moments":
+        addon()._moments._open()
+        return (True, None)
     if message.startswith("ankiquest:study:"):
         deck = message.rsplit(":", 1)[1]
         if deck.isdigit():
@@ -586,30 +590,25 @@ def celebrate(summary):
     if earned is None:
         return False
     mw.pm.profile[CELEBRATED_KEY] = record
-    today_ui.session_dialog(
-        mw,
-        goals.celebration_title(earned, tr),
-        goals.celebration_text(earned, status, tr) + "\n\n" + today.session_body(summary, tr),
-        art_path(companion(), moods.STREAK if earned == goals.MINIMUM else moods.CELEBRATE),
-        continue_studying if summary["remaining"] > 0 else None,
-        open_progress,
-        done_text=tr("Nice!"),
-    )
+    topics = ["secured", "goal"] if earned == goals.BOTH else ["secured" if earned == goals.MINIMUM else "goal"]
+    items = [{
+        "key": "%s:%d" % (topic, status.day), "topic": topic,
+        "title": goals.celebration_title(goals.MINIMUM if topic == "secured" else goals.GOAL, tr),
+        "body": goals.celebration_text(goals.MINIMUM if topic == "secured" else goals.GOAL, status, tr),
+        "at": summary["finished_at"], "local": True, "summary": summary,
+    } for topic in topics]
+    addon()._moments._offer(addon().client(), items, summary)
     return True
 
 
 def recap(summary):
     if not addon().config().get("session_summary", True):
         return
-    today_ui.session_dialog(
-        mw,
-        tr("Your study session"),
-        today.session_body(summary, tr),
-        art_path(companion(), moods.CELEBRATE if summary["remaining"] == 0 else moods.STREAK),
-        continue_studying if summary["remaining"] > 0 else None,
-        open_progress,
-        never_again=lambda: addon().save_config({"session_summary": False}),
-    )
+    addon()._moments._offer(addon().client(), [{
+        "key": "session:%d" % summary["finished_at"], "topic": "session",
+        "title": tr("Your study session"), "body": today.session_body(summary, tr),
+        "at": summary["finished_at"], "local": True, "summary": summary,
+    }], summary)
 
 
 def continue_studying():
