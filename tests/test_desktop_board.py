@@ -99,7 +99,7 @@ class NotifyTests(unittest.TestCase):
         self.assertIsNone(notify.streak_warning(profile, 0, ends - notify.HOUR_MS, None))
         self.assertIsNone(notify.streak_warning({"day_ends_at": ends}, 2, ends - 1, None))
 
-    def test_only_recent_arrivals_are_announced_but_all_are_consumed(self):
+    def test_missed_arrivals_are_announced_once_regardless_of_age(self):
         now = 1_700_000_000
         inbox = [
             {"id": 1, "created_at": now - 90_000, "title": "Deck complete", "body": "old"},
@@ -107,7 +107,7 @@ class NotifyTests(unittest.TestCase):
             {"id": 2, "created_at": now - 60, "title": "Deck complete", "body": "also new"},
         ]
         fresh, cursor = notify.fresh_messages(inbox, 0, now)
-        self.assertEqual(["also new", "new"], [entry["body"] for entry in fresh])
+        self.assertEqual(["old", "also new", "new"], [entry["body"] for entry in fresh])
         self.assertEqual(3, cursor)
         self.assertEqual(([], 3), notify.fresh_messages(inbox, cursor, now))
 

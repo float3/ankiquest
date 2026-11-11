@@ -226,9 +226,9 @@ class Preferences(unittest.TestCase):
     def test_settings_the_server_lacks_are_left_alone(self):
         api = SimpleNamespace(user="ana", _request=Mock(side_effect=client.ServerError(404, "")))
         loaded = preferences.load(api)
-        self.assertEqual(loaded, {"freezes": None, "alerts": None})
+        self.assertEqual(loaded, {"freezes": None, "alerts": None, "reminders": None})
         preferences.save(api, loaded, {"freezes": False, "alerts": False, "before": [], "after": []})
-        self.assertEqual(api._request.call_count, 2)
+        self.assertEqual(api._request.call_count, 3)
 
     def test_the_last_upload_line(self):
         self.assertEqual(preferences.last_upload_text(None, english), "Last upload: never")

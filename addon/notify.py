@@ -62,14 +62,13 @@ def streak_warning(profile, hours, now_ms, warned_for):
     ends_at = profile.get("day_ends_at")
     if hours <= 0 or not warning or not ends_at or warned_for == ends_at:
         return None
-    if ends_at - now_ms > hours * HOUR_MS:
+    if not 0 < ends_at - now_ms <= hours * HOUR_MS:
         return None
     return notice(warning), ends_at
 
 
 def fresh_messages(inbox, cursor, now_s):
-    """Shows recent arrivals even on the first poll, but never replays a backlog. Quiet rows
-    (a routine "Streak secured!") stay in the inbox without being announced."""
+    """Collect missed arrivals once, including those received while Anki was closed."""
     fresh = []
     for entry in sorted(inbox, key=lambda entry: entry["id"]):
         if entry["id"] <= cursor:
@@ -77,6 +76,5 @@ def fresh_messages(inbox, cursor, now_s):
         cursor = entry["id"]
         if entry.get("quiet"):
             continue
-        if entry.get("created_at", 0) >= now_s - FRESH_SECONDS:
-            fresh.append(entry)
+        fresh.append(entry)
     return fresh, cursor
