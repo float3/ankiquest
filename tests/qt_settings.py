@@ -4,9 +4,9 @@ from concurrent.futures import Future
 from copy import deepcopy
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QPushButton, QScrollArea, QSpinBox, QTimer
+from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QTimer
 
 from addon_loader import load_in_package
 
@@ -95,6 +95,18 @@ class Settings(unittest.TestCase):
 
         self.assertIsNone(self.open(inspect))
         self.assertEqual([], self.posts)
+
+    def test_installed_version_is_visible_and_ankiweb_hides_github_channels(self):
+        def inspect(dialog):
+            labels = [widget.text() for widget in dialog.findChildren(QLabel)]
+            self.assertIn("Version: addon-11", labels)
+            self.assertIn("Updates are managed by AnkiWeb.", labels)
+            self.assertNotIn("Update channel", labels)
+            dialog.reject()
+
+        with patch.object(ui.updates, "installed", return_value={"release": 11, "nightly": 0, "commit": "abc"}), \
+                patch.object(ui.updates, "_source", return_value=ui.updates._Source.ANKIWEB):
+            self.open(inspect)
 
     def test_reads_server_choices_and_saves_only_changed_fields(self):
         def edit(dialog):

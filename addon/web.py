@@ -88,6 +88,7 @@ def session_cookie(base, token):
 
 
 def _build(parent, base, user, token, cookie, open_link, language="en"):
+    # Both supported Anki versions use Qt 6 but do not re-export this cookie type.
     from PyQt6.QtNetwork import QNetworkCookie
     from aqt.qt import (
         QByteArray,

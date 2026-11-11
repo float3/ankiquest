@@ -16,7 +16,7 @@ from aqt.qt import QAction, QKeySequence, QMenu, QTimer
 from aqt.utils import openLink, tooltip
 
 from . import board, delivery, heatmap_ui, home, notify, ui, updates, web
-from . import inbox_ui, moments, moments_ui, share, share_ui, sharing
+from . import inbox_ui, moments, moments_ui, share, sharing
 from .inbox import CHALLENGE_ROUTE
 from .language import tr
 from .client import (
@@ -877,10 +877,7 @@ def on_operation(changes, handler):
 def on_profile_open():
     state["poll_failure"] = None
     if state["timer"] is None:
-        try:
-            state["timer"] = mw.progress.timer(POLL_MS, poll, repeat=True, parent=mw)
-        except TypeError:
-            state["timer"] = mw.progress.timer(POLL_MS, poll, True)
+        state["timer"] = mw.progress.timer(POLL_MS, poll, repeat=True, parent=mw)
     refresh_shared_decks()
     _request_upload(Refresh(False, UploadMode.PROFILE_OPEN))
     poll()
@@ -890,6 +887,10 @@ def on_profile_open():
 
 
 def check_updates(quiet=True):
+    if updates._source(ADDON_DIR) is updates._Source.ANKIWEB:
+        if not quiet:
+            tooltip(tr("This installation updates through AnkiWeb. Use Tools → Add-ons → Check for Updates."))
+        return
     current = updates.installed(ADDON_DIR)
     if current is None:
         if not quiet:
@@ -913,6 +914,8 @@ def check_updates(quiet=True):
 
 
 def maybe_check_updates():
+    if updates._source(ADDON_DIR) is updates._Source.ANKIWEB:
+        return
     now_ms = int(time.time() * 1000)
     if not updates.due(mw.pm.profile.get(UPDATE_CHECK_KEY, 0), now_ms):
         return

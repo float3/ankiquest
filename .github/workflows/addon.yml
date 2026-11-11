@@ -4,7 +4,7 @@ on:
   push:
     tags: ["addon-*"]
     branches: [master]
-    paths: ["addon/**", ".github/workflows/addon.yml"]
+    paths: ["addon/**", ".github/workflows/addon.yml", ".github/scripts/package-addon.py"]
   workflow_dispatch:
 
 permissions:
@@ -25,24 +25,9 @@ jobs:
       - name: Version
         id: version
         run: |
-          nightly=0
-          if [[ "$GITHUB_REF" == refs/tags/addon-* ]]; then
-            release="${GITHUB_REF#refs/tags/addon-}"
-            [[ "$release" =~ ^[1-9][0-9]*$ ]] || { echo "::error::tag must be addon-<number>"; exit 1; }
-          elif tag=$(git describe --tags --match 'addon-[0-9]*' --abbrev=0 HEAD 2>/dev/null); then
-            release="${tag#addon-}"
-            nightly=$(git rev-list --count --first-parent "$tag..HEAD")
-          else
-            echo "::error::no addon-<number> tag before this commit"
-            exit 1
-          fi
-          jq -n --argjson release "$release" --argjson nightly "$nightly" --arg commit "$GITHUB_SHA" \
-            '{release: $release, nightly: $nightly, commit: $commit}' > addon/version.json
-          cat addon/version.json
-          echo "release=$release" >> "$GITHUB_OUTPUT"
-
-      - name: Package
-        run: cd addon && zip -r ../ankiquest.ankiaddon . -x '__pycache__/*' '*.pyc' 'meta.json'
+          python3 .github/scripts/package-addon.py --output ankiquest.ankiaddon \
+            --ref "$GITHUB_REF" --metadata addon-nightly.json
+          echo "release=$(jq -r .release addon-nightly.json)" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/addon-')
@@ -59,7 +44,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE: ${{ steps.version.outputs.release }}
         run: |
-          jq --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {built_at: $built_at}' addon/version.json > addon-nightly.json
           gh release delete addon-nightly --yes --cleanup-tag || true
           gh release create addon-nightly ankiquest.ankiaddon addon-nightly.json \
             --prerelease --latest=false --target "$GITHUB_SHA" \
