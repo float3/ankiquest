@@ -1,6 +1,7 @@
 """The Tools menu entries for deck copies: send a deck to friends, and the decks offered to me."""
 
 import html
+from enum import Enum, auto
 
 from aqt.qt import (
     QAction,
@@ -22,11 +23,84 @@ from .ui import _brand, _scroller
 
 SEEN_KEY = "ankiquestSeenDeckCopies"
 
-state = {"mw": None, "client": None, "companion": None, "action": None, "polling": None, "count": 0, "delivery": None}
+state = {"mw": None, "client": None, "companion": None, "action": None, "count": 0, "delivery": None,
+         "generation": object(), "requests": {}, "dialogs": set()}
+
+
+class _Job(Enum):
+    POLL = auto()
+    OFFERS = auto()
+    SEND_FORM = auto()
+    SEND = auto()
+
+
+class _Phase(Enum):
+    OPEN = auto()
+    CLOSED = auto()
+
+
+class _Owner:
+    """Profile + collection + account generation -> request -> current UI only."""
+
+    def __init__(self, api, dialog=None):
+        self._mw, self._who = state["mw"], _account(api)
+        self._profile, self._collection = self._mw.pm.profile, self._mw.col
+        self._generation, self._phase = state["generation"], _Phase.OPEN
+        self._pending = set()
+        if dialog is not None:
+            state["dialogs"].add(dialog)
+            dialog.finished.connect(lambda _result: self._closed(dialog))
+            dialog.destroyed.connect(lambda _object: self._closed(dialog))
+
+    def _closed(self, dialog):
+        self._phase = _Phase.CLOSED
+        state["dialogs"].discard(dialog)
+
+    def _owns(self):
+        return (self._phase is _Phase.OPEN and self._generation is state["generation"]
+                and self._profile is not None and self._profile is self._mw.pm.profile
+                and self._collection is not None and self._collection is self._mw.col
+                and self._who == _account(state["client"]()))
+
+    def _begin(self, offer):
+        if not self._owns() or offer in self._pending:
+            return False
+        self._pending.add(offer)
+        return True
+
+    def _end(self, offer):
+        self._pending.discard(offer)
+        return self._owns()
+
+
+def _start(api, job):
+    previous = state["requests"].get(job)
+    if previous is not None and previous._owns():
+        return None
+    owner = _Owner(api)
+    if not owner._owns():
+        return None
+    state["requests"][job] = owner
+    return owner
+
+
+def _finish(owner, job):
+    if state["requests"].get(job) is not owner:
+        return False
+    state["requests"].pop(job)
+    return owner._owns()
+
+
+def _dialog_owner(api, dialog):
+    if not hasattr(dialog, "_copies_owner"):
+        dialog._copies_owner = _Owner(api, dialog)
+    return dialog._copies_owner
 
 
 def clear_account():
-    state["polling"] = None
+    state.update(generation=object(), requests={})
+    for dialog in tuple(state["dialogs"]):
+        dialog.close()
     _set_count(0)
 
 
@@ -67,29 +141,23 @@ def poll(quiet=False):
     if mw is None or api is None or not api.configured or mw.pm.profile is None:
         _set_count(0)
         return
-    if state["polling"]:
+    request = _start(api, _Job.POLL)
+    if request is None:
         return
-    request = object()
-    state["polling"] = request
-    account = _account(api)
-    profile = mw.pm.profile
 
     def done(future):
-        if state["polling"] is not request:
+        if not _finish(request, _Job.POLL):
             return
-        state["polling"] = None
         try:
             inbox = future.result()
         except Exception as error:
             print("ankiquest deck copies:", error)
             return
-        if mw.pm.profile is not profile or _account(state["client"]()) != account:
-            return
         offers = copies.pending(inbox)
         _set_count(len(offers))
         announce(offers, copies.display_names(inbox), quiet)
 
-    mw.taskman.run_in_background(lambda: copies.inbox(api), done)
+    mw.taskman.run_in_background(lambda: copies.inbox(api) if request._owns() else None, done)
 
 
 def announce(offers, names, quiet):
@@ -118,17 +186,22 @@ def _configured():
     return api
 
 
-def _load(api, then):
+def _load(api, then, job=_Job.OFFERS):
+    owner = _start(api, job)
+    if owner is None:
+        return
+
     def done(future):
+        if not _finish(owner, job):
+            return
         try:
             inbox = future.result()
         except Exception as error:
             tooltip(_failed(error))
             return
-        if _account(state["client"]()) == _account(api):
-            then(inbox)
+        then(inbox)
 
-    state["mw"].taskman.run_in_background(lambda: copies.inbox(api), done)
+    state["mw"].taskman.run_in_background(lambda: copies.inbox(api) if owner._owns() else None, done)
 
 
 def open_send():
@@ -146,19 +219,25 @@ def open_send():
             ((deck.name, deck.id) for deck in mw.col.decks.all_names_and_ids(skip_empty_default=True, include_filtered=False)),
             key=lambda deck: deck[0].lower(),
         )
+        owner = _Owner(api)
         choice = send_dialog(mw, decks, people, api.name)
-        if choice is not None:
+        if choice is not None and owner._owns():
             send(api, choice, copies.limit_of(inbox))
 
-    _load(api, loaded)
+    _load(api, loaded, _Job.SEND_FORM)
 
 
 def send(api, choice, limit):
     deck_id, deck_name, recipients = choice
     mw = state["mw"]
+    owner = _start(api, _Job.SEND)
+    if owner is None:
+        return
     tooltip(tr("Preparing and sending the deck copy…"))
 
     def done(future):
+        if not _finish(owner, _Job.SEND):
+            return
         try:
             future.result()
         except Exception as error:
@@ -166,14 +245,18 @@ def send(api, choice, limit):
             return
         tooltip(tr("Deck copy sent."))
 
-    mw.taskman.run_in_background(
-        lambda: copies.share(api, mw.col, deck_id, deck_name, recipients, limit), done, uses_collection=True
-    )
+    def work():
+        if owner._owns():
+            return copies.share(api, owner._collection, deck_id, deck_name, recipients, limit)
+        return None
+
+    mw.taskman.run_in_background(work, done, uses_collection=True)
 
 
 def send_dialog(parent, decks, people, sender):
     """A deck and the friends to send it to; stays open until the choice is acceptable."""
     dialog = QDialog(parent)
+    _dialog_owner(state["client"](), dialog)
     dialog.setWindowTitle(tr("Send a deck to friends"))
     dialog.resize(480, 520)
     layout = QVBoxLayout(dialog)
@@ -250,6 +333,7 @@ def open_offers():
 def offers_dialog(api, offers, names, limit):
     mw = state["mw"]
     dialog = QDialog(mw)
+    _dialog_owner(api, dialog)
     dialog.setWindowTitle(tr("Decks offered to me"))
     dialog.resize(520, 420)
     layout = QVBoxLayout(dialog)
@@ -270,6 +354,7 @@ def offers_dialog(api, offers, names, limit):
 
 
 def _offer_row(api, offer, names, limit, dialog, status):
+    owner = _dialog_owner(api, dialog)
     holder = QWidget()
     line = QHBoxLayout(holder)
     line.setContentsMargins(0, 0, 0, 0)
@@ -283,7 +368,7 @@ def _offer_row(api, offer, names, limit, dialog, status):
     line.addWidget(drop)
     buttons = (take, drop)
     take.clicked.connect(lambda: _import(api, offer, limit, dialog, status, buttons))
-    drop.clicked.connect(lambda: _dismiss(api, offer, holder, status, buttons))
+    drop.clicked.connect(lambda: _dismiss(api, offer, holder, status, buttons, owner))
     return holder
 
 
@@ -294,6 +379,9 @@ def _busy(buttons, busy):
 
 def _import(api, offer, limit, dialog, status, buttons):
     mw = state["mw"]
+    owner = _dialog_owner(api, dialog)
+    if not owner._begin(offer["id"]):
+        return
     _busy(buttons, True)
     status.setText(tr("Downloading the deck copy…"))
     target = copies.temporary_package("ankiquest-friend-")
@@ -302,13 +390,19 @@ def _import(api, offer, limit, dialog, status, buttons):
         try:
             path = future.result()
         except Exception as error:
+            copies._remove(target)
+            if not owner._end(offer["id"]):
+                return
             _busy(buttons, False)
             status.setText(_failed(error, rich=False))
+            return
+        if not owner._end(offer["id"]) or path is None:
+            copies._remove(target)
             return
         dialog.accept()
         import_package(mw, path)
 
-    mw.taskman.run_in_background(lambda: copies.download(api, offer["id"], target, limit), done)
+    mw.taskman.run_in_background(lambda: copies.download(api, offer["id"], target, limit) if owner._owns() else None, done)
 
 
 def import_package(mw, path):
@@ -318,10 +412,14 @@ def import_package(mw, path):
     import_file(mw, path)
 
 
-def _dismiss(api, offer, holder, status, buttons):
+def _dismiss(api, offer, holder, status, buttons, owner):
+    if not owner._begin(offer["id"]):
+        return
     _busy(buttons, True)
 
     def done(future):
+        if not owner._end(offer["id"]):
+            return
         try:
             future.result()
         except Exception as error:
@@ -331,5 +429,8 @@ def _dismiss(api, offer, holder, status, buttons):
         holder.hide()
         _set_count(max(0, state["count"] - 1))
         status.setText(tr("Offer removed."))
+        # A poll started before this write must not restore the dismissed offer.
+        state["requests"].pop(_Job.POLL, None)
+        poll(quiet=True)
 
-    state["mw"].taskman.run_in_background(lambda: copies.dismiss(api, offer["id"]), done)
+    state["mw"].taskman.run_in_background(lambda: copies.dismiss(api, offer["id"]) if owner._owns() else None, done)

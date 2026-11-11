@@ -998,6 +998,8 @@ gui_hooks.deck_browser_will_render_content.append(on_deck_browser)
 gui_hooks.webview_did_receive_js_message.append(on_js_message)
 if hasattr(gui_hooks, "profile_will_close"):
     gui_hooks.profile_will_close.append(inbox_ui.clear_account)
+    gui_hooks.profile_will_close.append(copies_ui.clear_account)
+    gui_hooks.profile_will_close.append(preview.clear_account)
     gui_hooks.profile_will_close.append(lambda: _delivery._clear())
 
 

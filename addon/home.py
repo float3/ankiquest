@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import Enum, auto
+from http import HTTPStatus
 from pathlib import Path
 from html import escape
 
@@ -42,11 +43,9 @@ local = {
     "timer": None,
     "days": None,
     "restarted": None,
-    "reporting": False,
+    "requests": {},
     "goal_request": None,
     "capabilities": None,
-    "capabilities_loading": False,
-    "moving": False,
     "progress": None,
     "browser_buttons": set(),
     "board_window": None,
@@ -73,7 +72,39 @@ class _Request:
     profile: dict
 
     def owns(self, api):
-        return self.who == account(api) and self.profile is mw.pm.profile
+        return self.profile is not None and self.who == account(api) and self.profile is mw.pm.profile
+
+
+class _Job(Enum):
+    REPORT = auto()
+    CAPABILITIES = auto()
+    MOVE = auto()
+    RESTART = auto()
+    SAVE_GOAL = auto()
+
+
+def _begin_request(job, api):
+    # Each slot belongs to one profile/account; old replies cannot release a new slot.
+    pending = local["requests"].get(job)
+    if mw.pm.profile is None or (pending is not None and pending.owns(api)):
+        return None
+    request = local["requests"][job] = _Request(account(api), mw.pm.profile)
+    return request
+
+
+def _owns_request(job, request):
+    return local["requests"].get(job) is request and request.owns(addon().client())
+
+
+def _finish_request(job, request):
+    if local["requests"].get(job) is not request:
+        return False
+    local["requests"].pop(job)
+    return request.owns(addon().client())
+
+
+def _clear_requests():
+    local.update(requests={}, goal_request=None, restarted=None)
 
 
 class _GoalMode(Enum):
@@ -197,41 +228,51 @@ def goal_status(tree=None):
 
 def restart_plan(api, found, day):
     """The backlog plan ran out: it starts again from today, once."""
-    if not api.configured or local["restarted"] == [owner(api), day]:
+    previous = local["restarted"]
+    if not api.configured or (previous is not None and previous[0].owns(api) and previous[1] == day):
         return
-    local["restarted"] = [owner(api), day]
+    request = _begin_request(_Job.RESTART, api)
+    if request is None:
+        return
+    local["restarted"] = (request, day)
 
     def done(future):
+        if not _finish_request(_Job.RESTART, request):
+            return
         try:
             answer = future.result()
         except Exception as e:
             print("ankiquest goal restart:", e)
             return
-        if owner(addon().client()) == owner(api):
-            remember_plan(answer)
+        remember_plan(answer)
 
-    mw.taskman.run_in_background(lambda: goals.put(api, goals.BACKLOG, found.value, restart=True), done)
+    mw.taskman.run_in_background(
+        lambda: goals.put(api, goals.BACKLOG, found.value, restart=True) if _owns_request(_Job.RESTART, request) else None, done,
+    )
 
 
 def report_reached(api, status, day):
     """Tells the server, once a day, that a backlog goal is reached; it judges the other goals itself."""
-    if not api.configured or local["reporting"]:
+    if not api.configured or mw.pm.profile is None:
         return
     if not goals.to_report(status, owner(api), day, mw.pm.profile.get(REACHED_KEY)):
         return
-    local["reporting"] = True
+    request = _begin_request(_Job.REPORT, api)
+    if request is None:
+        return
 
     def done(future):
-        local["reporting"] = False
+        if not _finish_request(_Job.REPORT, request):
+            return
         try:
             future.result()
         except Exception as e:
-            if getattr(e, "status", None) != 409:
+            if getattr(e, "status", None) != HTTPStatus.CONFLICT:
                 print("ankiquest goal reached:", e)
                 return
         mw.pm.profile[REACHED_KEY] = {"account": owner(api), "day": day}
 
-    mw.taskman.run_in_background(lambda: goals.report_reached(api, day), done)
+    mw.taskman.run_in_background(lambda: goals.report_reached(api, day) if _owns_request(_Job.REPORT, request) else None, done)
 
 
 def sync_goal(prompt=False):
@@ -306,24 +347,28 @@ def open_goal_dialog():
     if not api.configured:
         addon().tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
+    request = _begin_request(_Job.SAVE_GOAL, api)
+    if request is None:
+        return
     answer = goal_ui.goal_dialog(mw, current_plan(server_day()), collection_forecast())
-    if answer is None:
+    if answer is None or not _owns_request(_Job.SAVE_GOAL, request):
+        _finish_request(_Job.SAVE_GOAL, request)
         return
     mode, value = answer
 
     def done(future):
+        if not _finish_request(_Job.SAVE_GOAL, request):
+            return
         try:
             saved = future.result()
         except Exception as e:
             addon().failed(tr("Could not save your daily goal (%s)."), e)
             return
-        if owner(addon().client()) != owner(api):
-            return
         remember_plan(saved)
         addon().redraw()
         addon().tooltip(tr("Daily goal saved."))
 
-    mw.taskman.run_in_background(lambda: goals.put(api, mode, value), done)
+    mw.taskman.run_in_background(lambda: goals.put(api, mode, value) if _owns_request(_Job.SAVE_GOAL, request) else None, done)
 
 
 def goal_view(status):
@@ -648,12 +693,15 @@ def finish_session():
 
 def load_capabilities(api):
     """Learns, in the background, which features the player's server has."""
-    if not api.configured or local["capabilities_loading"]:
+    if not api.configured:
         return
-    local["capabilities_loading"] = True
+    request = _begin_request(_Job.CAPABILITIES, api)
+    if request is None:
+        return
 
     def done(future):
-        local["capabilities_loading"] = False
+        if not _finish_request(_Job.CAPABILITIES, request):
+            return
         try:
             features, public_url = future.result()
         except Exception as e:
@@ -662,26 +710,27 @@ def load_capabilities(api):
         local["capabilities"] = (api.base, features)
         move_to_main_address(api, address.main_address({"public_url": public_url}))
 
-    mw.taskman.run_in_background(lambda: api.server_info(), done)
+    mw.taskman.run_in_background(lambda: api.server_info() if _owns_request(_Job.CAPABILITIES, request) else None, done)
 
 
 def move_to_main_address(api, main):
     """Moves a player saved at an older address of their server to its main address `main`,
     once one signed-in request with their token works there (the device list, which needs it). Keeps the saved address when it
     does not, and says nothing either way."""
-    if not address.should_move(api.base, main) or local["moving"]:
+    if not address.should_move(api.base, main):
         return
-    local["moving"] = True
+    request = _begin_request(_Job.MOVE, api)
+    if request is None:
+        return
     there = Client(main, api.name, api.token, api.language)
 
     def done(future):
-        local["moving"] = False
+        if not _finish_request(_Job.MOVE, request):
+            return
         try:
             future.result()
         except Exception as e:
             print("ankiquest main address:", e)
-            return
-        if account(addon().client()) != account(api):
             return
         address.move_profile(mw.pm.profile, api.base, there.base)
         values = {"url": there.base}
@@ -694,7 +743,7 @@ def move_to_main_address(api, main):
         if addon().state.get("companion_account") == account(api):
             addon().state["companion_account"] = account(there)
 
-    mw.taskman.run_in_background(there.devices, done)
+    mw.taskman.run_in_background(lambda: there.devices() if _owns_request(_Job.MOVE, request) else None, done)
 
 
 def server_celebrates_goal(api):
@@ -839,6 +888,7 @@ def clear_account():
     _close_progress()
     _clear_boards()
     _close_friends()
+    _clear_requests()
     local.update(
         goal_request=None, days=None, session=None, capabilities=None, restarted=None,
     )
@@ -852,6 +902,7 @@ def on_profile_open():
     _close_progress()
     _clear_boards()
     _close_friends()
+    _clear_requests()
     local["days"], local["session"] = None, None
     if local["timer"] is None:
         local["timer"] = mw.progress.timer(BOARD_MS, refresh_board, repeat=True, parent=mw)
@@ -870,7 +921,7 @@ def install(module):
     gui_hooks.sync_did_finish.append(refresh_board)
     for name, callback in (("top_toolbar_did_init_links", _toolbar_links), ("top_toolbar_did_redraw", _refresh_toolbar),
                            ("profile_will_close", _close_progress), ("profile_will_close", _clear_boards),
-                           ("profile_will_close", _close_friends),
+                           ("profile_will_close", _close_friends), ("profile_will_close", _clear_requests),
                            ("browser_will_show", _browser_entry)):
         hook = getattr(gui_hooks, name, None)
         if hook is not None:
