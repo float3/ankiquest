@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, Qt
+from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLineEdit, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, Qt
 
 from . import inbox, share_ui, social_data
 from .language import tr

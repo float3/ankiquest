@@ -1,0 +1,4 @@
+# Anki's qt extra pins its supported Qt runtime and bindings.
+aqt[qt]==26.9.4
+pyflakes==3.4.0
+tzdata==2026.2
