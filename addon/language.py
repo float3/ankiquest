@@ -890,7 +890,6 @@ SPANISH.update({
     "Next year": "Año siguiente",
     "Click a day for details. Gray squares show estimated review cards due over the next 90 days.": "Haz clic en un día para ver los detalles. Los cuadros grises estiman las tarjetas de repaso pendientes de los próximos 90 días.",
     "Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by AnkiQuest · Sand = under the streak minimum": "Menos repasos → Más repasos · Gris = previsión · Azul = racha mantenida por AnkiQuest · Arena = por debajo del mínimo de la racha",
-    "%s · AnkiQuest kept your streak": "%s · AnkiQuest mantuvo tu racha",
     "%s · %s of %s minutes, short of the streak minimum": "%s · %s de %s minutos, por debajo del mínimo de la racha",
     "%s · %s of %s minutes for the streak so far": "%s · %s de %s minutos para la racha hasta ahora",
     "Forecast is available for the next 90 days.": "La previsión abarca los próximos 90 días.",
@@ -920,7 +919,6 @@ GERMAN.update({
     "Next year": "Nächstes Jahr",
     "Click a day for details. Gray squares show estimated review cards due over the next 90 days.": "Klicke auf einen Tag für Details. Graue Felder schätzen die fälligen Wiederholungskarten der nächsten 90 Tage.",
     "Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by AnkiQuest · Sand = under the streak minimum": "Weniger Wiederholungen → Mehr Wiederholungen · Grau = Prognose · Blau = Lernserie von AnkiQuest gehalten · Sand = unter dem Minimum der Lernserie",
-    "%s · AnkiQuest kept your streak": "%s · AnkiQuest hat deine Lernserie gehalten",
     "%s · %s of %s minutes, short of the streak minimum": "%s · %s von %s Minuten, unter dem Minimum der Lernserie",
     "%s · %s of %s minutes for the streak so far": "%s · bisher %s von %s Minuten für die Lernserie",
     "Forecast is available for the next 90 days.": "Die Prognose reicht 90 Tage voraus.",
@@ -950,7 +948,6 @@ FRENCH.update({
     "Next year": "Année suivante",
     "Click a day for details. Gray squares show estimated review cards due over the next 90 days.": "Clique sur un jour pour voir le détail. Les cases grises estiment les cartes à réviser des 90 prochains jours.",
     "Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by AnkiQuest · Sand = under the streak minimum": "Moins de révisions → Plus de révisions · Gris = prévision · Bleu = série gardée par AnkiQuest · Sable = sous le minimum de la série",
-    "%s · AnkiQuest kept your streak": "%s · AnkiQuest a gardé ta série",
     "%s · %s of %s minutes, short of the streak minimum": "%s · %s sur %s minutes, sous le minimum de la série",
     "%s · %s of %s minutes for the streak so far": "%s · %s sur %s minutes pour la série jusqu’ici",
     "Forecast is available for the next 90 days.": "La prévision couvre les 90 prochains jours.",
@@ -980,7 +977,6 @@ PORTUGUESE.update({
     "Next year": "Ano seguinte",
     "Click a day for details. Gray squares show estimated review cards due over the next 90 days.": "Clica num dia para ver os detalhes. Os quadrados cinzentos estimam os cartões de revisão pendentes nos próximos 90 dias.",
     "Fewer reviews → More reviews · Gray = forecast · Blue = streak kept by AnkiQuest · Sand = under the streak minimum": "Menos revisões → Mais revisões · Cinzento = previsão · Azul = sequência mantida pelo AnkiQuest · Areia = abaixo do mínimo da sequência",
-    "%s · AnkiQuest kept your streak": "%s · o AnkiQuest manteve a tua sequência",
     "%s · %s of %s minutes, short of the streak minimum": "%s · %s de %s minutos, abaixo do mínimo da sequência",
     "%s · %s of %s minutes for the streak so far": "%s · %s de %s minutos para a sequência até agora",
     "Forecast is available for the next 90 days.": "A previsão abrange os próximos 90 dias.",
@@ -1332,4 +1328,62 @@ PORTUGUESE.update({
     "Best week": "Melhor semana",
     "Best month": "Melhor mês",
     "Best year": "Melhor ano",
+})
+
+# Day verdict labels shared by Today and the session card.
+
+SPANISH.update({
+    "Syncing — today counts after upload": "Sincronizando: hoy cuenta cuando termine la subida",
+    "Streak secured": "Racha asegurada",
+    "Protected by a freeze": "Protegida por una congelación",
+    "Streak unknown": "Racha desconocida",
+    "Streak minimum met": "Mínimo de la racha alcanzado",
+    "Short of the streak minimum": "Por debajo del mínimo de la racha",
+    "Frozen — streak kept": "Día congelado: racha mantenida",
+    "Skipped day — streak kept": "Día omitido: racha mantenida",
+    "No study counted": "Sin estudio contabilizado",
+    "Protected — streak kept": "Día protegido: racha mantenida",
+    "Streak minimum reached — syncing": "Mínimo de la racha alcanzado: sincronizando",
+})
+
+GERMAN.update({
+    "Syncing — today counts after upload": "Wird synchronisiert: Heute zählt nach dem Hochladen",
+    "Streak secured": "Serie gesichert",
+    "Protected by a freeze": "Durch einen Streak-Freeze geschützt",
+    "Streak unknown": "Serie unbekannt",
+    "Streak minimum met": "Serienminimum erreicht",
+    "Short of the streak minimum": "Unter dem Serienminimum",
+    "Frozen — streak kept": "Eingefroren: Serie erhalten",
+    "Skipped day — streak kept": "Tag übersprungen: Serie erhalten",
+    "No study counted": "Kein Lernen gezählt",
+    "Protected — streak kept": "Geschützt: Serie erhalten",
+    "Streak minimum reached — syncing": "Serienminimum erreicht: Synchronisierung läuft",
+})
+
+FRENCH.update({
+    "Syncing — today counts after upload": "Synchronisation : aujourd’hui comptera après l’envoi",
+    "Streak secured": "Série assurée",
+    "Protected by a freeze": "Protégée par un gel",
+    "Streak unknown": "Série inconnue",
+    "Streak minimum met": "Minimum de la série atteint",
+    "Short of the streak minimum": "Sous le minimum de la série",
+    "Frozen — streak kept": "Jour gelé : série conservée",
+    "Skipped day — streak kept": "Jour sauté : série conservée",
+    "No study counted": "Aucune étude comptabilisée",
+    "Protected — streak kept": "Jour protégé : série conservée",
+    "Streak minimum reached — syncing": "Minimum de la série atteint : synchronisation",
+})
+
+PORTUGUESE.update({
+    "Syncing — today counts after upload": "A sincronizar: hoje conta após o envio",
+    "Streak secured": "Sequência garantida",
+    "Protected by a freeze": "Protegida por um congelamento",
+    "Streak unknown": "Sequência desconhecida",
+    "Streak minimum met": "Mínimo da sequência atingido",
+    "Short of the streak minimum": "Abaixo do mínimo da sequência",
+    "Frozen — streak kept": "Dia congelado: sequência mantida",
+    "Skipped day — streak kept": "Dia saltado: sequência mantida",
+    "No study counted": "Sem estudo contabilizado",
+    "Protected — streak kept": "Dia protegido: sequência mantida",
+    "Streak minimum reached — syncing": "Mínimo da sequência atingido: a sincronizar",
 })

@@ -38,7 +38,9 @@ class Moments(unittest.TestCase):
         self.addon = SimpleNamespace(mw=self.mw, client=lambda: self.api, current_companion=lambda: "aki",
                                      config=lambda: {},
                                      save_config=Mock(), redraw=Mock(), open_inbox=Mock(),
-                                     home=SimpleNamespace(open_progress=Mock(), continue_studying=Mock()))
+                                     home=SimpleNamespace(open_progress=Mock(), continue_studying=Mock(),
+                                         _streak_title=Mock(return_value="Streak minimum reached — syncing"),
+                                         _session_day=Mock(return_value={"state": "frozen", "label": "Frozen — streak kept"})))
         self.presenter = ui._Presenter(self.addon)
 
     def tearDown(self):
@@ -171,8 +173,21 @@ class Moments(unittest.TestCase):
         card = self.presenter._card
         self.assertIsNotNone(card)
         self.assertEqual("session:50", card._choices.currentData())
+        self.assertEqual("Frozen — streak kept", card._day.text())
+        self.assertIn("#def0ff", card._day.styleSheet())
         card._dialog.close()
         self.assertEqual(1, self.presenter._count(), "the disabled server win remains available manually")
+
+    def test_a_queued_local_streak_title_refreshes_when_opened(self):
+        summary = {"reviews": 2, "minutes": 1, "remaining": 0}
+        self.offer(dict(self.item("secured:50", "secured"), local=True, summary=summary), summary)
+        self.transition("overview", "review")
+        self.assertEqual("Streak minimum reached — syncing", self.presenter._card._title.text())
+        self.transition("review", "overview")
+        self.addon.home._streak_title.return_value = "Streak secured! 🔥"
+        self.transition("overview", "review")
+        self.assertEqual("Streak secured! 🔥", self.presenter._card._title.text())
+        self.addon.home._streak_title.assert_called_with(summary)
 
     def test_conquest_load_is_read_only_and_a_new_win_keeps_the_draft_label(self):
         control = self.conquest()
