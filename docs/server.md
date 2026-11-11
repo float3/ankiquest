@@ -1,5 +1,9 @@
 # running AnkiQuest
 
+For a first installation, HTTPS deployment, backups and upgrades, start with
+the [installation guide](install.md). This page is the configuration and
+administration reference.
+
 XP, levels, streaks, daily quests, achievements and a leaderboard for Anki. clients send review log rows (card id, timestamp, previous and new interval, time taken, review type), never card content. deck names and daily counts are only sent by players who use deck completion notifications.
 
 XP never depends on which answer button was pressed, so there is no incentive to grade dishonestly.
