@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PLAYWRIGHT_CHANNEL: chromium
     steps:
@@ -30,7 +30,9 @@ jobs:
           cache: npm
 
       - name: Install Playwright
-        run: npm ci && npx playwright install --with-deps chromium
+        run: |
+          bash .github/scripts/ubuntu-archive.sh
+          npm ci && npx playwright install --with-deps chromium
 
       - name: Type check
         run: npm run typecheck
@@ -42,7 +44,7 @@ jobs:
         run: npm run test:web
 
   nix:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -61,7 +63,7 @@ jobs:
 
       - name: Test desktop deck completion
         run: |
-          sudo apt-get update -qq
+          bash .github/scripts/ubuntu-archive.sh
           sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0 libfontconfig1 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
           python3 -m venv "$RUNNER_TEMP/aqt"
           "$RUNNER_TEMP/aqt/bin/pip" install --quiet aqt
