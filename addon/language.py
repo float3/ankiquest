@@ -1711,3 +1711,41 @@ PORTUGUESE.update({
     "declined": "recusado",
     "left": "saiu"
 })
+
+# Durable activity counts, filters and pagination.
+SPANISH.update({
+    "Could not mark this message read (%s).": "No se pudo marcar este mensaje como leído (%s).",
+    "%d awaiting action": "%d requieren una acción", "%d unread · %d awaiting action": "%d sin leer · %d requieren una acción",
+    "All activity": "Toda la actividad", "Deck completions": "Mazos terminados", "Load more": "Cargar más",
+    "Messages": "Mensajes", "Needs action": "Requiere una acción", "Study updates": "Novedades de estudio",
+    "This server provides recent messages without read counts or filters.": "Este servidor ofrece mensajes recientes sin recuentos de lectura ni filtros.",
+    "This server shows all activity without filters.": "Este servidor muestra toda la actividad sin filtros.",
+    "Unread only": "Solo sin leer", "View invitation": "Ver invitación",
+})
+GERMAN.update({
+    "%d awaiting action": "%d warten auf eine Antwort", "%d unread · %d awaiting action": "%d ungelesen · %d warten auf eine Antwort",
+    "Could not mark this message read (%s).": "Diese Nachricht konnte nicht als gelesen markiert werden (%s).",
+    "All activity": "Alle Aktivitäten", "Deck completions": "Abgeschlossene Stapel", "Load more": "Mehr laden",
+    "Messages": "Nachrichten", "Needs action": "Antwort ausstehend", "Study updates": "Lernfortschritte",
+    "This server provides recent messages without read counts or filters.": "Dieser Server liefert aktuelle Nachrichten ohne Lesestatus-Zähler oder Filter.",
+    "This server shows all activity without filters.": "Dieser Server zeigt alle Aktivitäten ohne Filter an.",
+    "Unread only": "Nur ungelesene", "View invitation": "Einladung ansehen",
+})
+FRENCH.update({
+    "%d awaiting action": "%d en attente de réponse", "%d unread · %d awaiting action": "%d non lus · %d en attente de réponse",
+    "Could not mark this message read (%s).": "Impossible de marquer ce message comme lu (%s).",
+    "All activity": "Toute l’activité", "Deck completions": "Paquets terminés", "Load more": "Charger plus",
+    "Messages": "Messages", "Needs action": "Réponse attendue", "Study updates": "Progrès d’étude",
+    "This server provides recent messages without read counts or filters.": "Ce serveur fournit les messages récents sans compteurs de lecture ni filtres.",
+    "This server shows all activity without filters.": "Ce serveur affiche toute l’activité sans filtres.",
+    "Unread only": "Non lus seulement", "View invitation": "Voir l’invitation",
+})
+PORTUGUESE.update({
+    "%d awaiting action": "%d precisam de uma ação", "%d unread · %d awaiting action": "%d por ler · %d precisam de uma ação",
+    "Could not mark this message read (%s).": "Não foi possível marcar esta mensagem como lida (%s).",
+    "All activity": "Toda a atividade", "Deck completions": "Baralhos concluídos", "Load more": "Carregar mais",
+    "Messages": "Mensagens", "Needs action": "Precisa de uma ação", "Study updates": "Novidades de estudo",
+    "This server provides recent messages without read counts or filters.": "Este servidor fornece mensagens recentes sem contagens de leitura nem filtros.",
+    "This server shows all activity without filters.": "Este servidor mostra toda a atividade sem filtros.",
+    "Unread only": "Apenas por ler", "View invitation": "Ver convite",
+})
