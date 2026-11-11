@@ -381,7 +381,9 @@ def session_line(today, translate):
 
 def panel(profile, place, unread, translate, today):
     cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate, profile)
+    moments = ('<button type=button onclick="pycmd(\'ankiquest:moments\')">%s</button>'
+               % escape(translate("Your moments (%d)") % today["moments"])) if today.get("moments") else ""
     return (
         "%s<div id=ankiquest class=aq-today>%s<div class=aq-grid>%s</div>%s<div class=aq-links>%s</div></div>"
-        % (STYLE, head(today, profile, place, translate), cards, session_line(today, translate), links(unread, translate))
+        % (STYLE, head(today, profile, place, translate), cards, session_line(today, translate), moments + links(unread, translate))
     )
