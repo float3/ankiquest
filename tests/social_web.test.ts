@@ -13,6 +13,7 @@ function state() {
     social: {groups: [{id: 3, name: 'Spanish club', owner: true, invite: 'abc123', members: [people.alice, people.bob]}] as Group[], friends: [] as Person[], incoming: [people.cleo], outgoing: [] as Person[], public: false, muted: [] as Person[]},
     writes: [] as Record<string, unknown>[],
     boards: [] as string[],
+    hidden: [] as string[],
   };
 }
 
@@ -42,9 +43,23 @@ async function fixture(browser: Browser, width = 390, prepare = (_: ReturnType<t
     }
     if (pathname === '/api/invites/abc123') return route.fulfill({json: {name: 'Spanish club', members: 2}});
     if (pathname === '/api/invites/gone') return route.fulfill({status: 404, json: {error: 'gone'}});
+    if (pathname === '/api/leaderboard/hidden/alice') {
+      if (route.request().method() === 'POST') {
+        assert.equal(route.request().headers()['x-ankiquest-csrf'], '1');
+        const body = route.request().postDataJSON() as {action: string; user: string};
+        data.writes.push(body);
+        if (body.action === 'hide') data.hidden = [body.user];
+        if (body.action === 'unhide') data.hidden = [];
+      }
+      return route.fulfill({json: data.hidden.map(user => people[user as keyof typeof people])});
+    }
     if (pathname === '/api/leaderboard' || pathname === '/api/records') {
       data.boards.push(url.search);
-      return route.fulfill({json: pathname === '/api/records' ? [] : [{user: 'alice', display: 'Alice', level: 1, xp_total: 10, week_xp: 10, xp: 10, period: 'week', periods: {}, streak: 1, streak_state: 'safe', day_ends_at: 0, today_reviews: 1}]});
+      if (pathname === '/api/records') return route.fulfill({json: []});
+      const alice = {...people.alice, level: 1, xp_total: 10, week_xp: 10, xp: 10, period: 'week', periods: {}, streak: 1, streak_state: 'safe', day_ends_at: 0, today_reviews: 1};
+      if (url.searchParams.get('scope') !== 'global') return route.fulfill({json: [alice]});
+      const bob = {...people.bob, level: 1, xp: 20, period: 'week', streak: 1, rank: 1};
+      return route.fulfill({json: [bob, {...alice, rank: 2, me: true}].filter(row => !data.hidden.includes(row.user))});
     }
     if (pathname === '/api/week') return route.fulfill({json: {ends_at: Date.now() + 86400000, timezone: 'UTC'}});
     if (pathname === '/api/winners') return route.fulfill({json: {}});
@@ -146,14 +161,61 @@ test('the leaderboard and records follow the chosen scope', async () => {
     await f.page.locator('#board-scope').waitFor();
     assert.deepEqual(await f.page.locator('#board-scope option').allTextContents(), ['Friends and groups', 'Everyone', 'Spanish club']);
     assert.equal(f.data.boards.at(-1), '?period=week', 'the server picks the default scope');
+    const groupBoard = f.page.waitForResponse(response => response.url().endsWith('/api/leaderboard?period=week&scope=group%3A3'));
     await f.page.locator('#board-scope').selectOption('group:3');
-    await f.page.waitForFunction(() => (document.getElementById('board-scope') as HTMLSelectElement | null)?.value === 'group:3');
+    await groupBoard;
     assert.equal(f.data.boards.at(-1), '?period=week&scope=group%3A3');
     await f.page.goto('http://ankiquest.test/records');
     await f.page.locator('#board-scope').waitFor();
     assert.equal(f.data.boards.at(-1), '?scope=group%3A3', 'the choice carries over to records');
     await noOverflow(f.page);
     assert.deepEqual(f.errors, []);
+    await f.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test('hide and restore a stranger without changing the ranks on Global', async () => {
+  const browser = await launch();
+  try {
+    const f = await fixture(browser, 320);
+    await f.page.goto('http://ankiquest.test/week');
+    assert.equal(await f.page.getByRole('button', {name: /hide .* for me/i}).count(), 0);
+    await f.page.locator('#board-scope').selectOption('global');
+    await f.page.getByRole('button', {name: 'Hide Bob for me'}).click({timeout: 5000});
+    await f.page.getByRole('link', {name: 'Bob', exact: true}).waitFor({state: 'hidden'});
+    assert.deepEqual(f.data.writes.at(-1), {action: 'hide', user: 'bob'});
+    assert.equal(await f.page.locator('.board .rank').textContent(), '🥈');
+    assert.equal(await f.page.getByRole('button', {name: 'Hide Alice for me'}).count(), 0);
+    await noOverflow(f.page);
+
+    assert.equal(await f.page.locator('#hidden-players li span').textContent(), 'Bob (bob)');
+    await f.page.getByRole('button', {name: 'Show Bob again'}).click();
+    await f.page.getByRole('link', {name: 'Bob', exact: true}).waitFor();
+    assert.deepEqual(f.data.writes.at(-1), {action: 'unhide', user: 'bob'});
+    assert.deepEqual(f.errors, []);
+    await f.context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+test('switching accounts clears the private hidden list immediately', async () => {
+  const browser = await launch();
+  try {
+    const f = await fixture(browser, 390, data => { data.hidden = ['bob']; });
+    await f.page.goto('http://ankiquest.test/week');
+    await f.page.locator('#board-scope').selectOption('global');
+    await f.page.locator('#hidden-players summary').click();
+    await f.page.getByRole('button', {name: 'Show Bob again'}).waitFor();
+
+    const gone = await f.page.evaluate(() => {
+      window.ankiquestSession = {user: 'cleo'};
+      dispatchEvent(new Event('ankiquest-auth'));
+      return !document.querySelector('#hidden-players');
+    });
+    assert.equal(gone, true, 'an account switch clears the old owner’s private choices before a network request');
     await f.context.close();
   } finally {
     await browser.close();

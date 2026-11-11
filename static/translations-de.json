@@ -1382,5 +1382,12 @@
   "The weekly competition closes for you in {0} hours, at {1}. You have {2} XP this week.": "Der Wochenwettbewerb endet für dich in {0} Stunden, um {1} Uhr. Du hast diese Woche {2} XP.",
   "Last week still counting: {0} XP · closes at {1}": "Letzte Woche zählt noch: {0} XP · endet um {1}",
   "{0} XP still counting for last week": "{0} XP zählen noch für letzte Woche",
-  "Short of the streak minimum": "Unter dem Minimum für die Lernserie"
+  "Short of the streak minimum": "Unter dem Minimum für die Lernserie",
+  "Hide for me": "Für mich ausblenden",
+  "Hide {0} for me": "{0} für mich ausblenden",
+  "Hidden players": "Ausgeblendete Personen",
+  "No hidden players.": "Niemand ausgeblendet.",
+  "Show again": "Wieder anzeigen",
+  "Show {0} again": "{0} wieder anzeigen",
+  "Could not update hidden players. Try again.": "Ausgeblendete Personen konnten nicht aktualisiert werden. Versuche es erneut."
 }

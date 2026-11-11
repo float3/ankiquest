@@ -80,6 +80,13 @@
 .board .xp b { display: block; font-size: 17px; color: var(--accent); }
 .board .xp span { font-size: 11px; color: var(--dim); white-space: nowrap; }
 .board .xp .closing-xp { display: block; white-space: normal; }
+.board .hide-row, #hidden-players button { font-size: 12px; }
+.board .hide-row { margin-top: 6px; }
+#hidden-players { margin-top: 12px; }
+#hidden-players summary { cursor: pointer; font-weight: 600; }
+#hidden-players ul { display: grid; gap: 6px; padding: 0; list-style: none; }
+#hidden-players li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+#hide-status:empty { display: none; }
 .records { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .record h3 { margin: 0 0 18px; font-size: 16px; font-weight: 650; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
 .record h3 em { font-size: 12px; color: var(--dim); font-style: normal; text-transform: none; letter-spacing: 0; font-weight: 400; white-space: nowrap; }
