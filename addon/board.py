@@ -177,13 +177,13 @@ def level_text(profile, translate):
     )
 
 
-def html(profile, place=None, unread=0, translate=lambda value: value, mascot=None, today=None):
+def html(profile, place=None, unread=0, translate=lambda value: value, mascot=None, today=None, actions=0):
     """A block for `deck_browser_will_render_content`, so it lands under the stats.
 
     Given `today`, the view home.today_view builds, it is the Today panel instead.
     """
     if today is not None:
-        return panel(profile, place, unread, translate, today)
+        return panel(profile, place, unread, translate, today, actions)
     parts = summary_parts(profile, place, translate)
     mascot_html = (
         '<img src="%s" width=40 height=40 alt="" style="object-fit:contain">'
@@ -194,19 +194,24 @@ def html(profile, place=None, unread=0, translate=lambda value: value, mascot=No
         "<div id=ankiquest style='max-width:600px;margin:2em auto 0;font-size:13px;"
         "display:flex;flex-wrap:wrap;justify-content:space-between;gap:.3em'>"
         "<div style='display:flex;align-items:center;gap:.5em'>%s<div><b>AnkiQuest</b> <span style='opacity:.7'>%s</span></div></div><div>%s</div></div>"
-        % (mascot_html, escape("  ·  ".join(parts)), plain_links(unread, translate))
+        % (mascot_html, escape("  ·  ".join(parts)), plain_links(unread, translate, actions))
     )
 
 
-def plain_links(unread, translate):
+def _inbox_label(unread, actions, translate):
+    label = translate("\U0001f4ec %d new") % unread if unread else translate("Inbox")
+    return label + " · " + translate("%d awaiting action") % actions if actions else label
+
+
+def plain_links(unread, translate, actions=0):
     found = link("board", translate("Leaderboard"), " style='margin-left:.8em'")
     found += link("challenges", translate("Friends"), " style='margin-left:.8em'")
-    if unread:
-        found += link("inbox", translate("\U0001f4ec %d new") % unread, " style='margin-left:.8em'")
+    if unread or actions:
+        found += link("inbox", _inbox_label(unread, actions, translate), " style='margin-left:.8em'")
     return found
 
 
-def links(unread, translate):
+def links(unread, translate, actions=0):
     found = "".join(
         link(page, translate(text))
         for page, text in (
@@ -214,8 +219,8 @@ def links(unread, translate):
             ("challenges", "Friends"), ("reminders", "Reminders"), ("settings", "Website settings"),
         )
     )
-    if unread:
-        found += link("inbox", translate("\U0001f4ec %d new") % unread, " class=aq-unread")
+    if unread or actions:
+        found += link("inbox", _inbox_label(unread, actions, translate), " class=aq-unread")
     return found
 
 
@@ -460,12 +465,12 @@ def session_line(today, translate):
     return "<div class=aq-session>%s %s</div>" % (pill("%s: %s" % (translate("Your last study session"), today["session"]), "ghost"), status)
 
 
-def panel(profile, place, unread, translate, today):
+def panel(profile, place, unread, translate, today, actions=0):
     cards = next_deck(today, translate) + goal_card(today, translate) + quests_card(profile, today, translate) + board_card(today, translate, profile)
     cards += _weekly_card(today, translate)
     moments = ('<button type=button onclick="pycmd(\'ankiquest:moments\')">%s</button>'
                % escape(translate("Your moments (%d)") % today["moments"])) if today.get("moments") else ""
     return (
         "%s<div id=ankiquest class=aq-today>%s<div class=aq-grid>%s</div>%s<div class=aq-links>%s</div></div>"
-        % (STYLE, head(today, profile, place, translate), cards, session_line(today, translate), moments + links(unread, translate))
+        % (STYLE, head(today, profile, place, translate), cards, session_line(today, translate), moments + links(unread, translate, actions))
     )

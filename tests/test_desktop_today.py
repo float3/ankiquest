@@ -627,7 +627,7 @@ class HomeTests(unittest.TestCase):
             profile=Mock(return_value={"level": 2, "streak": 1, "today": {"streak_minutes": 0, "reviews": 0}}),
             companion=Mock(return_value="ankilope"),
             deck_settings=Mock(return_value={}), server_info=Mock(return_value=(frozenset(), None)),
-            _request=Mock(return_value={}),
+            _request=Mock(return_value={"items": [], "unread_count": 0, "action_count": 0}),
         )
         col = collection(self.db, self.tree, 100, self.cutoff)
         col.get_config = lambda *args: 4
