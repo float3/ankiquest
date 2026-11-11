@@ -16,7 +16,7 @@ from aqt.qt import QAction, QKeySequence, QMenu, QTimer
 from aqt.utils import openLink, tooltip
 
 from . import board, heatmap_ui, home, notify, ui, updates, web
-from . import inbox_ui, share, share_ui, sharing
+from . import inbox_ui, moments, moments_ui, share, share_ui, sharing
 from .inbox import answerable, shareable
 from .language import tr
 from .client import (
@@ -139,8 +139,6 @@ state = {
     "companion": "aki",
     "companion_account": None,
     "inbox": [],
-    # A conquered card's big celebration, held until the player leaves the reviewer.
-    "conquest": None,
 }
 
 mw.addonManager.setWebExports(__name__, r"((aki|ankilope)_face|art/(aki|ankilope)_[a-z]+)\.png")
@@ -387,14 +385,15 @@ def _request_upload(request, *, attempts=0):
         if history:
             tooltip(tr("Uploaded %s reviews.") % sent)
             return
-        message = notify.feedback(profile, request.show_feedback)
+        # Wins arrive through the moment queue. Deck delivery confirmations and XP stay here.
+        feedback = dict(profile.get("feedback") or {})
+        feedback["headlines"] = [line for line in feedback.get("headlines", []) if line.startswith("📣")]
+        message = notify.feedback({"feedback": feedback}, request.show_feedback)
         if message:
             tooltip(message[0], period=3500 if message[1] else 1800)
-        conquest = notify.conquest_path(profile)
-        if conquest:
-            state["conquest"] = conquest
-            if mw.state != "review":
-                show_conquest()
+        if not initial_sync:
+            _moments._offer(api, [moments._conquest(item, tr) for item in profile.get("conquests", [])
+                                  if mark < item["at"] <= through])
 
     if history:
         tooltip(tr("Uploading your whole review history…"))
@@ -497,7 +496,11 @@ def announce(rank, profile, inbox, quiet):
     previous = mw.pm.profile.get(ORDER_KEY) or []
     mw.pm.profile[ORDER_KEY] = rank.get("order") or []
     mw.pm.profile[ORDER_WEEK_KEY] = rank.get("week")
-    fresh, cursor = notify.fresh_messages(inbox, mw.pm.profile.get(INBOX_KEY, 0), now_ms // 1000)
+    previous_cursor = mw.pm.profile.get(INBOX_KEY, 0)
+    fresh, cursor = notify.fresh_messages(inbox, previous_cursor, now_ms // 1000)
+    wins = [item for entry in inbox if entry["id"] > previous_cursor
+            and entry.get("created_at", 0) >= now_ms // 1000 - notify.FRESH_SECONDS
+            if (item := moments._notice(entry)) is not None]
     mw.pm.profile[INBOX_KEY] = cursor
     warning = notify.streak_warning(
         profile,
@@ -510,16 +513,20 @@ def announce(rank, profile, inbox, quiet):
     if quiet:
         return
 
-    if settings.get("notify_rank", True) and rank.get("change"):
-        tooltip(notify.notice(rank["change"]), period=4000)
     if warning:
         tooltip(warning[0], period=5000)
     for entry in fresh:
+        if shareable(entry):
+            continue
         text = notify.notice(entry)
         if answerable(entry):
             text += "<br><i>%s</i>" % html.escape(tr("Tools → AnkiQuest → Inbox to reply"))
         tooltip(text, period=6000)
-    celebrate_latest(previous, rank, fresh, settings)
+    if settings.get("notify_rank", True) and rank.get("change"):
+        place = share.climbed_to(previous, rank.get("order"), client().name)
+        if place:
+            wins.append(moments._rank(rank["change"], place, rank.get("week"), now_ms))
+    _moments._offer(client(), wins)
 
 
 def failed(template, error):
@@ -569,26 +576,8 @@ def open_page(path):
     web.open_page(mw, api, path.replace("{user}", api.user), openLink, tooltip)
 
 
-def conquered_card_text(path):
-    """The conquered card's first field, to offer as its label. Empty when unknown."""
-    try:
-        at = int(path.rsplit("/", 1)[1])
-        cid = mw.col.db.scalar("select cid from revlog where id = ?", at)
-        return notify.suggested_label(mw.col.get_card(cid).note().fields[0]) if cid else ""
-    except Exception as e:
-        print("ankiquest card label:", e)
-        return ""
-
-
-def show_conquest():
-    path, state["conquest"] = state["conquest"], None
-    if path:
-        open_page(notify.with_suggestion(path, conquered_card_text(path)))
-
-
-def on_state_change(new_state, _old_state):
-    if new_state != "review":
-        show_conquest()
+def on_state_change(new_state, old_state):
+    _moments._transition(new_state, old_state)
 
 
 def open_inbox():
@@ -679,8 +668,9 @@ def _save_account_config(values):
             profile.pop(key, None)
     state.update(
         upload=None, polling=None, reauth=None, profile=None, place=None, inbox=[],
-        conquest=None, companion="aki", companion_account=None,
+        companion="aki", companion_account=None,
     )
+    _moments._clear()
     home.clear_account()
     preview.clear_account()
     copies_ui.clear_account()
@@ -872,6 +862,7 @@ def on_profile_open():
     poll(quiet=True)
     maybe_check_updates()
     _offer_sign_in()
+    _moments._transition(mw.state, None)
 
 
 def check_updates(quiet=True):
@@ -1000,34 +991,6 @@ def on_replied(notification):
     redraw()
 
 
-def celebrate_latest(previous, rank, fresh, settings):
-    """The newest win this poll announced, offered for sharing: an own celebration, finished
-    challenge or weekly recap, or a climb into the top three."""
-    api = client()
-    wins = [share.win_from_entry(entry) for entry in fresh if shareable(entry)]
-    if settings.get("notify_rank", True) and rank.get("change"):
-        place = share.podium(previous, rank.get("order"), api.name)
-        if place:
-            wins.append(share.win_from_place(rank["change"], place))
-    if wins:
-        celebrate(api, wins[-1])
-
-
-def celebrate(api, win):
-    """Shows the share window only to players who keep celebrations on."""
-
-    def done(future):
-        try:
-            celebrations = future.result().get("celebrations")
-        except Exception as e:
-            print("ankiquest celebrations:", e)
-            return
-        if celebrations is False or not share_ui.same_account(api, client()):
-            return
-        share_ui.offer(mw, api, win, current_companion(), client, mw.taskman.run_in_background)
-
-    mw.taskman.run_in_background(lambda: api.deck_settings(), done)
-
-
+_moments = moments_ui._Presenter(sys.modules[__name__])
 heatmap_ui.install(sys.modules[__name__])
 home.install(sys.modules[__name__])

@@ -339,17 +339,17 @@ class CelebrationHookTests(unittest.TestCase):
     write_config = base.RefreshTests.write_config
 
     def offered(self, celebrations=True):
+        from moment_fixture import cards
         self.with_board()
         self.api.deck_settings = Mock(return_value={"celebrations": celebrations})
-        self.addon.share_ui = SimpleNamespace(offer=Mock(), same_account=lambda a, b: a is b)
-        return self.addon.share_ui.offer
+        return cards(self)
 
     def test_a_climb_onto_the_podium_is_offered_for_sharing(self):
         offer = self.offered()
         self.mw.pm.profile["ankiquestLastOrder"] = ["hill", "cerro"]
         self.api.rank.return_value = {"order": ["cerro", "hill"], "change": {"title": "Crown", "body": "You passed Hill."}}
         self.addon.poll()
-        win = offer.call_args.args[2]
+        win = offer.call_args.args[3][0]["share"]
         self.assertEqual({"title": "Crown", "body": "You passed Hill.", "notification": None, "place": 1, "win": None}, win)
 
     def test_the_poll_sends_back_the_week_its_order_was_seen_in(self):
@@ -362,7 +362,7 @@ class CelebrationHookTests(unittest.TestCase):
         self.addon.poll()
         self.api.rank.assert_called_with(["cerro", "hill"], 1_700_000_000_000)
 
-    def test_only_the_newest_own_win_is_offered(self):
+    def test_every_own_win_is_kept_and_friends_shares_stay_in_the_inbox(self):
         offer = self.offered()
         now = int(time.time())
         self.inbox[:] = [
@@ -372,18 +372,51 @@ class CelebrationHookTests(unittest.TestCase):
         ]
         self.addon.poll()
         offer.assert_called_once()
-        self.assertEqual(7, offer.call_args.args[2]["notification"])
-        self.assertEqual(21, offer.call_args.args[2]["win"])
+        items = self.addon._moments._card._items
+        self.assertEqual([6, 7], sorted(item["share"]["notification"] for item in items))
+        self.assertEqual(21, next(item for item in items if item["share"]["notification"] == 7)["share"]["win"])
+        self.assertEqual(1, self.addon.tooltip.call_count, "only the friend's share has a tooltip")
+
+    def test_a_poll_does_not_open_a_win_over_the_reviewer(self):
+        offer = self.offered()
+        self.mw.state = "review"
+        self.inbox[:] = [{
+            "id": 6, "title": "Level 5!", "body": "a", "created_at": int(time.time()),
+            "kind": "celebration", "moment": "level:5",
+        }]
+        self.addon.poll()
+        offer.assert_not_called()
+        self.assertEqual(1, self.addon._moments._count())
+        self.addon.tooltip.assert_not_called()
+        self.mw.state = "overview"
+        self.addon.on_state_change("overview", "review")
+        offer.assert_called_once()
 
     def test_nothing_pops_up_with_celebrations_off_or_on_a_quiet_poll(self):
         offer = self.offered(celebrations=False)
         self.inbox[:] = [{"id": 6, "title": "Level 5!", "body": "a", "created_at": int(time.time()), "kind": "celebration"}]
         self.addon.poll()
         offer.assert_not_called()
-        offer = self.offered()
+        self.api.deck_settings.return_value = {"celebrations": True}
         self.inbox.append({"id": 9, "title": "Level 6!", "body": "a", "created_at": int(time.time()), "kind": "celebration"})
         self.addon.poll(quiet=True)
         offer.assert_not_called()
+
+    def test_later_arrivals_enrich_one_card_and_a_duplicate_does_not_reopen_it(self):
+        offer = self.offered()
+        now = int(time.time())
+        self.inbox[:] = [{"id": 6, "moment": "level:5", "topic": "level", "kind": "celebration", "created_at": now}]
+        self.addon.poll()
+        card = self.addon._moments._card
+        self.inbox.append({"id": 7, "moment": "goal:2", "topic": "goal", "kind": "celebration", "created_at": now})
+        self.addon.poll()
+        self.assertIs(card, self.addon._moments._card)
+        self.assertEqual(2, len(card._items))
+        card._dialog.close()
+        self.inbox.append({"id": 8, "moment": "level:5", "topic": "level", "kind": "celebration", "created_at": now})
+        self.addon.poll()
+        offer.assert_called_once()
+        self.assertEqual(0, self.addon._moments._count())
 
     def test_the_reply_hint_points_at_the_native_inbox(self):
         self.offered()
