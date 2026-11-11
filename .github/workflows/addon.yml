@@ -51,7 +51,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" ankiquest.ankiaddon \
             --title "Desktop add-on ${GITHUB_REF_NAME#addon-}" \
-            --notes "Double-click ankiquest.ankiaddon or choose Tools → Add-ons → Install from file. Restart Anki, then open the Tools menu to sign in or create an AnkiQuest account."
+            --notes "Double-click ankiquest.ankiaddon or choose Tools → Add-ons → Install from file, then restart Anki. Sign in or create an account when AnkiQuest asks, or later from Tools → AnkiQuest: sign in or create account. Passwords are sent only over HTTPS unless the server is on your local network. Switch account, Sign out and Manual connection (server, player and token) are in Tools → AnkiQuest settings."
 
       - name: Publish nightly
         if: github.ref == 'refs/heads/master'
