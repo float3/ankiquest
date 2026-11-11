@@ -1,11 +1,14 @@
 # A single source for mascot art
 
 Keep the transparent PNG masters in `art/mascots/<mascot>/<pose>.png`.
-Register each mascot and the common pose names in `art/mascots/manifest.json`.
-The exporter checks that every mascot directory is registered and contains the
-full set of poses. Put group illustrations in `art/mascots/scenes/` and list
-their participants by mascot ID in the manifest. Put mascot-free icons in
-`art/mascots/common/`. Keep each mascot's generation prompts with its masters.
+Register each mascot and its required poses in `art/mascots/manifest.json`.
+Start with the shared core that every mascot already has, plus each mascot's
+existing poses; expand that core as the missing art is completed. Check that
+every registered mascot has its declared poses. Reserve `scenes/` for group
+illustrations with participants listed by mascot ID, and `common/` for icons
+without a mascot. Exclude those reserved folders from the directory-registration
+check. Keep each mascot's generation prompts with its masters. Size variants
+such as `face-192` and `face-32` are exports of one face master.
 
 The manifest records each export's dimensions, format, and destination. Keep
 existing web URLs, add-on filenames, card keys and Android resource names.
@@ -21,8 +24,9 @@ PNG masters and manifest
 ## Exporter and packaging
 
 Add a Rust workspace crate in `tools/mascot-export/` with a CLI and a library.
-Use the workspace's locked PNG and lossless WebP encoders and fix the resize
-filter, encoder settings, and metadata handling in the exporter. Generate the
+Enable the existing `image` crate's `webp` feature for lossless WebP output and
+commit the resulting dependency lockfile. Fix the resize filter, encoder
+settings, and metadata handling in the exporter. Generate the
 files from the manifest in sorted order. Run the exporter twice in CI and
 compare bytes to verify reproducibility.
 
@@ -30,8 +34,14 @@ Call the exporter library from `build.rs` for the web and card PNGs. Write them
 under Cargo's `OUT_DIR`, register the source files for rebuilds, and point the
 `include_bytes!` calls in `src/cards.rs` and the web handlers at those outputs.
 Nix builds the same locked dependencies and source tree as Cargo. The build
-script runs with its local inputs. Add-on packaging invokes the CLI to put its
-PNG exports in the add-on archive.
+script runs with its local inputs. Keep the generated copies in `static/aki/`,
+`static/ankilope/`, `assets/cards/`, `addon/art/` and `addon/*_face.png` committed
+and SHA-256 checked against the manifest, so runtime consumers and development
+add-ons work straight from a checkout. Add-on packaging regenerates and checks
+those same PNGs before adding them to the archive. Remove a committed copy
+only after every consumer generates or reads its replacement. Extend
+`setWebExports` in `addon/__init__.py` from the registered mascot list when
+adding another mascot; its current expression names only Aki and Ankilope.
 
 ## Android drawables
 
