@@ -81,9 +81,10 @@ class ActionTests(unittest.TestCase):
         self.assertFalse(inbox.answerable({"sender": "cerro", "challenge_id": 8}))
         self.assertFalse(inbox.answerable({"sender": "cerro", "route": "/community#challenge-8"}))
 
-    def test_challenge_rows_are_answered_on_the_website(self):
+    def test_challenge_rows_identify_the_native_friend_goal(self):
         invite = {"id": 5, "sender": "alice", "kind": "challenge_invite", "challenge_id": 8, "route": "/community#challenge-8"}
         self.assertEqual(["open", "read"], inbox.actions(invite))
+        self.assertEqual(8, inbox.challenge_target(invite))
         self.assertEqual("/community#challenge-8", inbox.web_path(invite))
         self.assertEqual("/community#challenge-3", inbox.web_path({"route": "/community#challenge-3"}))
         self.assertEqual(inbox.ACTIVITY_PATH, inbox.web_path({"route": "/community#challenge-0"}))

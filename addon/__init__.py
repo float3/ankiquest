@@ -17,7 +17,7 @@ from aqt.utils import openLink, tooltip
 
 from . import board, heatmap_ui, home, notify, ui, updates, web
 from . import inbox_ui, moments, moments_ui, share, share_ui, sharing
-from .inbox import answerable, shareable
+from .inbox import CHALLENGE_ROUTE, answerable, shareable
 from .language import tr
 from .client import (
     COUNT_SQL,
@@ -585,6 +585,9 @@ def on_js_message(handled, message, context):
         if page == "board":
             home._open_board()
             return (True, None)
+        if page == "challenges":
+            home._open_friends()
+            return (True, None)
         if page in board.PAGES:
             open_page(board.PAGES[page])
         return (True, None)
@@ -979,7 +982,7 @@ _tools = QMenu("AnkiQuest", mw)
 mw.form.menuTools.addAction(_tools.menuAction())
 add_action(tr("Today"), lambda: open_page(board.PAGES["today"]))
 add_action(tr("Inbox"), open_inbox, inbox_ui.SHORTCUT)
-add_action(tr("Friends"), lambda: open_page("/friends"))
+add_action(tr("Friends"), home._open_friends)
 copies_ui.setup(mw, lambda: client(), lambda: state["companion"], _tools)
 add_action(tr("Website"), open_website, WEBSITE_SHORTCUT)
 add_action(tr("Settings"), open_settings)
@@ -1005,7 +1008,15 @@ def open_native_inbox():
     if not api.configured:
         tooltip(tr("Set the server, player and token in AnkiQuest settings first."))
         return
-    inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, open_page, on_replied)
+    inbox_ui.inbox_dialog(mw, api, current_companion(), client, mw.taskman.run_in_background, _open_inbox_path, on_replied)
+
+
+def _open_inbox_path(path):
+    target = CHALLENGE_ROUTE.fullmatch(path)
+    if target:
+        home._open_friends(int(target.group(1)))
+        return
+    open_page(path)
 
 
 def on_replied(notification):
