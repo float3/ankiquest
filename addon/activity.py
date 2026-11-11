@@ -2,6 +2,7 @@
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from http import HTTPStatus
+from typing import Optional
 from urllib.parse import urlencode
 
 
@@ -31,8 +32,8 @@ class _Page:
     attention: list
     unread: int
     actions: int
-    latest: int | None
-    before: int | None
+    latest: Optional[int]
+    before: Optional[int]
     source: _Source = _Source.ACTIVITY
 
 
