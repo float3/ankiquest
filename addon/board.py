@@ -25,6 +25,7 @@ PERIOD_LABELS = (
 MEDALS = {1: "👑", 2: "🥈", 3: "🥉"}
 STATUS_CLASS = {"done": "aq-done-today", "learning_later": "aq-learning-later"}
 AVATAR_COLOURS = ("#58cc02", "#1cb0f6", "#ff9600", "#ce82ff", "#ff4b4b", "#2b70c9", "#ffc800")
+_FRIENDS, _GLOBAL = "friends", "global"
 
 STYLE = """<style>
 #ankiquest.aq-today{--aq-bg:#fff;--aq-line:#e5e5e5;--aq-text:#3c3c3c;--aq-muted:#777;--aq-soft:#f7f7f7;
@@ -89,7 +90,7 @@ box-shadow:inset 0 -4px 0 rgba(0,0,0,.12);position:relative;min-width:16px}
 background:var(--aq-soft);box-shadow:inset 0 -3px 0 var(--aq-line)}
 #ankiquest .aq-quest-body{flex:1;min-width:0}
 #ankiquest .aq-winner{float:right;width:56px;height:56px;object-fit:contain;margin:-6px -4px 0 6px}
-#ankiquest .aq-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+#ankiquest .aq-board-head{display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;margin-bottom:8px}
 #ankiquest .aq-board-head h3{margin:0}
 #ankiquest select{font-family:inherit;font-weight:800;font-size:12px;color:var(--aq-text);background:var(--aq-soft);border:2px solid var(--aq-line);
 border-radius:999px;padding:3px 8px}
@@ -97,7 +98,7 @@ border-radius:999px;padding:3px 8px}
 #ankiquest .aq-player.aq-me{background:var(--aq-me);box-shadow:inset 0 0 0 2px var(--aq-blue)}
 #ankiquest .aq-place{width:26px;text-align:center;font-weight:800;color:var(--aq-muted)}
 #ankiquest .aq-avatar{flex:none;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;
-font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18)}
+font-size:13px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.18);object-fit:cover}
 #ankiquest .aq-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}
 #ankiquest .aq-xp{font-weight:800;color:var(--aq-orange);white-space:nowrap}
 #ankiquest .aq-empty-note{color:var(--aq-muted);padding:6px 8px}
@@ -393,10 +394,24 @@ def avatar(name):
     return "<span class=aq-avatar style='background:%s'>%s</span>" % (colour, escape(initial))
 
 
+def _scope_picker(standing, translate):
+    options = "".join('<option value="%s"%s>%s</option>' % (
+        escape(key, True), " selected" if key == standing.get("scope", _FRIENDS) else "",
+        escape(translate(title) if key in (_FRIENDS, _GLOBAL) else title),
+    ) for key, title in standing.get("scopes", [(_FRIENDS, "Friends")]))
+    return '<select aria-label="%s" onchange="pycmd(\'ankiquest:scope:\'+this.value)">%s</select>' % (
+        escape(translate("Leaderboard scope"), True), options,
+    )
+
+
 def board_row(place, entry, mine, translate=lambda value: value):
     name = str(entry.get("display") or entry.get("user") or "")
     day = _day_label(entry["day"], translate) if "day" in entry else ""
     day_html = "<span class=aq-row-day>%s</span>" % escape(day) if day else ""
+    if mine and entry.get("shown") is False:
+        day_html += "<span class=aq-row-day>%s</span>" % escape(translate("you, not shown to others"))
+    picture = entry.get("avatar")
+    face = '<img class=aq-avatar src="%s" alt="">' % escape(picture, True) if picture and picture.startswith("data:image/png;base64,") else avatar(name)
     xp = "—" if "xp" in entry and entry["xp"] is None else "{:,}".format(int(entry.get("xp") or 0))
     return (
         "<div class='aq-player%s'><span class=aq-place>%s</span>%s<span class=aq-name>%s%s</span>"
@@ -404,7 +419,7 @@ def board_row(place, entry, mine, translate=lambda value: value):
     ) % (
         " aq-me" if mine else "",
         MEDALS.get(place, "#%d" % place),
-        avatar(name),
+        face,
         escape(name),
         day_html, xp,
     )
@@ -431,7 +446,9 @@ def board_card(today, translate, profile=None):
     closing = closing_week(profile, translate)
     if closing:
         rows += "<div class='aq-note aq-closing-week'>%s</div>" % escape(closing)
-    title = "<div class=aq-board-head><h3>%s</h3>%s</div>" % (escape(translate("Leaderboard")), period_picker(standing["period"], translate))
+    title = "<div class=aq-board-head><h3>%s</h3>%s%s</div>" % (
+        escape(translate("Leaderboard")), _scope_picker(standing, translate), period_picker(standing["period"], translate),
+    )
     return "<div class=aq-card>%s%s</div>" % (title, rows)
 
 
