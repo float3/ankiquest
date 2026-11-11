@@ -36,6 +36,7 @@ SPANISH = {
     "Uploading your whole review history…": "Subiendo todo tu historial de repasos…",
     "Set the server, player and token in AnkiQuest settings first.": "Configura primero el servidor, el jugador y el token en los ajustes de AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: no se pudieron cargar tus mazos (%s)",
+    "Full history upload is queued.": "La subida del historial completo está en cola.",
     "Pick at least one person to notify, or share no decks.": "Elige al menos una persona a la que avisar o desactiva el envío de mazos.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: no se pudieron guardar tus mazos (%s)",
     "%d deck shared.": "Se comparte %d mazo.", "%d decks shared.": "Se comparten %d mazos.",
@@ -158,6 +159,7 @@ GERMAN = {
     "Uploading your whole review history…": "Dein gesamter Wiederholungsverlauf wird hochgeladen…",
     "Set the server, player and token in AnkiQuest settings first.": "Richte zuerst Server, Spieler und Token in den AnkiQuest-Einstellungen ein.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: Deine Stapel konnten nicht geladen werden (%s)",
+    "Full history upload is queued.": "Der vollständige Verlauf steht zum Hochladen bereit.",
     "Pick at least one person to notify, or share no decks.": "Wähle mindestens eine Person zum Benachrichtigen aus oder teile keine Stapel.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: Deine Stapel konnten nicht gespeichert werden (%s)",
     "%d deck shared.": "%d Stapel geteilt.", "%d decks shared.": "%d Stapel geteilt.",
@@ -247,6 +249,7 @@ FRENCH = {
     "Uploading your whole review history…": "Envoi de tout ton historique de révisions…",
     "Set the server, player and token in AnkiQuest settings first.": "Configure d’abord le serveur, le joueur et le jeton dans les réglages AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest : impossible de charger tes paquets (%s)",
+    "Full history upload is queued.": "L’envoi de tout ton historique est en attente.",
     "Pick at least one person to notify, or share no decks.": "Choisis au moins une personne à prévenir, ou ne partage aucun paquet.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest : impossible d’enregistrer tes paquets (%s)",
     "%d deck shared.": "%d paquet partagé.", "%d decks shared.": "%d paquets partagés.",
@@ -336,6 +339,7 @@ PORTUGUESE = {
     "Uploading your whole review history…": "A enviar todo o teu histórico de revisões…",
     "Set the server, player and token in AnkiQuest settings first.": "Configura primeiro o servidor, o jogador e o token nas definições do AnkiQuest.",
     "AnkiQuest: could not load your decks (%s)": "AnkiQuest: não foi possível carregar os teus baralhos (%s)",
+    "Full history upload is queued.": "O envio de todo o histórico está em fila de espera.",
     "Pick at least one person to notify, or share no decks.": "Escolhe pelo menos uma pessoa a avisar ou não partilhes nenhum baralho.",
     "AnkiQuest: could not save your decks (%s)": "AnkiQuest: não foi possível guardar os teus baralhos (%s)",
     "%d deck shared.": "%d baralho partilhado.", "%d decks shared.": "%d baralhos partilhados.",
@@ -973,4 +977,44 @@ PORTUGUESE.update({
     "%s day": "%s dia",
     "%s days": "%s dias",
     "Review history could not be loaded.": "Não foi possível carregar o histórico de revisões.",
+})
+
+SPANISH.update({
+    "%s of %s reviews uploaded": "%s de %s repasos subidos",
+    "Uploaded %s reviews.": "Se subieron %s repasos.",
+    "Could not upload review history (%s).": "No se pudo subir el historial de repasos (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Vuelve a iniciar sesión en AnkiQuest para reanudar las subidas.",
+    "Offline, will retry": "Sin conexión. Se volverá a intentar",
+    "Last upload failed (%s), will retry": "Falló la última subida (%s). Se volverá a intentar",
+    "Last upload failed (%s)": "Falló la última subida (%s)",
+})
+
+GERMAN.update({
+    "%s of %s reviews uploaded": "%s von %s Wiederholungen hochgeladen",
+    "Uploaded %s reviews.": "%s Wiederholungen hochgeladen.",
+    "Could not upload review history (%s).": "Der Wiederholungsverlauf konnte nicht hochgeladen werden (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Melde dich erneut bei AnkiQuest an, um Uploads fortzusetzen.",
+    "Offline, will retry": "Offline. Erneuter Versuch folgt",
+    "Last upload failed (%s), will retry": "Letzter Upload fehlgeschlagen (%s). Erneuter Versuch folgt",
+    "Last upload failed (%s)": "Letzter Upload fehlgeschlagen (%s)",
+})
+
+FRENCH.update({
+    "%s of %s reviews uploaded": "%s révisions sur %s envoyées",
+    "Uploaded %s reviews.": "%s révisions envoyées.",
+    "Could not upload review history (%s).": "Impossible d’envoyer l’historique des révisions (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Reconnecte-toi à AnkiQuest pour reprendre les envois.",
+    "Offline, will retry": "Hors ligne. Nouvel essai prévu",
+    "Last upload failed (%s), will retry": "Échec du dernier envoi (%s). Nouvel essai prévu",
+    "Last upload failed (%s)": "Échec du dernier envoi (%s)",
+})
+
+PORTUGUESE.update({
+    "%s of %s reviews uploaded": "%s de %s revisões enviadas",
+    "Uploaded %s reviews.": "%s revisões enviadas.",
+    "Could not upload review history (%s).": "Não foi possível enviar o histórico de revisões (%s).",
+    "Sign in to AnkiQuest again to resume uploads.": "Volta a iniciar sessão no AnkiQuest para retomar os envios.",
+    "Offline, will retry": "Sem ligação. Nova tentativa em breve",
+    "Last upload failed (%s), will retry": "O último envio falhou (%s). Nova tentativa em breve",
+    "Last upload failed (%s)": "O último envio falhou (%s)",
 })

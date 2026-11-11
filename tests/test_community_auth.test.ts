@@ -10,10 +10,10 @@ const html = built('community');
 const origin = 'http://ankiquest.test';
 interface Session { user: string; token?: string }
 interface ActivityItem { id: number; sender: string; kind: string; title: string; body: string; created_at: number; read_at: number | null; challenge_id?: number; action_required?: boolean }
-interface Options { locale?: string; cookieUser?: string; activityItems?: ActivityItem[]; activityBefore?: number }
+interface Options { locale?: string; cookieUser?: string; activityItems?: ActivityItem[]; activityBefore?: number; challengeRecipients?: boolean }
 interface Recorded { url: string; auth: string | undefined; csrf?: string | undefined; method: string; body: Record<string, unknown> | null }
 interface Hold { arrive: () => void; released: Promise<void> }
-interface Control { reject: boolean; hold: Promise<void> | null; holdSession: Hold | null; cookieUser: string | null; replies: {auth: string | undefined; body: unknown}[]; receiving: boolean; automatic: boolean; muted: Record<string, boolean>; nudged: boolean; activityItems: ActivityItem[] }
+interface Control { reject: boolean; rejectLogout: boolean; hold: Promise<void> | null; holdSession: Hold | null; cookieUser: string | null; replies: {auth: string | undefined; body: unknown}[]; receiving: boolean; automatic: boolean; muted: Record<string, boolean>; nudged: boolean; activityItems: ActivityItem[] }
 interface TestWindow { storageWrites: [string, string][]; connection: Promise<unknown>; connectionActive: boolean; queuedActive: boolean; queuedConnection: Promise<unknown>; disconnectFinished: boolean; disconnectDone: Promise<void> }
 const saved: Session = { user: 'cerro', token: 'saved-token' };
 const tokenOwners: Record<string, string> = { 'Bearer saved-token': 'cerro', 'Bearer hill-token': 'hill' };
@@ -30,7 +30,7 @@ async function fixture(t: TestContext, session: Session | null = saved, options:
   page.setDefaultTimeout(10000);
   page.setDefaultNavigationTimeout(15000);
   const errors: string[] = [], requests: Recorded[] = [];
-  const control: Control = { reject: false, hold: null, holdSession: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false,
+  const control: Control = { reject: false, rejectLogout: false, hold: null, holdSession: null, cookieUser:options.cookieUser || null, replies: [], receiving:false, automatic:false, muted:{}, nudged:false,
     activityItems:(options.activityItems || [{id:1,sender:'hill',kind:'message',title:'Saved encouragement',body:'Nice studying!',created_at:Math.floor(Date.now()/1000),read_at:null}]).map(item=>({...item})) };
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(session => {
@@ -57,7 +57,11 @@ async function fixture(t: TestContext, session: Session | null = saved, options:
       control.cookieUser = owner;
       return route.fulfill({status:204});
     }
-    if (url.pathname === '/auth/logout') { control.cookieUser = null; return route.fulfill({status:204}); }
+    if (url.pathname === '/auth/logout') {
+      if (control.rejectLogout) { return route.fulfill({status:503}); }
+      control.cookieUser = null;
+      return route.fulfill({status:204});
+    }
     let data: unknown;
     if (url.pathname === '/api/community') data = { meta: {}, players: [{ user: 'cerro', display: 'Cerro' }, { user: 'hill', display: 'Hill' }] };
     else if (url.pathname.startsWith('/api/friend-nudges/')) {
@@ -101,7 +105,7 @@ async function fixture(t: TestContext, session: Session | null = saved, options:
       if (control.reject || (!cookieAuthorized && !['Bearer saved-token', 'Bearer hill-token'].includes(request.headers().authorization!))) return route.fulfill({ status: 401, body: '{}' });
       data = url.pathname.includes('/reminders/')
         ? { gentle_daily: false, reminder_hour: 18, quiet_start: 22, quiet_end: 9, daily_limit: 3, ...(request.method() === 'POST' ? request.postDataJSON() : {}) }
-        : { challenges: [], recipients: [] };
+        : { challenges: [], recipients: options.challengeRecipients ? [{user:'hill',display:'Hill'},{user:'cerro',display:'Cerro'}] : [] };
     } else return route.fulfill({ status: 404, body: '' });
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(data) });
   });
@@ -252,6 +256,144 @@ test('late native credentials connect, while explicit disconnect survives repeat
   await page.locator('#connect-button').click();
   await page.locator('#reminder-form').waitFor();
   assert.equal(await page.locator('#auth-dialog').evaluate((dialog: HTMLDialogElement) => dialog.open), false);
+});
+
+test('a rejected disconnect preserves the native account and can be retried', async t => {
+  const {page, control} = await fixture(t);
+  const view = page.locator('#view-reminders');
+  await view.locator('#reminder-form').waitFor();
+  control.rejectLogout = true;
+  await view.locator('[data-disconnect]').click();
+  const errors = page.locator('.auth-status [role=alert]').filter({hasText:'Could not disconnect'});
+  await errors.first().waitFor({state:'attached'});
+  assert.deepEqual(await page.evaluate(() => window.ankiquestSession), saved);
+  await view.getByRole('alert').filter({hasText:'Could not disconnect'}).waitFor();
+  await view.locator('#reminder-form').waitFor();
+
+  control.rejectLogout = false;
+  await view.locator('[data-disconnect]').click();
+  await view.locator('#reminder-form').waitFor({state:'detached'});
+});
+
+test('a new browser sign-in restores Community after disconnect', async t => {
+  const {page, control, requests, deliver} = await fixture(t, saved, {cookieUser:'cerro'});
+  const view = page.locator('#view-reminders');
+  await view.locator('#reminder-form').waitFor();
+  await view.locator('[data-disconnect]').click();
+  await view.locator('[data-connect]').waitFor();
+  await deliver();
+  control.cookieUser = 'hill';
+  await page.evaluate(() => AnkiQuestSite.status(true));
+  await view.locator('.auth-status strong').filter({hasText:'Hill'}).waitFor({timeout:2000});
+  await view.locator('#reminder-form').waitFor();
+  assert.ok(requests.filter(request => request.url.endsWith('/hill')).every(request => !request.auth));
+});
+
+test('logout clears the native account even if the access refresh throws', async t => {
+  const {page, control} = await fixture(t, saved, {cookieUser:'cerro'});
+  const view = page.locator('#view-reminders');
+  await view.locator('#reminder-form').waitFor();
+  await page.evaluate(() => {
+    const disconnect = AnkiQuestSite.disconnectMember;
+    AnkiQuestSite.disconnectMember = async () => {
+      await disconnect();
+      throw new Error('Access refresh failed');
+    };
+  });
+  await view.locator('[data-disconnect]').click();
+  await view.locator('[data-connect]').waitFor();
+  assert.equal(control.cookieUser, null);
+  assert.equal(await page.evaluate(() => window.ankiquestSession), undefined);
+});
+
+test('finishing a challenge save preserves a pending private reload', async t => {
+  const {page} = await fixture(t, saved, {challengeRecipients:true});
+  await page.locator('#tab-challenges').click();
+  await page.locator('[data-create-challenge]').click();
+  await page.locator('#challenge-form [name=recipients]').check();
+
+  let finishSave!: () => void, finishReload!: () => void;
+  const save = new Promise<void>(resolve => { finishSave = resolve; });
+  const reload = new Promise<void>(resolve => { finishReload = resolve; });
+  t.after(() => { finishSave(); finishReload(); });
+  await page.route(`${origin}/api/community/challenges/cerro`, async route => {
+    if (route.request().method() === 'POST') {
+      await save;
+      return route.fulfill({status:503, json:{error:'Goal service unavailable'}});
+    }
+    await reload;
+    return route.fallback();
+  });
+  const sent = page.waitForRequest(request => request.url().endsWith('/challenges/cerro') && request.method() === 'POST');
+  await page.getByRole('button', {name:'Send invitation'}).click();
+  await sent;
+  await page.evaluate(() => {
+    const retry = document.createElement('button');
+    retry.dataset.privateRetry = '';
+    document.body.append(retry);
+    retry.click();
+    retry.remove();
+  });
+  const loading = page.locator('#view-challenges').getByText('Loading your account…');
+  await loading.waitFor();
+  finishSave();
+  await page.locator('#challenge-status').getByText('Goal service unavailable').waitFor();
+  assert.equal(await loading.count(), 1);
+  finishReload();
+});
+
+test('a failed challenge save stays visible after closing the form', async t => {
+  const {page} = await fixture(t, saved, {challengeRecipients:true});
+  await page.route(`${origin}/api/community/challenges/cerro`, async route => {
+    if (route.request().method() !== 'POST') { return route.fallback(); }
+    return route.fulfill({status:503, json:{error:'Goal service unavailable'}});
+  });
+  await page.locator('#tab-challenges').click();
+  await page.locator('[data-create-challenge]').click();
+  await page.locator('#challenge-form [name=recipients]').check();
+  await page.getByRole('button', {name:'Send invitation'}).click();
+  await page.locator('#challenge-status').getByText('Goal service unavailable').waitFor();
+  await page.getByRole('button', {name:'Close new challenge'}).click();
+  assert.equal(await page.locator('#challenge-action-status').innerText(), 'Goal service unavailable');
+});
+
+test('an old challenge response cannot unlock the new account’s submission', async t => {
+  const {page, deliver} = await fixture(t, saved, {challengeRecipients:true});
+  const hold = () => {
+    let arrive!: () => void, release!: () => void;
+    const arrived = new Promise<void>(resolve => { arrive = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    t.after(release);
+    return {arrive, arrived, release, released};
+  };
+  const older = hold(), newer = hold();
+  await page.route(`${origin}/api/community/challenges/*`, async route => {
+    if (route.request().method() !== 'POST') { return route.fallback(); }
+    const pending = route.request().url().endsWith('/cerro') ? older : newer;
+    pending.arrive();
+    await pending.released;
+    return route.fulfill({status:503, json:{error:'Goal service unavailable'}});
+  });
+  const open = page.locator('[data-create-challenge]');
+  const submit = async () => {
+    await open.click();
+    await page.locator('#challenge-form [name=recipients]').check();
+    await page.getByRole('button', {name:'Send invitation'}).click();
+  };
+  await page.locator('#tab-challenges').click();
+  await submit();
+  await older.arrived;
+  await deliver({user:'hill',token:'hill-token'});
+  await submit();
+  await newer.arrived;
+
+  const oldResponse = page.waitForResponse(response => response.url().endsWith('/challenges/cerro') && response.status() === 503);
+  older.release();
+  await (await oldResponse).finished();
+  await page.getByRole('button', {name:'Close new challenge'}).click();
+  await open.click();
+  assert.equal(await page.locator('#challenge-dialog').evaluate((dialog: HTMLDialogElement) => dialog.open), false);
+  newer.release();
 });
 
 test('standalone visitors can connect a different player with their own token', async t => {
