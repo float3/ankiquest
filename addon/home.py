@@ -11,7 +11,7 @@ from html import escape
 from aqt import gui_hooks, mw
 
 from . import address, day_verdict, goal_ui, goals, heatmap_ui, moods, today, today_ui
-from .board import PAGES, _day_label
+from .board import _day_label
 from .client import Client, offset_west_min
 from .deck_completion import deck_snapshots, study_day
 from .language import tr
@@ -465,14 +465,16 @@ def _toolbar_links(links, toolbar):
 
 
 def _refresh_toolbar(toolbar=None):
+    toolbar = toolbar or getattr(mw, "toolbar", None)
+    if toolbar is None and not local["browser_buttons"]:
+        return
     label, tip = _toolbar_values()
     for button in local["browser_buttons"]:
         button.setText(label)
         button.setToolTip(tip)
-    toolbar = toolbar or getattr(mw, "toolbar", None)
     if toolbar is None:
         return
-    toolbar.web.eval("var aq=document.getElementById('ankiquest-today');if(aq){aq.textContent=%s;aq.title=%s;aq.setAttribute('aria-label',%s);}" % (
+    toolbar.web.eval("(function(){var aq=document.getElementById('ankiquest-today');if(aq){aq.textContent=%s;aq.title=%s;aq.setAttribute('aria-label',%s);}})();" % (
         json.dumps(label), json.dumps(tip), json.dumps(label),
     ))
 
@@ -488,7 +490,7 @@ def _browser_entry(browser):
     button.clicked.connect(_open_today)
     local["browser_buttons"].add(button)
     button.destroyed.connect(lambda: local["browser_buttons"].discard(button))
-    grid.addWidget(button, 0, 2)
+    grid.addWidget(button, 0, grid.columnCount())
     _refresh_toolbar()
 
 
