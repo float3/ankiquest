@@ -271,6 +271,22 @@ class RefreshTests(unittest.TestCase):
         self.addon.refresh(False)
         self.assertEqual(self.addon.deck_snapshots.call_args.kwargs, {"only": {"1"}})
 
+    def test_every_new_conquest_joins_the_queue_without_replaying_old_ones(self):
+        self.pending = [[(101, 1, 1, 21, 1000, 1), (102, 2, 1, 21, 1000, 1)]]
+        self.api.upload.return_value = {
+            "conquests": [{"at": 90}, {"at": 101}, {"at": 102}],
+            "feedback": {"headlines": ["🏆 Card conquered after 4 lapses"]},
+        }
+        self.api.deck_settings = Mock(return_value={"celebrations": True})
+        self.mw.state = "review"
+        self.addon.refresh(False)
+        items = self.addon.moments._pending(self.mw.pm.profile, (self.api.base, self.api.user))
+        self.assertEqual(["conquered:102", "conquered:101"], [item["key"] for item in items])
+        self.addon.tooltip.assert_not_called()
+        self.addon.web.open_page.assert_not_called()
+        self.addon.refresh(False)
+        self.assertEqual(2, self.addon._moments._count())
+
     def test_deck_notifications_menu_sends_full_catalog_and_saves_the_choice(self):
         self.api.shared_decks = Mock(return_value=["1", "3"])
         self.api.deck_settings = Mock(return_value={"decks": [], "recipients": []})
@@ -324,6 +340,7 @@ class RefreshTests(unittest.TestCase):
 
     def test_the_server_worded_rank_change_is_shown_once_polled_loudly(self):
         self.with_board()
+        self.api.deck_settings = Mock(return_value={"celebrations": True})
         self.mw.pm.profile["ankiquestLastOrder"] = ["hill", "cerro"]
         self.api.rank.return_value = {
             "order": ["cerro", "hill"],
@@ -331,9 +348,10 @@ class RefreshTests(unittest.TestCase):
         }
         self.addon.poll()
         self.api.rank.assert_called_once_with(["hill", "cerro"], None)
-        self.assertEqual(
-            "\U0001f451 You took the crown<br>You passed Hill.", self.addon.tooltip.call_args_list[0].args[0]
-        )
+        items = self.addon.moments._pending(self.mw.pm.profile, (self.api.base, self.api.user))
+        self.assertEqual("\U0001f451 You took the crown", items[0]["title"])
+        self.assertEqual("You passed Hill.", items[0]["body"])
+        self.assertFalse(any("crown" in call.args[0] for call in self.addon.tooltip.call_args_list))
         self.assertEqual(self.mw.pm.profile["ankiquestLastOrder"], ["cerro", "hill"])
 
     def test_a_new_message_is_announced_once(self):
