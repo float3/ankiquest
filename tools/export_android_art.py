@@ -49,6 +49,14 @@ ART = [
     ("aki_leech", "static/aki/leech.png", 336),
     ("aki_sleeping", "static/aki/sleeping.png", 336),
     ("aki_at_risk", "static/aki/at_risk.png", 336),
+    ("aki_nudge", "static/aki/nudge.png", 336),
+    ("aki_challenge", "static/aki/challenge.png", 336),
+    ("aki_challenge_won", "static/aki/challenge_won.png", 336),
+    ("aki_challenge_lost", "static/aki/challenge_lost.png", 336),
+    ("ankilope_nudge", "static/ankilope/nudge.png", 336),
+    ("ankilope_challenge", "static/ankilope/challenge.png", 336),
+    ("ankilope_challenge_won", "static/ankilope/challenge_won.png", 336),
+    ("ankilope_challenge_lost", "static/ankilope/challenge_lost.png", 336),
     ("duo_friends", "static/duo/friends.png", 336),
 ]
 
