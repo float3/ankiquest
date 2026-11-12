@@ -3,16 +3,20 @@
 import time
 from http import HTTPStatus
 
-from aqt.qt import QApplication, QHBoxLayout, QLineEdit, QPushButton, QTimer, QVBoxLayout, QWidget
+from aqt.qt import QApplication, QComboBox, QHBoxLayout, QLineEdit, QPushButton, QTimer, QVBoxLayout, QWidget
 
-from . import conquests, inbox, share, share_ui
+from . import conquests, deck_names, inbox, share, share_ui
 from .language import tr
+
+_DECK_COLUMNS = 20
+_TEXT_LIMIT = 120
 
 
 class _Conquest:
     def __init__(self, card, at):
         self._card, self._api, self._at = card, card._api, at
         self._found, self._deck = None, ""
+        self._deck_record = None
         self._suggestion, self._busy = "", False
         self._widget = QWidget()
         layout = QVBoxLayout(self._widget)
@@ -21,7 +25,7 @@ class _Conquest:
         layout.addWidget(self._stats)
         layout.addWidget(share_ui._plain(tr("Card label")))
         self._label = QLineEdit()
-        self._label.setMaxLength(120)
+        self._label.setMaxLength(_TEXT_LIMIT)
         self._label.setPlaceholderText(tr("Choose what to share about this card"))
         layout.addWidget(self._label)
         layout.addWidget(share_ui._plain(tr("Your suggestion stays on this computer until you save it.")))
@@ -43,6 +47,17 @@ class _Conquest:
         self._options = QWidget()
         options = QVBoxLayout(self._options)
         options.setContentsMargins(0, 0, 0, 0)
+        options.addWidget(share_ui._plain(tr("Deck name")))
+        self._deck_name = QComboBox()
+        self._deck_name.setEditable(True)
+        self._deck_name.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._deck_name.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._deck_name.setMinimumContentsLength(_DECK_COLUMNS)
+        self._deck_name.lineEdit().setMaxLength(_TEXT_LIMIT)
+        self._deck_name.setToolTip(tr("Choose a name or edit it. Leave it empty to share without a deck name."))
+        self._deck_name.lineEdit().textEdited.connect(self._choose_deck)
+        self._deck_name.textActivated.connect(self._choose_deck)
+        options.addWidget(self._deck_name)
         self._copy = self._button(tr("Copy text"), self._copy_text)
         self._image = self._button(tr("Copy as image"), lambda: self._picture(False))
         self._file = self._button(tr("Save image…"), lambda: self._picture(True))
@@ -83,13 +98,31 @@ class _Conquest:
         self._busy = True
         self._buttons()
         col = self._card._addon.mw.col
+        prefs = self._card._addon.mw.pm.profile
+        known = deck_names._state(prefs, self._api).get("conquests", {}).get(str(self._at))
+
+        def read_local():
+            label, _deck = conquests._local(col, self._at)
+            return label, known or deck_names._record(col, self._at)
 
         def local(future):
-            self._suggestion, self._deck = future.result()
+            try:
+                self._suggestion, self._deck_record = future.result()
+            except Exception as error:
+                print("ankiquest local conquest:", error)
+                return
+            if self._deck_record:
+                deck_names._remember(prefs, self._api, {str(self._at): self._deck_record})
+            self._deck = deck_names._choice(prefs, self._api, self._deck_record)
+            self._deck_name.clear()
+            if self._deck_record:
+                choices = list(dict.fromkeys([self._deck, deck_names._name(self._deck_record["path"]), *deck_names._parts(self._deck_record["path"]), ""]))
+                self._deck_name.addItems(choices)
+            self._deck_name.setCurrentText(self._deck)
             if not self._label.isModified() and not (self._found or {}).get("label"):
                 self._label.setText(self._suggestion)
 
-        self._card._run(lambda: conquests._local(col, self._at), local, uses_collection=True)
+        self._card._run(read_local, local, uses_collection=True)
         self._card._run(lambda: conquests._load(self._api, self._at), self._loaded)
 
     def _loaded(self, future):
@@ -144,6 +177,12 @@ class _Conquest:
 
     def _win(self):
         return conquests._win(self._api, self._at, self._found, self._deck, tr)
+
+    def _choose_deck(self, text):
+        if not self._card._owned():
+            return
+        self._deck = " ".join(text.split())[:_TEXT_LIMIT]
+        deck_names._choose(self._card._addon.mw.pm.profile, self._api, self._deck_record, self._deck)
 
     def _copy_text(self):
         self._card._status.setText(share_ui.copy_text(self._win(), self._api.base))
