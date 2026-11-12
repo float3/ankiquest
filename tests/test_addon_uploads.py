@@ -4,7 +4,8 @@ import time
 import unittest
 from copy import deepcopy
 from http import HTTPStatus
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import test_desktop_today as today
 
@@ -45,6 +46,33 @@ class HeldTasks(unittest.TestCase):
 
 
 class UploadQueue(HeldTasks):
+    def test_a_later_failed_batch_keeps_the_deck_already_noticed(self):
+        self.db.execute("insert into revlog values (50, 5, 3, 1, 5000, 1, 3)")
+        self.mw.col.get_card = Mock(return_value=SimpleNamespace(did=7, odid=0))
+        self.mw.col.decks = SimpleNamespace(name=Mock(return_value="Languages::Spanish"))
+        self.api.upload.side_effect = [{"conquests": [{"at": 50}]}, OSError("next batch failed")]
+        with patch.object(self.addon, "MAX_PENDING", 1):
+            self.addon.refresh(False)
+            self.finish()
+        known = self.addon.deck_names._state(self.mw.pm.profile, self.api).get("conquests", {})
+        self.assertEqual({"id": "7", "path": "Languages::Spanish"}, known.get("50"))
+
+    def test_upload_records_the_home_deck_once_when_a_conquest_is_noticed(self):
+        self.db.execute("insert into revlog values (50, 5, 3, 1, 5000, 1, 3)")
+        card = SimpleNamespace(did=99, odid=7)
+        self.mw.col.get_card = Mock(return_value=card)
+        self.mw.col.decks = SimpleNamespace(name=Mock(return_value="Languages::Spanish"))
+        self.api.upload.return_value = {"conquests": [{"at": 50}]}
+        self.addon.refresh(False)
+        self.finish()
+        known = self.addon.deck_names._state(self.mw.pm.profile, self.api)["conquests"]
+        self.assertEqual({"id": "7", "path": "Languages::Spanish"}, known["50"])
+        card.odid = 0
+        self.mw.col.decks.name.return_value = "Archive::Old"
+        self.addon.refresh(False)
+        self.finish()
+        self.assertEqual({"id": "7", "path": "Languages::Spanish"}, known["50"])
+
     def test_a_refresh_asked_for_during_a_failed_upload_still_runs(self):
         self.addon.refresh(False)
         self.addon.refresh(False)

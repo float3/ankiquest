@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "cases": [
+    {"path": "5 Archive::Mandarin — Modern Course::Mandarin modern 1", "expected": "Mandarin — Modern Course › Mandarin modern 1"},
+    {"path": "German", "expected": "German"},
+    {"path": "01. Languages::#3 Spanish::[A] Animals", "expected": "Animals"},
+    {"path": "Archive::Japanese::Vocab", "expected": "Japanese › Vocab"},
+    {"path": "Default::German::Book 2", "expected": "German › Book 2"},
+    {"path": "English::1", "expected": "English › 1"},
+    {"path": "Spanish::A1", "expected": "Spanish › A1"},
+    {"path": "Inbox::Cards", "expected": "Cards"},
+    {"path": "Custom Study Session::Filtered", "expected": ""},
+    {"path": "ARCHIVE::Old::Done", "expected": ""},
+    {"path": "Archiv::Französisch::Lektion 3", "expected": "Französisch › Lektion 3"},
+    {"path": "Archivo::Español::Animales", "expected": "Animales"},
+    {"path": "Boîte de réception::Japonais::Cartes", "expected": "Japonais › Cartes"},
+    {"path": "Padrão::Mandarim::Lição 2", "expected": "Mandarim › Lição 2"},
+    {"path": "::  02. French  :: :: Words ::", "expected": "Words"},
+    {"path": "Languages::German::German", "expected": "German"},
+    {"path": "日本語::単語", "expected": "日本語 › 単語"},
+    {"path": "", "expected": ""}
+  ]
+}

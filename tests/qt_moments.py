@@ -2,14 +2,15 @@
 
 from concurrent.futures import Future
 from copy import deepcopy
+from os import environ
 from types import SimpleNamespace
 import time
 import tempfile
 from pathlib import Path
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-from aqt.qt import QApplication, QPushButton, QScrollArea, QWidget
+from aqt.qt import QApplication, QFont, QFontDatabase, QPushButton, QScrollArea, QWidget
 from anki.collection import Collection
 
 from addon_loader import load_in_package
@@ -268,6 +269,55 @@ class Moments(unittest.TestCase):
         self.presenter._sync_owner()
         self.assertIsNone(self.presenter._card)
         self.assertEqual(1, len(ui.moments._pending(old_profile, (old_api.base, old_api.user))))
+
+    def test_a_deck_name_is_editable_remembered_and_stays_local(self):
+        self.mw.col.decks.name = lambda _did: "5 Archive::Spanish::Animals"
+        control = self.conquest()
+        self.assertEqual("Animals", control._deck_name.currentText())
+        choices = [control._deck_name.itemText(index) for index in range(control._deck_name.count())]
+        self.assertIn("Spanish", choices)
+        self.assertNotIn("Archive", choices)
+        requests = deepcopy(self.requests)
+        control._deck_name.lineEdit().textEdited.emit("My Spanish words")
+        self.assertIn("My Spanish words", control._win()["body"])
+        control._load()
+        self.assertEqual("My Spanish words", control._deck_name.currentText())
+        if capture := environ.get("ANKIQUEST_QT_CAPTURE"):
+            if font := environ.get("ANKIQUEST_QT_FONT"):
+                family = QFontDatabase.applicationFontFamilies(QFontDatabase.addApplicationFont(font))[0]
+                self.presenter._card._dialog.setFont(QFont(family, 10))
+            control._share.click()
+            self.presenter._card._dialog.resize(480, 640)
+            self.flush()
+            self.assertTrue(self.presenter._card._dialog.grab().save(str(Path(capture) / "friendly-deck-name.png")))
+        self.assertTrue(all(body is None for _path, body, _method in self.requests[len(requests):]))
+        self.mw.col.decks.name = lambda _did: "Archive::Old"
+        control._load()
+        self.assertEqual("Spanish::Animals", control._deck_record["path"].removeprefix("5 Archive::"))
+        control._deck_name.lineEdit().textEdited.emit("")
+        self.assertNotIn(" in ", control._win()["body"])
+
+    def test_a_stale_local_deck_reply_cannot_change_another_account(self):
+        control = self.conquest()
+        previous = self.mw.pm.profile
+        ui.conquests_ui.deck_names._state(previous, self.api)["conquests"] = {}
+        self.defer = True
+        control._load()
+        self.mw.pm.profile = {}
+        for task in list(self.tasks):
+            self.complete(task)
+        self.assertNotIn("ankiquestConquestDecks", self.mw.pm.profile)
+        self.assertFalse(previous.get("ankiquestConquestDecks", {}).get(self.api.base, {}).get(self.api.user, {}).get("conquests"))
+
+    def test_long_deck_quick_picks_do_not_widen_the_small_window(self):
+        self.mw.col.decks.name = lambda _did: "Languages::" + "A very long deck name " * 20
+        control = self.conquest()
+        control._share.click()
+        dialog = self.presenter._card._dialog
+        dialog.resize(480, 640)
+        self.flush()
+        self.assertLessEqual(dialog.width(), 480)
+        self.assertEqual(0, dialog.findChild(QScrollArea).horizontalScrollBar().maximum())
 
     def test_expanded_actions_fit_a_small_window_with_a_fixed_footer(self):
         control = self.conquest()
