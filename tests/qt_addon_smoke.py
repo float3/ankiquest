@@ -52,6 +52,27 @@ def members():
 
 
 class RealAnki(unittest.TestCase):
+    def test_conquest_labels_use_real_front_fields(self):
+        from addon_loader import load_in_package
+        conquests = load_in_package("aq_label_smoke", "conquests")
+        with tempfile.TemporaryDirectory(prefix="ankiquest-label-") as folder:
+            col = Collection(str(Path(folder) / "collection.anki2"))
+            try:
+                notetype = col.models.by_name("Basic")
+                notetype["tmpls"][0]["qfmt"] = "{{Front}} Meaning?{{type:Back}}"
+                col.models.save(notetype)
+                note = col.new_note(notetype)
+                note["Front"], note["Back"] = "(B1L01-3-10) 不客氣", "you're welcome"
+                col.add_note(note, 1)
+                at = 1_793_183_400_000
+                col.db.execute(
+                    "insert into revlog (id,cid,usn,ease,ivl,lastIvl,factor,time,type) values (?,?,0,3,25,8,2500,7000,1)",
+                    at, note.cards()[0].id,
+                )
+                self.assertEqual(("不客氣", "Default"), conquests._local(col, at))
+            finally:
+                col.close()
+
     def test_channel_conflicts_and_repeat_updates_preserve_enabled_state(self):
         with tempfile.TemporaryDirectory(prefix="ankiquest-channels-") as folder:
             pm = ProfileManager(Path(folder))
