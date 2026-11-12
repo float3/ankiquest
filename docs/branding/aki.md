@@ -65,6 +65,9 @@ yet: they are not embedded in the server binary and are not public paths.
 | `leech.png` | `aki_leech` | A leech tamed |
 | `at_risk.png` | `aki_at_risk` | Still time to secure the streak |
 | `backlog.png` | `aki_backlog` | Calmly sorting overdue flashcards, one small step at a time |
+| `place_1.png` | `aki_place_1` | Weekly first place, gold medal and a friendly wave |
+| `place_2.png` | `aki_place_2` | Weekly second place, proudly holding a silver medal |
+| `place_3.png` | `aki_place_3` | Weekly third place, a relaxed smile and bronze medal |
 | `nudge.png` | `aki_nudge` | A friendly wave to another player |
 | `challenge.png` | `aki_challenge` | An invitation to a friendly challenge |
 | `challenge_won.png` | `aki_challenge_won` | A completed challenge, celebrating as a good sport |
@@ -87,6 +90,14 @@ on light and dark backgrounds. Both transparent masters were also reviewed
 at native resolution on both backgrounds. Prompts and references are recorded
 in `aki-prompts.json`. These assets are ready for backlog-specific surfaces;
 adding them does not change study goals or the current general study artwork.
+
+The three podium poses have matching `static/ankilope/place_1..3.png` masters
+and `ankilope_place_1..3` Android exports. Gold, silver and bronze medals use
+distinct positive poses. The [podium review sheet](podium-review.png) shows
+all six at 128 and 64 pixels on light and dark backgrounds. Each 1254px
+transparent master was also reviewed at native size on both backgrounds.
+Exact generation prompts and references are recorded in `aki-prompts.json`.
+Android exports are 336px for the 112dp moment-card illustration.
 
 `aki-prompts.json` records the prompts for new and replaced art. Prompts for
 earlier poses without a generation record were reconstructed from the shipped
