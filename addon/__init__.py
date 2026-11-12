@@ -316,6 +316,10 @@ def _request_upload(request, *, attempts=0):
         if state["upload"] is not upload or mw.col is not col or mw.pm.profile is not prefs:
             raise RuntimeError("AnkiQuest connection changed during upload")
 
+    def remember_decks(records):
+        if target.current(client()):
+            deck_names._remember(prefs, api, records)
+
     def work():
         check_target()
         window = col.db.all(WINDOW_SQL, window_start)
@@ -355,7 +359,11 @@ def _request_upload(request, *, attempts=0):
                 review_offsets.stamp(rows_to_reviews(sent), stamps), rollover, history or initial_sync or full, deleted if first else (),
                 decks=decks, clock_offset=clock_offset,
             )
-            conquest_decks.update(deck_names._capture(col, profile.get("conquests", []), known_decks | conquest_decks))
+            found = deck_names._capture(col, profile.get("conquests", []), known_decks | conquest_decks)
+            conquest_decks.update(found)
+            if found:
+                # Keep what this successful batch noticed even if a later batch fails.
+                mw.taskman.run_on_main(lambda records=dict(found): remember_decks(records))
             first = False
             next_restore += len(extra)
             sent_count += len(sent)
