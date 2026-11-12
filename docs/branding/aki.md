@@ -64,6 +64,7 @@ yet: they are not embedded in the server binary and are not public paths.
 | `deck_conquered.png` | `aki_deck_conquered` | A deck conquered |
 | `leech.png` | `aki_leech` | A leech tamed |
 | `at_risk.png` | `aki_at_risk` | Still time to secure the streak |
+| `backlog.png` | `aki_backlog` | Calmly sorting overdue flashcards, one small step at a time |
 | `nudge.png` | `aki_nudge` | A friendly wave to another player |
 | `challenge.png` | `aki_challenge` | An invitation to a friendly challenge |
 | `challenge_won.png` | `aki_challenge_won` | A completed challenge, celebrating as a good sport |
@@ -78,6 +79,14 @@ The [review sheet](social-poses-review.png) shows each at 128 and 64 pixels
 on light and dark backgrounds. All eight transparent masters were also
 reviewed at native resolution. They were generated with the built-in
 `image_gen` tool; the prompt record includes the nudge cutout refinement.
+
+The backlog pose also has a matching `static/ankilope/backlog.png`, exported
+as `ankilope_backlog`. Both show a calm companion sorting blank flashcards.
+The [backlog review sheet](backlog-review.png) shows each at 128 and 64 pixels
+on light and dark backgrounds. Both transparent masters were also reviewed
+at native resolution on both backgrounds. Prompts and references are recorded
+in `aki-prompts.json`. These assets are ready for backlog-specific surfaces;
+adding them does not change study goals or the current general study artwork.
 
 `aki-prompts.json` records the prompts for new and replaced art. Prompts for
 earlier poses without a generation record were reconstructed from the shipped
