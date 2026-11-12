@@ -37,7 +37,7 @@ from .client import (
     sign_up,
 )
 from .deck_completion import deck_snapshots, study_day
-from . import copies_ui, preferences, preview, review_offsets
+from . import copies_ui, deck_names, preferences, preview, review_offsets
 
 MARK_KEY = "ankiquestUploadedThrough"
 RECENT_KEY = "ankiquestRecentUploads"
@@ -306,6 +306,7 @@ def _request_upload(request, *, attempts=0):
     recent = {i for i in saved.get("recent", []) if i > window_start}
     shared = set(saved.get("shared", [])) if not history else set()
     stamps = review_offsets.journal(prefs)
+    known_decks = dict(deck_names._state(prefs, api).get("conquests", {}))
 
     def progress(sent, total):
         if state["upload"] is upload and target.current(client()):
@@ -324,6 +325,7 @@ def _request_upload(request, *, attempts=0):
         known = start
         first = True
         next_restore = sent_count = 0
+        conquest_decks = {}
 
         # Restored rows and new rows share the same upload limit.
         while True:
@@ -353,13 +355,14 @@ def _request_upload(request, *, attempts=0):
                 review_offsets.stamp(rows_to_reviews(sent), stamps), rollover, history or initial_sync or full, deleted if first else (),
                 decks=decks, clock_offset=clock_offset,
             )
+            conquest_decks.update(deck_names._capture(col, profile.get("conquests", []), known_decks | conquest_decks))
             first = False
             next_restore += len(extra)
             sent_count += len(sent)
             if history and sent:
                 mw.taskman.run_on_main(lambda count=sent_count: progress(count, max(count, total)))
             if not full:
-                return max(known, mark), sorted(present), profile, sent_count
+                return max(known, mark), sorted(present), profile, sent_count, conquest_decks
 
     def done(future):
         if state["upload"] is not upload:
@@ -380,10 +383,11 @@ def _request_upload(request, *, attempts=0):
 
     def uploaded(result):
         # Advance the mark only after the whole upload was accepted.
-        through, present, profile, sent = result
+        through, present, profile, sent, conquest_decks = result
         uploaded_at = int(time.time() * 1000)
         saved["through"], saved["recent"] = through, present
         saved["last_upload"] = uploaded_at
+        deck_names._remember(prefs, api, conquest_decks)
         if resync:
             saved["resynced_day"] = day
         review_offsets.prune(prefs, through, uploaded_at)

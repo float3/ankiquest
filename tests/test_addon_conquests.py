@@ -14,6 +14,16 @@ client = load_in_package("conquest_rules", "client")
 
 
 class Labels(unittest.TestCase):
+    def test_shared_deck_names(self):
+        cases = json.loads((Path(__file__).parent / "fixtures/deck_names.json").read_text("utf-8"))["cases"]
+        note = SimpleNamespace(fields=["word"], note_type=lambda: {"type": 0})
+        card = SimpleNamespace(question=lambda: "word", note=lambda: note, did=5, odid=0)
+        for case in cases:
+            with self.subTest(path=case["path"]):
+                col = SimpleNamespace(db=SimpleNamespace(scalar=lambda *args: 1), get_card=lambda _: card,
+                                      decks=SimpleNamespace(name=lambda _: case["path"]))
+                self.assertEqual(case["expected"], conquests._local(col, 50)[1])
+
     def test_shared_front_field_labels(self):
         cases = json.loads((Path(__file__).parent / "fixtures/card_labels.json").read_text("utf-8"))["cases"]
         self.assertTrue(cases)

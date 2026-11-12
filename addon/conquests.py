@@ -3,7 +3,7 @@
 import html
 import re
 
-from . import share
+from . import deck_names, share
 
 _HIDDEN = re.compile(r"<(style|script)\b[^>]*>.*?</\1\s*>|<!--.*?-->", re.I | re.S)
 _SOUND = re.compile(r"\[(?:sound|anki:play):[^\]]*\]")
@@ -120,7 +120,7 @@ def _local(col, at):
             template = None
         names = [field["name"] for field in notetype.get("flds", [])]
         label = _suggest(question, note.fields, notetype.get("type") == 1, template, names)
-        return label, col.decks.name(card.odid or card.did)
+        return label, deck_names._name(col.decks.name(card.odid or card.did))
     except Exception as error:
         print("ankiquest local conquest:", error)
         return "", ""
