@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 from io import BytesIO
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import Mock
 
@@ -12,6 +14,22 @@ client = load_in_package("conquest_rules", "client")
 
 
 class Labels(unittest.TestCase):
+    def test_shared_front_field_labels(self):
+        cases = json.loads((Path(__file__).parent / "fixtures/card_labels.json").read_text("utf-8"))["cases"]
+        self.assertTrue(cases)
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                fields = case["fields"]
+                note = SimpleNamespace(fields=[value for _, value in fields],
+                                       note_type=lambda: {"type": int(case.get("cloze", False)),
+                                                          "flds": [{"name": name} for name, _ in fields]})
+                card = SimpleNamespace(question=lambda: case["question"], note=lambda: note,
+                                       template=lambda: {"qfmt": case["template"]}, did=5, odid=0)
+                col = SimpleNamespace(db=SimpleNamespace(scalar=lambda *args: 1),
+                                      get_card=lambda _: card,
+                                      decks=SimpleNamespace(name=lambda _: "Vocabulary"))
+                self.assertEqual(case["expected"], conquests._local(col, 50)[0])
+
     def test_rendered_front_drops_hidden_content_sounds_and_markup(self):
         front = '<style>.card{color:red}</style><!-- hidden --><script>bad()</script><b>der&nbsp;Hund</b>[sound:dog.mp3][anki:play:q:0]'
         self.assertEqual("der Hund", conquests._suggest(front, ["B1L02", "wrong field"], False))
@@ -22,7 +40,7 @@ class Labels(unittest.TestCase):
     def test_an_unrenderable_or_identifier_front_falls_back_to_real_words(self):
         for front in ("", "B1L02", "0042", "ID-17", "2024-05-01", "ff12acde"):
             self.assertEqual("the dog", conquests._suggest(front, ["B1L02", "<b>the dog</b>"], False))
-        self.assertEqual("B1L02", conquests._suggest("", ["B1L02"], False))
+        self.assertEqual("", conquests._suggest("", ["B1L02"], False))
         self.assertEqual("", conquests._suggest("<img src=x>", [""], False))
         self.assertEqual(120, len(conquests._suggest("x" * 200, [], False)))
 
