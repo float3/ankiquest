@@ -69,7 +69,7 @@ class RealAnki(unittest.TestCase):
                     "insert into revlog (id,cid,usn,ease,ivl,lastIvl,factor,time,type) values (?,?,0,3,25,8,2500,7000,1)",
                     at, note.cards()[0].id,
                 )
-                self.assertEqual(("不客氣", "Default"), conquests._local(col, at))
+                self.assertEqual(("不客氣", ""), conquests._local(col, at))
             finally:
                 col.close()
 

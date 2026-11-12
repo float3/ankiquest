@@ -4,6 +4,7 @@ import time
 import unittest
 from copy import deepcopy
 from http import HTTPStatus
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import test_desktop_today as today
@@ -45,6 +46,22 @@ class HeldTasks(unittest.TestCase):
 
 
 class UploadQueue(HeldTasks):
+    def test_upload_records_the_home_deck_once_when_a_conquest_is_noticed(self):
+        self.db.execute("insert into revlog values (50, 5, 3, 1, 5000, 1, 3)")
+        card = SimpleNamespace(did=99, odid=7)
+        self.mw.col.get_card = Mock(return_value=card)
+        self.mw.col.decks = SimpleNamespace(name=Mock(return_value="Languages::Spanish"))
+        self.api.upload.return_value = {"conquests": [{"at": 50}]}
+        self.addon.refresh(False)
+        self.finish()
+        known = self.addon.deck_names._state(self.mw.pm.profile, self.api)["conquests"]
+        self.assertEqual({"id": "7", "path": "Languages::Spanish"}, known["50"])
+        card.odid = 0
+        self.mw.col.decks.name.return_value = "Archive::Old"
+        self.addon.refresh(False)
+        self.finish()
+        self.assertEqual({"id": "7", "path": "Languages::Spanish"}, known["50"])
+
     def test_a_refresh_asked_for_during_a_failed_upload_still_runs(self):
         self.addon.refresh(False)
         self.addon.refresh(False)

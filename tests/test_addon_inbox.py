@@ -4,7 +4,6 @@ import ast
 import time
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from addon_loader import ADDON, load_in_package

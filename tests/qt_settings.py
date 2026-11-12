@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QLabel, QPushButton, QScrollArea, QSpinBox, QTimer
+from aqt.qt import QApplication, QCheckBox, QComboBox, QDialog, QGroupBox, QLabel, QPushButton, QScrollArea, QTimer
 
 from addon_loader import load_in_package
 
