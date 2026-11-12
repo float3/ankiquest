@@ -8,8 +8,11 @@ flashcards and confetti. At alpha above 16, the top margin grows from 6px to
 The exact built-in image_gen edit prompt is recorded in `../aki-prompts.json`.
 The input was `static/ankilope/celebrate.png` at server commit
 `2038ae27b34ad4841096764b7e9e405b1e6c0af8`. This is a generated revision, not a
-pixel-identical rescale. The web master, card image and desktop add-on PNG are
-identical copies; Android uses the existing 336px WebP exporter.
+pixel-identical rescale. Every client variant derives from this same master:
+the card PNG stays 512px and the desktop add-on PNG stays 256px, resized with
+Pillow's Lanczos filter and saved as optimized PNGs. Their decoded pixels match
+those resizes exactly; [export hashes](exports.json) record the files. Android
+uses the existing 336px WebP exporter.
 
 [Before/after](review.png) shows the PNGs at 128px and 64px on light and dark
 backgrounds. Both full-size composites were also inspected. See

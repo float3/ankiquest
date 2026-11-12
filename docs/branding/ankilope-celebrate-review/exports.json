@@ -1,0 +1,20 @@
+[
+  {
+    "path": "assets/cards/ankilope-celebrate.png",
+    "size": [
+      512,
+      512
+    ],
+    "sha256": "8bec8fffe46e79f501c726d761a59f4926048bf910b11178c6b9fe188cd82672",
+    "bytes": 213646
+  },
+  {
+    "path": "addon/art/ankilope_celebrate.png",
+    "size": [
+      256,
+      256
+    ],
+    "sha256": "fc3ddf49d828f8a5a4d4cc2d482dee87aea2ded3e692d59bb139ebfd43d41c02",
+    "bytes": 68101
+  }
+]
