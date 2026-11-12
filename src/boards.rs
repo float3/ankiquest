@@ -1050,9 +1050,10 @@ mod tests {
     #[tokio::test]
     async fn a_group_board_lists_its_members_only_for_members() {
         let (app, path) = fixture();
+        // Keep review XP far enough apart that date-dependent quest bonuses cannot reorder them.
         let ana = account(&app, "ana", 4);
-        let bobby = account(&app, "bobby", 6);
-        let carla = account(&app, "carla", 8);
+        let bobby = account(&app, "bobby", 50);
+        let carla = account(&app, "carla", 500);
         app.store
             .lock()
             .unwrap()
@@ -1097,9 +1098,10 @@ mod tests {
     #[tokio::test]
     async fn the_global_board_lists_everyone_but_who_opted_out_or_went_private() {
         let (app, path) = app_with(serde_json::json!({"registration": true}));
+        // These tests assert visibility and rank, not a particular day's quest selection.
         let ana = account(&app, "ana", 4);
-        account(&app, "bobby", 6);
-        let carla = account(&app, "carla", 8);
+        account(&app, "bobby", 50);
+        let carla = account(&app, "carla", 500);
         let assert_summary = |stranger: &serde_json::Value| {
             let fields: BTreeSet<&str> = stranger
                 .as_object()
