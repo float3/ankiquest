@@ -49,6 +49,8 @@ ART = [
     ("aki_leech", "static/aki/leech.png", 336),
     ("aki_sleeping", "static/aki/sleeping.png", 336),
     ("aki_at_risk", "static/aki/at_risk.png", 336),
+    ("aki_backlog", "static/aki/backlog.png", 336),
+    ("ankilope_backlog", "static/ankilope/backlog.png", 336),
     ("aki_nudge", "static/aki/nudge.png", 336),
     ("aki_challenge", "static/aki/challenge.png", 336),
     ("aki_challenge_won", "static/aki/challenge_won.png", 336),
