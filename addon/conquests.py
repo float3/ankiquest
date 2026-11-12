@@ -14,30 +14,39 @@ _TAG = re.compile(r"\{\{([^{}]*)\}\}")
 _PLACEHOLDER = re.compile(r"\[\[type:[\s\S]*?(?:\]\]|$)|\{\{[\s\S]*?(?:\}\}|$)")
 _SPECIAL = {"Tags", "Type", "Deck", "Subdeck", "CardFlag", "Card", "FrontSide"}
 _SHORT_LABEL = 40
+_LABEL_LIMIT = 120
 
 
 def _line(value):
-    return " ".join((value or "").split())[:120]
+    return " ".join((value or "").split())[:_LABEL_LIMIT]
+
+
+def _plain(value):
+    text = _CLOZE.sub(r"\1", _SOUND.sub(" ", _HIDDEN.sub(" ", value or "")))
+    return html.unescape(re.sub(r"<[^>]*>", " ", text))
 
 
 def _text(value):
-    text = _CLOZE.sub(r"\1", _SOUND.sub(" ", _HIDDEN.sub(" ", value or "")))
-    return _line(html.unescape(re.sub(r"<[^>]*>", " ", text)))
+    return _line(_plain(value))
 
 
 def _identifier(value):
     return bool(_ID.fullmatch(value) or _HEX.fullmatch(value) and any(letter.isdigit() for letter in value))
 
 
-def _clean_label(value):
+def _label_plain(value):
     # Strip before truncation, and again after HTML decoding for escaped placeholders.
     source = _PLACEHOLDER.sub(" ", _CLOZE.sub(r"\1", value or ""))
-    return _line(_PLACEHOLDER.sub(" ", _text(source)))
+    return _PLACEHOLDER.sub(" ", _plain(source))
+
+
+def _clean_label(value):
+    return _line(_label_plain(value))
 
 
 def _label_text(value):
     """Keep real words, never template/type placeholders or ID tokens."""
-    text = _clean_label(value)
+    text = _label_plain(value)
     return _line(" ".join(word for word in text.split() if not _identifier(word.strip("()[]{}.,;"))))
 
 
