@@ -19,6 +19,9 @@ Random values are replaced, numbered in order of appearance: device tokens by `e
 | `upload.json` | `POST /api/reviews/{user}` |
 | `share_to_friends.json` | `POST /api/share/{user}` `{"win", "to": "friends"}` |
 | `share_to_link.json` | `POST /api/share/{user}` `{"win", "to": "link"}` |
+| `share_moment.json` | `POST /api/share/{user}` `{"moment": {"conquest"}, "to": {"friends"}, "note"}` |
+| `share_moment_group.json` | `POST /api/share/{user}` `{"moment": {"key"}, "to": {"groups"}}` |
+| `share_undo.json` | `DELETE /api/share/{user}/{win}`, taking a moment sent by hand back |
 | `deck_share.json` | `POST /api/decks/{user}/share` |
 | `react.json` | `POST /api/react/{user}` |
 | `profile.json` | `GET /api/profile/{user}`, owner view with `goal` |

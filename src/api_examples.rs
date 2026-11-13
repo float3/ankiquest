@@ -151,8 +151,11 @@ impl Fixture {
             .unwrap();
         drop(stmt);
         drop(store);
+        // Links made since the last call get the next numbers.
         for token in tokens {
-            self.keep_secret(&Value::from(token), "example-link");
+            if !self.secrets.iter().any(|(secret, _)| *secret == token) {
+                self.keep_secret(&Value::from(token), "example-link");
+            }
         }
     }
 
@@ -747,6 +750,32 @@ async fn examples_match_the_handlers() {
         .await,
     ));
 
+    // Any moment can go to chosen friends with a note, and be taken back for a day.
+    let shared = f
+        .call(
+            "POST",
+            "/api/share/hill",
+            Some("hill-secret"),
+            json!({
+                "moment": {"conquest": conquered},
+                "to": {"friends": ["cerro"]},
+                "note": "Took me a month!"
+            }),
+        )
+        .await;
+    let shared_win = shared["win"].as_i64().unwrap();
+    examples.push(("share_moment", shared));
+    examples.push((
+        "share_undo",
+        f.call(
+            "DELETE",
+            &format!("/api/share/hill/{shared_win}"),
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+
     // The global leaderboard: profiles are public and listed by default, but Ana made hers
     // private. With no friends yet she sees public standings and her own full row, which nobody
     // else sees until she turns the global leaderboard on. Then Hill sees her there as a
@@ -831,6 +860,7 @@ async fn examples_match_the_handlers() {
     let invite = created["groups"][0]["invite"].clone();
     f.keep_secret(&invite, "example-invite");
     let invite = invite.as_str().unwrap().to_string();
+    let club = created["groups"][0]["id"].clone();
     examples.push(("group_create", created));
     f.call(
         "POST",
@@ -874,6 +904,19 @@ async fn examples_match_the_handlers() {
         )
         .await,
     ));
+
+    // A group's members, here Ana, get a moment named by its event key.
+    examples.push((
+        "share_moment_group",
+        f.call(
+            "POST",
+            "/api/share/hill",
+            Some("hill-secret"),
+            json!({"moment": {"key": "level:3"}, "to": {"groups": [club]}}),
+        )
+        .await,
+    ));
+    f.remember_links();
 
     let update = std::env::var_os("UPDATE_API_EXAMPLES").is_some_and(|v| v == "1");
     let dir = examples_dir();

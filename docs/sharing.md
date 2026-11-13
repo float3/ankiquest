@@ -180,6 +180,48 @@ each win reaches each friend once.
 
 `DELETE /api/wins/{user}/{id}/link` revokes the link (204, or 404 for someone else's win). The page and the image then answer 404.
 
+## Sending a moment to chosen friends
+
+`POST /api/share/{user}` (owner only) also takes one body for every moment that is a win:
+
+```json
+{ "moment": { "conquest": 1793183400000 }, "to": { "friends": ["cerro"], "groups": [3] }, "note": "Took me a month!" }
+```
+
+- `moment` is one of:
+  - `{ "win": 17 }`: a win by id.
+  - `{ "key": "streak:20000:30" }`: a win by its event key, the `moment` of an inbox row. Records,
+    streak milestones, daily goals, levels, achievements, places and challenges are all wins.
+  - `{ "notification": 42 }`: one of the player's own shareable rows that has a `win`. A row from
+    before wins were kept has none and is `409`; share it with `{ "notification" }` alone.
+  - `{ "conquest": at }`: a conquered card. Its win is kept now if the server announced it before
+    wins were kept; one the worker has not announced yet is `409`, so ask again shortly.
+- `to` is `"circle"`, everyone in the player's circle, or `{ "friends": [...], "groups": [...] }`.
+  Friends must be in the player's circle and groups ones the player is in; a group reaches its
+  members other than the player. At most 100 friends and 20 groups, none twice, and not both
+  empty. Anything else is `400`.
+- `note` is optional: one line of at most 140 characters, with runs of spaces and line breaks
+  made one space. A note with nothing printable is `400`.
+
+It answers `{ "recipients": n, "link": { "url", "image" }, "win": 17, "undo_until": ms }`.
+`recipients` counts those who got it now. Each win reaches each person once, whoever sent it there
+and however it was addressed, and people who muted or unsubscribed from the player are skipped.
+`undo_until` is left out when nobody got it. A missing moment is `404`.
+
+Recipients get the usual `share` row (see above) with `"note"` when the player wrote one. The link
+is made as for `{ "win", "to": "friends" }`, which now does the same as `"to": "circle"` and
+answers as before.
+
+`DELETE /api/share/{user}/{win}` takes a win sent by hand back. Rows sent within the last day that
+their recipient has not read, cheered or answered leave their activity, and those people can be
+sent it again; other rows stay, and a push already delivered stays on their phone. Wins sent by an
+`auto` policy are not taken back. It answers `{ "retracted": n }`, `0` when there was nothing to
+take back, or `409` when every row was sent more than a day ago. Someone else's win is `404`.
+
+Telling friends about a conquest (`/api/conquests/{user}/{at}/tell`) and a finished deck
+(`/api/decks/{user}/share`) keep working as described here. Clients that see `share_moments` in
+`/api/capabilities` use this body instead for conquests.
+
 ### Conquered cards in the player's words
 
 A `conquered` win reads as the player's own news once it leaves them: on its card, its page, the

@@ -797,67 +797,14 @@ pub fn routes() -> Router<Arc<App>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{cleanup, json_response, route};
-    use axum::body::{Body, to_bytes};
-    use axum::extract::connect_info::MockConnectInfo;
-    use axum::http::Request;
-
-    use std::net::SocketAddr;
+    use crate::test_support::{call, cleanup, sign_up};
     use std::path::PathBuf;
-
-    use tower::ServiceExt;
 
     fn fixture() -> (Arc<App>, PathBuf) {
         crate::test_support::app_with(serde_json::json!({
             "registration": true,
             "users": {"alice": {"token": "alice-token"}, "bob": {"token": "bob-token"}}
         }))
-    }
-
-    async fn call(
-        app: &Arc<App>,
-        method: &str,
-        path: &str,
-        token: &str,
-        body: serde_json::Value,
-    ) -> (StatusCode, serde_json::Value) {
-        let request = Request::builder()
-            .method(method)
-            .uri(path)
-            .header("authorization", format!("Bearer {token}"))
-            .header("content-type", "application/json")
-            .body(Body::from(if method == "GET" {
-                String::new()
-            } else {
-                body.to_string()
-            }))
-            .unwrap();
-        json_response(route(app, request).await).await
-    }
-
-    async fn sign_up(app: &Arc<App>, user: &str) -> String {
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/accounts")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::json!({"user": user, "password": "long enough pw"}).to_string(),
-            ))
-            .unwrap();
-        let response = crate::router(app.clone())
-            .layer(MockConnectInfo(
-                format!("192.0.2.{}:40000", user.len())
-                    .parse::<SocketAddr>()
-                    .unwrap(),
-            ))
-            .oneshot(request)
-            .await
-            .unwrap();
-        let bytes = to_bytes(response.into_body(), 1 << 20).await.unwrap();
-        serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["token"]
-            .as_str()
-            .unwrap()
-            .to_string()
     }
 
     fn circle(app: &App, user: &str) -> Vec<String> {

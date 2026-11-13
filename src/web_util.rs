@@ -159,6 +159,17 @@ pub(crate) fn valid_title(title: &str, max: usize) -> bool {
     !title.is_empty() && title.chars().count() <= max && !title.chars().any(char::is_control)
 }
 
+/// `raw` as one line of plain text, its runs of spaces and control characters made one space:
+/// `None` when nothing printable is left or it is longer than `max` characters.
+pub(crate) fn clean_line(raw: &str, max: usize) -> Option<String> {
+    let line = raw
+        .split(|c: char| c.is_whitespace() || c.is_control())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!line.is_empty() && line.chars().count() <= max).then_some(line)
+}
+
 /// A typed user name as it is stored: trimmed and lowercased.
 pub(crate) fn normalize_user(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
