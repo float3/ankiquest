@@ -61,7 +61,7 @@ Mannered prose substitutes metaphor and flourish for direct statement. Instead o
 
 ## This repository
 
-- **Layout.** `src/` and `crates/`: the Rust server. `web/`: TypeScript for the pages in `static/`. `addon/`: the Anki desktop add-on, Python because Anki requires it. `tests/`: add-on tests (Python) and web tests (TypeScript). `tools/export_android_art.py` is the last Python tool; port it to Rust the next time it changes.
+- **Layout.** `src/` and `crates/`: the Rust server. `web/`: TypeScript for the pages in `static/`. `addon/`: the Anki desktop add-on, Python because Anki requires it. `tests/`: add-on tests (Python) and web tests (TypeScript). `crates/xtask` holds the repository tools (`cargo run -p ankiquest-xtask -- <command>`). `.github/scripts/package-addon.py` is the last Python tool; port it to `xtask` the next time it changes.
 - **API examples are a contract.** `docs/api/examples/*.json` and `tests/fixtures/*.json` are copied into the Android app at a pinned commit (float3/AnkiQuest-Android#203). Adding an example is fine: Android picks it up through its bump PR. Never remove or reshape an example released apps read (#230); retire it only after Android stops reading it. Document API changes in `docs/mobile-api.md`.
 - **Released apps talk to the deployed server.** Keep old endpoints and fields working until no supported client uses them.
 - **Deployment** is the NixOS module in `flake.nix`, used from a separate NixOS configuration. Secrets are files on the hosts (passed with systemd `LoadCredential`), never values in this repository.

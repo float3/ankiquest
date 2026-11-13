@@ -19,7 +19,7 @@ exact public paths bypass sign-in; member APIs and unknown paths remain
 protected. the desktop face is packaged locally in `addon/aki_face.png` so
 branding works offline.
 
-the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi`. after changing a PNG in `static/`, run `python tools/export_android_art.py <android-checkout>` (Pillow) to rewrite them, and `--check` to confirm every drawable exists at its size.
+the Android app ships WebP copies of the Aki and Ankilope art in `drawable-nodpi`. after changing a PNG in `static/`, run `cargo run -p ankiquest-xtask -- export-android-art <android-checkout>` to rewrite them, and `--check` to confirm every drawable exists at its size.
 
 The [mascot source plan](mascot-source.md) moves `aki-prompts.json` with the
 PNG masters to `art/mascots/aki/` and verifies Android's generated WebPs against
@@ -97,7 +97,8 @@ distinct positive poses. The [podium review sheet](podium-review.png) shows
 all six at 128 and 64 pixels on light and dark backgrounds. Each 1254px
 transparent master was also reviewed at native size on both backgrounds.
 Exact generation prompts and references are recorded in `aki-prompts.json`.
-Android exports are 336px for the 112dp moment-card illustration.
+Android exports are 336px for the 112dp moment-card illustration; poses the
+big streak widget shows are 1024px (`crates/xtask/src/art.rs`).
 
 `aki-prompts.json` records the prompts for new and replaced art. Prompts for
 earlier poses without a generation record were reconstructed from the shipped

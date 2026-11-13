@@ -1,0 +1,20 @@
+[package]
+name = "ankiquest-xtask"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "AGPL-3.0-only"
+description = "Repository tools: the Android API contract guard and the Android art exporter"
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+serde_json = "1"
+webp = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
