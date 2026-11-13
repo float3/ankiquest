@@ -58,12 +58,7 @@ pub(crate) fn label_of(conn: &Connection, user: &str, at: i64) -> rusqlite::Resu
 
 /// One line of plain text, or `None` when nothing printable is left.
 fn clean_label(raw: &str) -> Option<String> {
-    let label = raw
-        .split(|c: char| c.is_whitespace() || c.is_control())
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    (!label.is_empty() && label.chars().count() <= MAX_LABEL).then_some(label)
+    crate::web_util::clean_line(raw, MAX_LABEL)
 }
 
 #[derive(Deserialize)]
@@ -221,6 +216,28 @@ fn own_win(
         &event.body,
         &serde_json::json!({}),
     )?)
+}
+
+/// Where the win for a conquered card stands, for sharing it as a moment.
+pub(crate) enum ConquestWin {
+    /// No such conquest of the player's.
+    Missing,
+    /// Not announced yet; the worker keeps its win shortly.
+    Pending,
+    Kept(i64),
+}
+
+/// The win for the card `user` conquered at `at`, kept now when it was announced before wins
+/// were (see [`own_win`]).
+pub(crate) fn conquest_win(app: &App, user: &str, at: i64) -> Result<ConquestWin, Error> {
+    let Some(conquest) = find(app, user, at) else {
+        return Ok(ConquestWin::Missing);
+    };
+    let store = app.store.lock().unwrap();
+    Ok(match own_win(&store, user, &conquest)? {
+        Some(id) => ConquestWin::Kept(id),
+        None => ConquestWin::Pending,
+    })
 }
 
 /// Sends the conquest to each friend's activity, once, however often it is asked.

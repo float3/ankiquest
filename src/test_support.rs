@@ -5,7 +5,7 @@ pub(crate) use crate::config::Config;
 pub(crate) use crate::game::{self, Clock, ClockHistory, Review, Week};
 pub(crate) use crate::store::Store;
 use crate::study::{Upload, UploadResponse, upload};
-pub(crate) use crate::{access, decks, notifications};
+pub(crate) use crate::{access, decks};
 pub(crate) use axum::Json;
 pub(crate) use axum::extract::{Path as UrlPath, State};
 pub(crate) use axum::http::{HeaderMap, StatusCode, header};
@@ -13,7 +13,6 @@ pub(crate) use std::collections::HashMap;
 pub(crate) use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) use std::sync::{Arc, Mutex, RwLock};
-pub(crate) use std::time::Duration;
 
 /// A store in a new temporary directory; [`cleanup`] removes it.
 pub(crate) fn temporary_store() -> (Store, PathBuf) {
@@ -102,6 +101,44 @@ pub(crate) async fn json_response(
         status,
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
     )
+}
+
+/// `method` on `path` through the whole router with `token`, and the JSON it answers.
+pub(crate) async fn call(
+    app: &Arc<App>,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(path)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(if method == "GET" {
+            String::new()
+        } else {
+            body.to_string()
+        }))
+        .unwrap();
+    json_response(route(app, request).await).await
+}
+
+/// Signs `user` up as an account, from an address of their own so sign-up limits stay out of
+/// the way, and returns their token. Needs `"registration": true`.
+pub(crate) async fn sign_up(app: &Arc<App>, user: &str) -> String {
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/accounts")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            serde_json::json!({"user": user, "password": "long enough pw"}).to_string(),
+        ))
+        .unwrap();
+    let peer = format!("192.0.2.{}:40000", user.len());
+    let (_, body) = json_response(route_from(app, request, &peer).await).await;
+    body["token"].as_str().unwrap().to_string()
 }
 
 pub(crate) fn headers(user: &str) -> HeaderMap {

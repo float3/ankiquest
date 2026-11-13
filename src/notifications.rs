@@ -123,6 +123,9 @@ pub struct Notification {
     /// so clients can tell which moment they already showed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub moment: Option<String>,
+    /// What the sender wrote with a moment shared by hand.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,6 +189,7 @@ fn notification(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notification> {
         share_title: None,
         share_body: None,
         moment: row.get(18)?,
+        note: row.get(19)?,
     })
 }
 
@@ -197,7 +201,7 @@ const NOTICE_COLUMNS: &str = concat!(
     ",n.reply_to_title,n.reply_to_body,n.topic,n.win_id,
  exists(select 1 from reactions r where r.reactor=n.recipient and r.notification=n.id),
  (select w.link_token from wins w where w.id=n.win_id),n.quiet,
- (select w.key from wins w where w.id=n.win_id)"
+ (select w.key from wins w where w.id=n.win_id),n.note"
 );
 /// A notification written by the server itself: a nudge, or a message sent by hand.
 pub struct Outgoing<'a> {
@@ -451,7 +455,7 @@ impl Store {
                 |row| {
                     Ok(Sent {
                         notice: notification(row)?,
-                        recipient: row.get(19)?,
+                        recipient: row.get(20)?,
                     })
                 },
             )?
@@ -731,14 +735,14 @@ impl Store {
                      select recipient, max(retry_at) as last_retry from notifications
                      where push_attempts > 0 group by recipient
                  )
-                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, (select w.key from wins w where w.id = ready.win_id), ready.recipient
+                 select id, title, body, day, created_at / 1000, sender, replied, kind, read_at / 1000, challenge_id, 0, reply_to_title, reply_to_body, topic, win_id, 0, null, quiet, (select w.key from wins w where w.id = ready.win_id), note, ready.recipient
                  from ready left join attempted using (recipient)
                  order by turn, coalesce(last_retry, 0), retry_at, id limit 100",
                 completion_visible_sql("notifications", "notifications.recipient")
             ))?;
             stmt.query_map(params![now_ms, now_ms - INBOX_AGE_MS], |r| {
                 Ok(Delivery {
-                    user: r.get(19)?,
+                    user: r.get(20)?,
                     notification: notification(r)?,
                 })
             })?

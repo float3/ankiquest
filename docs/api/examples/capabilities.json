@@ -11,6 +11,7 @@
     "reactions",
     "review_offsets",
     "share_cards",
+    "share_moments",
     "wins"
   ],
   "public_url": "https://anki.example.test",

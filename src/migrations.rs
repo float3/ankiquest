@@ -16,6 +16,7 @@ const STEPS: &[Step] = &[
     global_leaderboard,
     global_leaderboard_choice,
     adopted_device_names,
+    share_notes,
 ];
 
 /// Brings the database up to the latest step, then turns foreign keys on for the connection.
@@ -190,6 +191,11 @@ fn adopted_device_names(conn: &Connection) -> Result<(), Error> {
         [],
     )?;
     Ok(())
+}
+
+/// The sender's own words with a moment shared by hand; null for every other row.
+fn share_notes(conn: &Connection) -> Result<(), Error> {
+    add_column(conn, "notifications", "note", "text")
 }
 
 #[cfg(test)]

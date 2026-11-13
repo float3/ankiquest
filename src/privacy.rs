@@ -287,6 +287,7 @@ const NOT_NAMES: &[&str] = &[
     "languages.language",
     "notifications.body",
     "notifications.kind",
+    "notifications.note",
     "notifications.reply_to_body",
     "notifications.reply_to_title",
     "notifications.title",
