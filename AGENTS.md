@@ -32,6 +32,7 @@ Write new code in Rust, or TypeScript for the web, when the platform allows it. 
 - Keep members private. Widening visibility (private to internal or public) needs the owner's explicit approval; link to it in the PR. Never claim an approval you can't link.
 - Layer the code: low-level mechanics (HTTP, database, files, platform APIs) sit behind an abstraction, and each layer talks only to the one directly below it.
 - Prefer targeted edits over rewriting whole files.
+- Keep all state explicit. Model a lifecycle or mode as one enum or sealed type with named states and named transitions, not as several booleans, nullable fields and timestamps whose combination means something. Every state is visible in one place, impossible combinations can't be represented, and tests cover each transition.
 
 ## Git and pull requests
 
@@ -39,6 +40,8 @@ Write new code in Rust, or TypeScript for the web, when the platform allows it. 
 - Never push to the default branch; open a pull request and merge only when every check is green on its final commit.
 - Commit messages: subject in the imperative, capitalised, at most 50 characters (72 hard limit), no full stop; a blank line; a body wrapped at 72 characters that explains what and why, not how.
 - Disclose AI help with an `Assisted-by: <tool and version>` trailer.
+- Never link to an agent session (such as `claude.ai/code/session_…`) in commits, pull requests, issues or comments.
+- No emoji in commits, pull requests, issues or comments.
 - Never commit secrets, tokens or personal data. Secrets live on the servers, outside the repositories.
 
 ## Desktop and Android parity
