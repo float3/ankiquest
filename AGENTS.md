@@ -41,6 +41,15 @@ Write new code in Rust, or TypeScript for the web, when the platform allows it. 
 - Disclose AI help with an `Assisted-by: <tool and version>` trailer.
 - Never commit secrets, tokens or personal data. Secrets live on the servers, outside the repositories.
 
+## Desktop and Android parity
+
+AnkiQuest has two clients: the Android app ([float3/AnkiQuest-Android](https://github.com/float3/AnkiQuest-Android)) and the Anki desktop add-on (`addon/` in [float3/ankiquest](https://github.com/float3/ankiquest)). A player should get the same AnkiQuest on both.
+
+- A user-facing feature or behaviour change lands on both clients, unless the platform can't do it (home-screen widgets, for example). Do both in one go when you can. Otherwise open an issue in the other repository, labelled `parity`, and link it from the PR.
+- Rules both clients compute (streak verdicts, heatmap, card labels, deck names) are defined once, as cases in `tests/fixtures/*.json` in float3/ankiquest. Both clients test against the same cases. Change the fixture first, then both implementations.
+- Use the same names, wording and order for the same thing on both clients.
+- When you find a gap between the clients, open a `parity` issue for it.
+
 ## Writing
 
 Write comments, commit messages, issues and PR descriptions with as few words as needed. No praise, no filler, no superlatives. Em dashes take no spaces around them.

@@ -1,3 +1,11 @@
+<a href="https://github.com/float3/ankiquest/releases/latest"><img src="https://img.shields.io/github/v/release/float3/ankiquest" alt="release"/></a>
+<a href="https://ankiweb.net/shared/info/414948448"><img src="https://img.shields.io/badge/AnkiWeb-414948448-2a6db0" alt="AnkiWeb add-on"/></a>
+<a href="https://github.com/float3/ankiquest/actions/workflows/ci.yml"><img src="https://github.com/float3/ankiquest/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
+<a href="https://github.com/float3/ankiquest/actions/workflows/addon.yml"><img src="https://github.com/float3/ankiquest/actions/workflows/addon.yml/badge.svg?branch=master" alt="Desktop add-on"/></a>
+<a href="https://github.com/float3/ankiquest/commits/master"><img src="https://img.shields.io/github/commit-activity/m/float3/ankiquest" alt="commit-activity"/></a>
+<a href="https://github.com/float3/ankiquest/graphs/contributors"><img src="https://img.shields.io/github/contributors/float3/ankiquest" alt="contributors"/></a>
+<a href="https://github.com/float3/ankiquest/blob/master/LICENSE"><img src="https://img.shields.io/github/license/float3/ankiquest" alt="license"/></a>
+
 # AnkiQuest
 
 XP, streaks, daily quests, friends and leaderboards for Anki. Clients send review history without card content. Sharing a conquered card label or a deck copy is an explicit choice.
