@@ -28,15 +28,18 @@ jobs:
           python3 .github/scripts/package-addon.py --output ankiquest.ankiaddon \
             --ref "$GITHUB_REF" --metadata addon-nightly.json
           echo "release=$(jq -r .release addon-nightly.json)" >> "$GITHUB_OUTPUT"
+          # The same build for the AnkiWeb listing: its package ID and conflicts differ.
+          python3 .github/scripts/package-addon.py --ankiweb --output ankiquest-ankiweb.ankiaddon \
+            --ref "$GITHUB_REF"
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/addon-')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" ankiquest.ankiaddon \
+          gh release create "$GITHUB_REF_NAME" ankiquest.ankiaddon ankiquest-ankiweb.ankiaddon \
             --title "Desktop add-on ${GITHUB_REF_NAME#addon-}" \
-            --notes "Double-click ankiquest.ankiaddon or choose Tools → Add-ons → Install from file, then restart Anki. Sign in or create an account when AnkiQuest asks, or later from Tools → AnkiQuest: sign in or create account. Passwords are sent only over HTTPS unless the server is on your local network. Switch account, Sign out and Manual connection (server, player and token) are in Tools → AnkiQuest settings."
+            --notes "Double-click ankiquest.ankiaddon or choose Tools → Add-ons → Install from file, then restart Anki. Sign in or create an account when AnkiQuest asks, or later from Tools → AnkiQuest: sign in or create account. Passwords are sent only over HTTPS unless the server is on your local network. Switch account, Sign out and Manual connection (server, player and token) are in Tools → AnkiQuest settings. ankiquest-ankiweb.ankiaddon is the upload for the AnkiWeb listing; do not install it next to ankiquest.ankiaddon."
 
       - name: Publish nightly
         if: github.ref == 'refs/heads/master'
@@ -45,7 +48,7 @@ jobs:
           RELEASE: ${{ steps.version.outputs.release }}
         run: |
           gh release delete addon-nightly --yes --cleanup-tag || true
-          gh release create addon-nightly ankiquest.ankiaddon addon-nightly.json \
+          gh release create addon-nightly ankiquest.ankiaddon ankiquest-ankiweb.ankiaddon addon-nightly.json \
             --prerelease --latest=false --target "$GITHUB_SHA" \
             --title "Desktop add-on nightly" \
             --notes "Built from $GITHUB_SHA after addon-$RELEASE. Untested: choose the nightly update channel in ankiquest settings to get these."
