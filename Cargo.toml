@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/float3/ankiquest"
 
 [workspace]
-members = [".", "crates/i18n", "crates/i18n-wasm"]
+members = [".", "crates/i18n", "crates/i18n-wasm", "crates/xtask"]
 
 [dependencies]
 ankiquest-i18n = { path = "crates/i18n" }

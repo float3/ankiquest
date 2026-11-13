@@ -17,19 +17,20 @@ permissions:
 jobs:
   android-contract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Test the compatibility guard
-        run: python3 -m unittest discover -s tests -p test_android_contract.py -v
+        run: cargo test -p ankiquest-xtask contract
       - name: Read Android's public consumed-example catalog
         run: |
           git clone --depth 1 --filter=blob:none --sparse --branch main https://github.com/float3/AnkiQuest-Android.git android-client
           git -C android-client sparse-checkout set --no-cone '/AnkiDroid/src/test/resources/ankiquest-api/' '/AnkiDroid/src/test/resources/ankiquest-server.sha'
       - name: Preserve Android's consumed API shapes
-        run: python3 .github/scripts/android-contract.py --android-resources android-client/AnkiDroid/src/test/resources
+        run: cargo run -p ankiquest-xtask -- android-contract --android-resources android-client/AnkiDroid/src/test/resources
 
   web:
     runs-on: ubuntu-24.04

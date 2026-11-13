@@ -2,8 +2,8 @@
 
 The `android-contract` CI job compares this server's API examples with the
 examples consumed by `float3/AnkiQuest-Android@main`. It makes a sparse public
-checkout without a personal access token and runs a plain Python guard. It
-does not run Android code or Gradle.
+checkout without a personal access token and runs a small Rust guard
+(`crates/xtask`). It does not run Android code or Gradle.
 
 Android owns the baseline in `AnkiDroid/src/test/resources/`:
 
@@ -40,8 +40,8 @@ disabling the check.
 Run the guard locally after checking out Android:
 
 ```sh
-python3 -m unittest discover -s tests -p test_android_contract.py -v
-python3 .github/scripts/android-contract.py \
+cargo test -p ankiquest-xtask contract
+cargo run -p ankiquest-xtask -- android-contract \
   --android-resources ../AnkiQuest-Android/AnkiDroid/src/test/resources
 ```
 
