@@ -18,11 +18,18 @@ const DRAWABLES: &str = "AnkiDroid/src/main/res/drawable-nodpi";
 /// WebP quality for most drawables.
 const QUALITY: f32 = 88.0;
 
+/// WebP quality for the streak widget poses, which are shown large.
+const WIDGET_QUALITY: f32 = 95.0;
+
 /// Alpha plane quality; edges must stay clean on any background.
 const ALPHA_QUALITY: i32 = 100;
 
 /// Slowest, smallest libwebp encoding method.
 const METHOD: i32 = 6;
+
+/// Large and huge streak widgets show the pose full-width, up to about
+/// 1100 px (AnkiQuest-Android#168), so 336 px poses were upscaled.
+const WIDGET: u32 = 1024;
 
 /// One drawable: name, master PNG, square size and WebP quality.
 struct Art {
@@ -42,11 +49,21 @@ const fn art(name: &'static str, source: &'static str, size: u32) -> Art {
     }
 }
 
+/// A pose the streak widget shows.
+const fn widget(name: &'static str, source: &'static str) -> Art {
+    Art {
+        name,
+        source,
+        size: WIDGET,
+        quality: WIDGET_QUALITY,
+    }
+}
+
 const ART: &[Art] = &[
-    art("aki_face", "static/aki/face.png", 432),
+    widget("aki_face", "static/aki/face.png"),
     art("ankilope_face", "static/ankilope/face.png", 192),
     art("aki_celebrate", "static/aki/celebrate.png", 336),
-    art("aki_streak", "static/aki/streak.png", 336),
+    widget("aki_streak", "static/aki/streak.png"),
     art("ankilope_celebrate", "static/ankilope/celebrate.png", 336),
     art("ankilope_study", "static/ankilope/study.png", 336),
     art("aki_welcome", "static/aki/welcome.png", 240),
@@ -59,24 +76,24 @@ const ART: &[Art] = &[
     art("aki_icon_worried", "static/aki/icon_worried.png", 432),
     art("aki_icon_frozen", "static/aki/icon_frozen.png", 432),
     art("aki_icon_sleepy", "static/aki/icon_sleepy.png", 432),
-    art("aki_streak_hot", "static/aki/streak_hot.png", 336),
-    art("aki_streak_blazing", "static/aki/streak_blazing.png", 336),
-    art("aki_streak_legend", "static/aki/streak_legend.png", 336),
+    widget("aki_streak_hot", "static/aki/streak_hot.png"),
+    widget("aki_streak_blazing", "static/aki/streak_blazing.png"),
+    widget("aki_streak_legend", "static/aki/streak_legend.png"),
     art(
         "aki_streak_milestone",
         "static/aki/streak_milestone.png",
         336,
     ),
-    art("aki_freeze_used", "static/aki/freeze_used.png", 336),
-    art("aki_comeback", "static/aki/comeback.png", 336),
+    widget("aki_freeze_used", "static/aki/freeze_used.png"),
+    widget("aki_comeback", "static/aki/comeback.png"),
     art("aki_minimum", "static/aki/minimum.png", 336),
     art("aki_goal", "static/aki/goal.png", 336),
     art("aki_achievement", "static/aki/achievement.png", 336),
     art("aki_level_up", "static/aki/level_up.png", 336),
     art("aki_deck_conquered", "static/aki/deck_conquered.png", 336),
     art("aki_leech", "static/aki/leech.png", 336),
-    art("aki_sleeping", "static/aki/sleeping.png", 336),
-    art("aki_at_risk", "static/aki/at_risk.png", 336),
+    widget("aki_sleeping", "static/aki/sleeping.png"),
+    widget("aki_at_risk", "static/aki/at_risk.png"),
     art("aki_backlog", "static/aki/backlog.png", 336),
     art("ankilope_backlog", "static/ankilope/backlog.png", 336),
     art("aki_place_1", "static/aki/place_1.png", 336),
@@ -292,6 +309,26 @@ mod tests {
         assert_eq!((336, 336), target(1254, 1254, 336));
         assert_eq!((200, 100), target(200, 100, 336));
         assert_eq!((336, 168), target(1254, 627, 336));
+    }
+
+    #[test]
+    fn widget_poses_are_large() {
+        // Every pose the streak widget shows, and nothing else.
+        let poses = [
+            "aki_face",
+            "aki_streak",
+            "aki_streak_hot",
+            "aki_streak_blazing",
+            "aki_streak_legend",
+            "aki_freeze_used",
+            "aki_comeback",
+            "aki_sleeping",
+            "aki_at_risk",
+        ];
+        let large: Vec<_> = ART.iter().filter(|art| art.size == WIDGET).collect();
+        let names: Vec<_> = large.iter().map(|art| art.name).collect();
+        assert_eq!(poses.to_vec(), names);
+        assert!(large.iter().all(|art| art.quality == WIDGET_QUALITY));
     }
 
     #[test]
