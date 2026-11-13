@@ -672,6 +672,10 @@ mod tests {
 
     #[test]
     fn a_tick_turns_moments_into_wins_and_sends_automatic_ones_as_one_digest() {
+        // Keep the fixture's last ten minutes within one study day.
+        let study_time = 1_793_183_400_000;
+        crate::app::fix_now_ms(Some(study_time));
+
         let (app, path) = fixture();
         with_reviews(&app, "hill", 1);
         tick(&app).unwrap();
@@ -736,10 +740,15 @@ mod tests {
         );
         drop(store);
         cleanup(app, path);
+        crate::app::fix_now_ms(None);
     }
 
     #[test]
     fn one_players_failure_does_not_stop_the_others_or_delivery() {
+        // Keep the fixture's last ten minutes within one study day.
+        let study_time = 1_793_183_400_000;
+        crate::app::fix_now_ms(Some(study_time));
+
         let (mut app, path) = fixture();
         let (base, server) = local_push(200);
         let config = &mut Arc::get_mut(&mut app).unwrap().config;
@@ -773,6 +782,7 @@ mod tests {
         };
         assert!(seen("cerro") > 0 && seen("friend") > 0);
         cleanup(app, path);
+        crate::app::fix_now_ms(None);
     }
 
     async fn health_of(app: &Arc<App>) -> (StatusCode, serde_json::Value) {
