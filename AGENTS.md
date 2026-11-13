@@ -39,6 +39,7 @@ Write new code in Rust, or TypeScript for the web, when the platform allows it. 
 - Never push to the default branch; open a pull request and merge only when every check is green on its final commit.
 - Commit messages: subject in the imperative, capitalised, at most 50 characters (72 hard limit), no full stop; a blank line; a body wrapped at 72 characters that explains what and why, not how.
 - Disclose AI help with an `Assisted-by: <tool and version>` trailer.
+- Never link to an agent session (such as `claude.ai/code/session_…`) in commits, pull requests, issues or comments.
 - Never commit secrets, tokens or personal data. Secrets live on the servers, outside the repositories.
 
 ## Desktop and Android parity
