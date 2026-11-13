@@ -97,7 +97,8 @@ distinct positive poses. The [podium review sheet](podium-review.png) shows
 all six at 128 and 64 pixels on light and dark backgrounds. Each 1254px
 transparent master was also reviewed at native size on both backgrounds.
 Exact generation prompts and references are recorded in `aki-prompts.json`.
-Android exports are 336px for the 112dp moment-card illustration.
+Android exports are 336px for the 112dp moment-card illustration; poses the
+big streak widget shows are 1024px (`crates/xtask/src/art.rs`).
 
 `aki-prompts.json` records the prompts for new and replaced art. Prompts for
 earlier poses without a generation record were reconstructed from the shipped

@@ -28,7 +28,7 @@ const ALPHA_QUALITY: i32 = 100;
 const METHOD: i32 = 6;
 
 /// Large and huge streak widgets show the pose full-width, up to about
-/// 1100 px (AnkiQuest-Android#168), so 336 px poses were upscaled.
+/// 1100 px (AnkiQuest-Android#168), so smaller poses were upscaled.
 const WIDGET: u32 = 1024;
 
 /// One drawable: name, master PNG, square size and WebP quality.
@@ -49,7 +49,7 @@ const fn art(name: &'static str, source: &'static str, size: u32) -> Art {
     }
 }
 
-/// A pose the streak widget shows.
+/// A pose the big streak widget shows, for either companion.
 const fn widget(name: &'static str, source: &'static str) -> Art {
     Art {
         name,
@@ -61,15 +61,15 @@ const fn widget(name: &'static str, source: &'static str) -> Art {
 
 const ART: &[Art] = &[
     widget("aki_face", "static/aki/face.png"),
-    art("ankilope_face", "static/ankilope/face.png", 192),
-    art("aki_celebrate", "static/aki/celebrate.png", 336),
+    widget("ankilope_face", "static/ankilope/face.png"),
+    widget("aki_celebrate", "static/aki/celebrate.png"),
     widget("aki_streak", "static/aki/streak.png"),
-    art("ankilope_celebrate", "static/ankilope/celebrate.png", 336),
-    art("ankilope_study", "static/ankilope/study.png", 336),
-    art("aki_welcome", "static/aki/welcome.png", 240),
-    art("aki_review", "static/aki/review.png", 240),
-    art("aki_freeze", "static/aki/freeze.png", 240),
-    art("ankilope_welcome", "static/ankilope/welcome.png", 240),
+    widget("ankilope_celebrate", "static/ankilope/celebrate.png"),
+    widget("ankilope_study", "static/ankilope/study.png"),
+    widget("aki_welcome", "static/aki/welcome.png"),
+    widget("aki_review", "static/aki/review.png"),
+    widget("aki_freeze", "static/aki/freeze.png"),
+    widget("ankilope_welcome", "static/ankilope/welcome.png"),
     art("aki_winner", "static/aki/winner.png", 168),
     // Moment art from #88: app icon moods, streak widget, celebrations.
     art("aki_icon_happy", "static/aki/icon_happy.png", 432),
@@ -79,15 +79,11 @@ const ART: &[Art] = &[
     widget("aki_streak_hot", "static/aki/streak_hot.png"),
     widget("aki_streak_blazing", "static/aki/streak_blazing.png"),
     widget("aki_streak_legend", "static/aki/streak_legend.png"),
-    art(
-        "aki_streak_milestone",
-        "static/aki/streak_milestone.png",
-        336,
-    ),
+    widget("aki_streak_milestone", "static/aki/streak_milestone.png"),
     widget("aki_freeze_used", "static/aki/freeze_used.png"),
     widget("aki_comeback", "static/aki/comeback.png"),
-    art("aki_minimum", "static/aki/minimum.png", 336),
-    art("aki_goal", "static/aki/goal.png", 336),
+    widget("aki_minimum", "static/aki/minimum.png"),
+    widget("aki_goal", "static/aki/goal.png"),
     art("aki_achievement", "static/aki/achievement.png", 336),
     art("aki_level_up", "static/aki/level_up.png", 336),
     art("aki_deck_conquered", "static/aki/deck_conquered.png", 336),
@@ -313,15 +309,27 @@ mod tests {
 
     #[test]
     fn widget_poses_are_large() {
-        // Every pose the streak widget shows, and nothing else.
+        // Every pose the big streak widget shows, with either companion
+        // (AnkiquestStreakWidget.poses, AnkiquestCompanion), and nothing else.
         let poses = [
             "aki_face",
+            "ankilope_face",
+            "aki_celebrate",
             "aki_streak",
+            "ankilope_celebrate",
+            "ankilope_study",
+            "aki_welcome",
+            "aki_review",
+            "aki_freeze",
+            "ankilope_welcome",
             "aki_streak_hot",
             "aki_streak_blazing",
             "aki_streak_legend",
+            "aki_streak_milestone",
             "aki_freeze_used",
             "aki_comeback",
+            "aki_minimum",
+            "aki_goal",
             "aki_sleeping",
             "aki_at_risk",
         ];
