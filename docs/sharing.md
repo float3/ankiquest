@@ -180,6 +180,43 @@ each win reaches each friend once.
 
 `DELETE /api/wins/{user}/{id}/link` revokes the link (204, or 404 for someone else's win). The page and the image then answer 404.
 
+### Chosen recipients and a private note
+
+The same owner-only endpoint also accepts:
+
+```json
+{
+  "moment": { "win": 17 },
+  "to": { "friends": ["cerro"], "groups": [42] },
+  "note": "Thanks for studying with me!"
+}
+```
+
+`moment` may also be `{ "notification": 42 }` for the owner's shareable row that
+already names a win. `to: "circle"` selects the whole circle. Explicit selections
+must contain at least one friend or group; the sender must belong to every selected
+group and each named friend must belong to their circle. Overlapping selections
+are deduplicated, and muted senders are skipped. Invalid selections send nothing.
+
+The answer contains `recipients`, `link` (`url` and `image`), an opaque `receipt`
+and `undo_until` in milliseconds. A repeat that delivers nothing returns zero
+recipients and null receipt/expiry fields. Old and new win-sharing requests use
+the same delivery history, so each friend receives a win once.
+
+The optional note is plain text, at most 280 Unicode characters after whitespace
+is folded to one line. It appears only in the selected recipients' inbox rows,
+never on the public card, page or win. Translation preserves the note, and it
+expires with the inbox row.
+
+`DELETE /api/share/{user}/{receipt}` retracts that send's unread inbox rows and
+answers `{ "retracted": n }`. It is available for one day unless a recipient
+replied or reacted (409). Read rows remain, previously delivered pushes cannot
+be recalled, and other sends are unaffected. Repeating an Undo returns zero;
+another sender's receipt returns 404. Retracted recipients can be selected again.
+
+Examples: `share_moment.json`, `share_moment_duplicate.json`,
+`share_moment_undo.json`.
+
 ### Conquered cards in the player's words
 
 A `conquered` win reads as the player's own news once it leaves them: on its card, its page, the

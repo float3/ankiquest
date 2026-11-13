@@ -18,12 +18,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+mod chosen;
+
 /// Notification kinds a player may pass on to friends.
 const SHAREABLE: [&str; 3] = ["celebration", "challenge_complete", "reminder_weekly_recap"];
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum Request {
+    Legacy(LegacyRequest),
+    Chosen(chosen::Request),
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Request {
+struct LegacyRequest {
     /// One of the player's own notifications.
     notification: Option<i64>,
     /// The player's current place on this week's board, 1 to 3.
@@ -156,11 +165,35 @@ pub(crate) fn send_wins(
     automatic: bool,
     now: i64,
 ) -> Result<usize, Error> {
+    let delivery = if automatic {
+        Delivery::Automatic
+    } else {
+        Delivery::Manual
+    };
+    deliver(store, sender, display, friends, wins, delivery, now)
+}
+
+enum Delivery<'a> {
+    Automatic,
+    Manual,
+    Chosen { receipt: &'a str, note: &'a str },
+}
+
+fn deliver(
+    store: &mut Store,
+    sender: &str,
+    display: &str,
+    friends: &[String],
+    wins: &[Moment],
+    delivery: Delivery<'_>,
+    now: i64,
+) -> Result<usize, Error> {
     if wins.is_empty() {
         return Ok(0);
     }
     let day = store.clock(sender)?.day(now);
     let cap = wins::sharing(&store.conn, sender)?.daily_cap;
+    let automatic = matches!(delivery, Delivery::Automatic);
     let tx = store.conn.transaction()?;
     let mut sent = 0;
     for friend in friends {
@@ -192,7 +225,7 @@ pub(crate) fn send_wins(
                 continue;
             }
         }
-        let (title, body) = if let [win] = fresh.as_slice() {
+        let (title, mut body) = if let [win] = fresh.as_slice() {
             let (title, body) = wins::shared_words(&tx, win)?;
             (
                 crate::i18n::english("🎉 {0} shared a win", &[display]),
@@ -208,6 +241,17 @@ pub(crate) fn send_wins(
                     .join(" · "),
             )
         };
+        if let Delivery::Chosen { receipt, note } = &delivery {
+            if sent == 0 {
+                tx.execute(
+                    "insert into moment_shares (receipt, sender, created_at, note) values (?1, ?2, ?3, ?4)",
+                    params![receipt, sender, now, note],
+                )?;
+            }
+            if !note.is_empty() {
+                body.push_str(&format!("\n\n{note}"));
+            }
+        }
         let id = insert_notification(
             &tx,
             &Outgoing {
@@ -225,6 +269,12 @@ pub(crate) fn send_wins(
             "update notifications set topic = ?2, win_id = ?3 where id = ?1",
             params![id, first.topic(), first.id],
         )?;
+        if let Delivery::Chosen { receipt, .. } = &delivery {
+            tx.execute(
+                "insert into moment_share_rows (receipt, notification) values (?1, ?2)",
+                params![receipt, id],
+            )?;
+        }
         for win in &fresh {
             tx.execute(
                 "insert into win_deliveries (win, recipient, notification, day, automatic)
@@ -293,6 +343,9 @@ pub(crate) fn localize(
                         .collect::<Vec<_>>()
                         .join(" · ")
                 }
+            }
+            if let Some(note) = chosen::note(conn, notice.id)? {
+                notice.body.push_str(&format!("\n\n{note}"));
             }
         }
         "reaction" => {
@@ -398,6 +451,10 @@ async fn share(
     Json(request): Json<Request>,
 ) -> Result<Json<Value>, StatusCode> {
     require_owner(&app, &user, &headers)?;
+    let request = match request {
+        Request::Chosen(request) => return chosen::share(&app, &user, request, &headers).map(Json),
+        Request::Legacy(request) => request,
+    };
     let win = match (request.notification, request.place, request.win, request.to) {
         (None, None, Some(id), Some(to)) => {
             return share_win(&app, &user, id, &to, &headers).map(Json);
@@ -539,7 +596,15 @@ async fn react_to(
 pub fn routes() -> Router<Arc<App>> {
     Router::new()
         .route("/api/share/{user}", post(share))
+        .route(
+            "/api/share/{user}/{receipt}",
+            axum::routing::delete(chosen::undo),
+        )
         .route("/api/react/{user}", post(react_to))
+}
+
+pub(crate) fn initialize(conn: &Connection) -> Result<(), Error> {
+    chosen::initialize(conn)
 }
 
 #[cfg(test)]
@@ -979,6 +1044,452 @@ mod tests {
                 .as_deref(),
             Some("cerro")
         );
+    }
+
+    #[tokio::test]
+    async fn selected_note_delivery() {
+        let (app, path) = fixture();
+        let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+        let note = "Thanks for studying with me";
+        let request = || {
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/share/hill")
+                .header("Authorization", "Bearer hill-secret")
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(
+                    json!({
+                        "moment": {"win": id},
+                        "to": {"friends": ["cerro"], "groups": []},
+                        "note": note,
+                    })
+                    .to_string(),
+                ))
+                .unwrap()
+        };
+        let (status, sent) =
+            crate::test_support::json_response(crate::test_support::route(&app, request()).await)
+                .await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        assert_eq!(sent["recipients"], 1);
+        assert!(sent["link"]["image"].as_str().unwrap().ends_with(".png"));
+        {
+            let store = app.store.lock().unwrap();
+            let rows = store.notifications("cerro", now_ms()).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].win, Some(id));
+            assert_eq!(rows[0].sender, "hill");
+            assert!(rows[0].body.contains(note));
+            assert!(store.notifications("friend", now_ms()).unwrap().is_empty());
+            let public = wins::win(&store.conn, "hill", id).unwrap();
+            assert!(!public.body.contains(note));
+            assert!(!public.stats.to_string().contains(note));
+        }
+
+        // Repeating the same request never sends a second inbox row.
+        let (status, again) =
+            crate::test_support::json_response(crate::test_support::route(&app, request()).await)
+                .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(again["recipients"], 0);
+        assert_eq!(
+            app.store
+                .lock()
+                .unwrap()
+                .notifications("cerro", now_ms())
+                .unwrap()
+                .len(),
+            1
+        );
+        cleanup(app, path);
+    }
+
+    async fn choose_moment(app: &Arc<App>, user: &str, body: Value) -> (StatusCode, Value) {
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/api/share/{user}"))
+            .header("Authorization", format!("Bearer {user}-secret"))
+            .header("Content-Type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        crate::test_support::json_response(crate::test_support::route(app, request).await).await
+    }
+
+    async fn undo_moment(app: &Arc<App>, user: &str, receipt: &str) -> (StatusCode, Value) {
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/share/{user}/{receipt}"))
+            .header("Authorization", format!("Bearer {user}-secret"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        crate::test_support::json_response(crate::test_support::route(app, request).await).await
+    }
+
+    #[tokio::test]
+    async fn notification_win_deduplicates() {
+        let (app, path) = fixture();
+        let (id, notice) = {
+            let store = app.store.lock().unwrap();
+            let id = moment(&store, "hill", "level:7");
+            let notice = insert_notification(
+                &store.conn,
+                &Outgoing {
+                    to: "hill",
+                    from: "",
+                    title: "Level 7",
+                    body: "You reached level 7.",
+                    kind: "celebration",
+                },
+                1,
+                now_ms(),
+                false,
+            )
+            .unwrap();
+            wins::attach(&store.conn, notice, id).unwrap();
+            (id, notice)
+        };
+        let (status, sent) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"notification": notice}, "to": {"friends": ["cerro"]}
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        assert_eq!(sent["recipients"], 1);
+        assert_eq!(
+            app.store
+                .lock()
+                .unwrap()
+                .notifications("cerro", now_ms())
+                .unwrap()[0]
+                .win,
+            Some(id)
+        );
+
+        // The old route reaches only the friend who did not get the selected delivery.
+        let (status, legacy) = choose_moment(&app, "hill", json!({"notification": notice})).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(legacy["recipients"], 1);
+        let (status, duplicate) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"win": id}, "to": "circle"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(duplicate["recipients"], 0);
+        let (status, _) = choose_moment(
+            &app,
+            "cerro",
+            json!({
+                "moment": {"notification": notice}, "to": "circle"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn note_privacy_and_translation() {
+        let (app, path) = fixture();
+        let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+        let note = "Our private study note";
+        let (status, _) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"win": id}, "to": "circle", "note": note
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        {
+            let store = app.store.lock().unwrap();
+            let mut row = store.notifications("cerro", now_ms()).unwrap().remove(0);
+            localize(&store.conn, &mut row, "es").unwrap();
+            assert_eq!(row.body.matches(note).count(), 1);
+            assert!(
+                !wins::win(&store.conn, "hill", id)
+                    .unwrap()
+                    .body
+                    .contains(note)
+            );
+            let exported = crate::privacy::export(&store.conn, "cerro").unwrap();
+            assert_eq!(exported["moment_shares"][0]["note"], note);
+            assert_eq!(exported["moment_share_rows"].as_array().unwrap().len(), 1);
+            crate::privacy::forget(&store.conn, "cerro").unwrap();
+            assert_eq!(store.notifications("friend", now_ms()).unwrap().len(), 1);
+            let remaining = crate::privacy::export(&store.conn, "hill").unwrap();
+            assert_eq!(remaining["moment_share_rows"].as_array().unwrap().len(), 1);
+            crate::privacy::forget(&store.conn, "hill").unwrap();
+            for table in ["moment_shares", "moment_share_rows"] {
+                assert_eq!(
+                    store
+                        .conn
+                        .query_row(&format!("select count(*) from {table}"), [], |row| row
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+            }
+        }
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn notes_expire_with_activity() {
+        let (app, path) = fixture();
+        let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+        let (status, _) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"win": id}, "to": "circle", "note": "A short-lived private note"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        {
+            let mut store = app.store.lock().unwrap();
+            store
+                .prune_notifications(
+                    now_ms()
+                        + i64::from(crate::notifications::ACTIVITY_DAYS) * crate::game::DAY_MS
+                        + 1,
+                )
+                .unwrap();
+            for table in ["moment_share_rows", "moment_shares"] {
+                assert_eq!(
+                    store
+                        .conn
+                        .query_row(&format!("select count(*) from {table}"), [], |row| row
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0,
+                    "{table}"
+                );
+            }
+            assert_eq!(
+                store
+                    .conn
+                    .query_row(
+                        "select count(*) from win_deliveries where win = ?1",
+                        [id],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                2,
+                "expiration must not make an old win eligible for duplicate delivery"
+            );
+        }
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn undo_respects_reads_and_age() {
+        for state in ["read", "replied", "reacted", "expired"] {
+            let (app, path) = fixture();
+            let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+            let (status, sent) = choose_moment(
+                &app,
+                "hill",
+                json!({
+                    "moment": {"win": id}, "to": "circle"
+                }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            let receipt = sent["receipt"].as_str().unwrap();
+            assert_eq!(
+                undo_moment(&app, "cerro", receipt).await.0,
+                StatusCode::NOT_FOUND
+            );
+            {
+                let mut store = app.store.lock().unwrap();
+                let notice = store.notifications("cerro", now_ms()).unwrap()[0].id;
+                match state {
+                    "read" => {
+                        store.read_activity("cerro", &[notice], now_ms()).unwrap();
+                    }
+                    "replied" => {
+                        store
+                            .reply("cerro", "Cerro", notice, "Well done", now_ms())
+                            .unwrap();
+                    }
+                    "reacted" => {
+                        react(&mut store.conn, "cerro", "Cerro", notice, now_ms()).unwrap();
+                    }
+                    "expired" => {
+                        store
+                            .conn
+                            .execute(
+                                "update moment_shares set created_at = ?1 where receipt = ?2",
+                                params![now_ms() - crate::conquests::UNDO_MS - 1, receipt],
+                            )
+                            .unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            let (status, removed) = undo_moment(&app, "hill", receipt).await;
+            if state == "read" {
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(removed["retracted"], 1);
+                let (status, repeated) = undo_moment(&app, "hill", receipt).await;
+                assert_eq!(status, StatusCode::OK);
+                assert_eq!(repeated["retracted"], 0);
+            } else {
+                assert_eq!(status, StatusCode::CONFLICT, "{state}");
+            }
+            assert_eq!(
+                app.store
+                    .lock()
+                    .unwrap()
+                    .notifications("cerro", now_ms())
+                    .unwrap()
+                    .len(),
+                1,
+                "{state}"
+            );
+            cleanup(app, path);
+        }
+    }
+
+    #[tokio::test]
+    async fn group_choices_respect_mutes() {
+        let (app, path) = fixture();
+        let id = {
+            let store = app.store.lock().unwrap();
+            store
+                .conn
+                .execute_batch(
+                    "insert into groups (id, name, invite, created_by, created_at)
+                 values (42, 'Study', 'synthetic-invite', 'hill', 0);
+                 insert into group_members (group_id, user, owner, joined_at)
+                 values (42, 'hill', 1, 0), (42, 'cerro', 0, 0), (42, 'friend', 0, 0);
+                 insert into muted_people (recipient, sender, created_at)
+                 values ('friend', 'hill', 0);",
+                )
+                .unwrap();
+            moment(&store, "hill", "level:7")
+        };
+        let (status, sent) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"win": id},
+                "to": {"friends": ["cerro", "cerro"], "groups": [42, 42]}
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{sent}");
+        assert_eq!(sent["recipients"], 1);
+        {
+            let store = app.store.lock().unwrap();
+            assert_eq!(store.notifications("cerro", now_ms()).unwrap().len(), 1);
+            assert!(store.notifications("friend", now_ms()).unwrap().is_empty());
+            assert!(store.notifications("hill", now_ms()).unwrap().is_empty());
+        }
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn validate_all_recipients() {
+        let (app, path) = fixture();
+        let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+        for destination in [
+            json!({"friends": ["cerro", "outsider"], "groups": []}),
+            json!({"friends": ["cerro"], "groups": [999]}),
+        ] {
+            let (status, _) = choose_moment(
+                &app,
+                "hill",
+                json!({
+                    "moment": {"win": id}, "to": destination
+                }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN);
+            assert!(
+                app.store
+                    .lock()
+                    .unwrap()
+                    .notifications("cerro", now_ms())
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let (status, _) = choose_moment(
+            &app,
+            "cerro",
+            json!({
+                "moment": {"win": id}, "to": "circle"
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a friend cannot share the owner's private win"
+        );
+        cleanup(app, path);
+    }
+
+    #[tokio::test]
+    async fn undo_one_send_only() {
+        let (app, path) = fixture();
+        let id = moment(&app.store.lock().unwrap(), "hill", "level:7");
+        let mut receipts = Vec::new();
+        for friend in ["cerro", "friend"] {
+            let (status, sent) = choose_moment(
+                &app,
+                "hill",
+                json!({
+                    "moment": {"win": id}, "to": {"friends": [friend], "groups": []}
+                }),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{sent}");
+            assert_eq!(sent["recipients"], 1);
+            assert!(sent["undo_until"].as_i64().unwrap() > now_ms());
+            receipts.push(sent["receipt"].as_str().unwrap().to_owned());
+        }
+        assert_ne!(receipts[0], receipts[1]);
+        let request = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/share/hill/{}", receipts[0]))
+            .header("Authorization", "Bearer hill-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (status, removed) =
+            crate::test_support::json_response(crate::test_support::route(&app, request).await)
+                .await;
+        assert_eq!(status, StatusCode::OK, "{removed}");
+        assert_eq!(removed["retracted"], 1);
+        {
+            let store = app.store.lock().unwrap();
+            assert!(store.notifications("cerro", now_ms()).unwrap().is_empty());
+            assert_eq!(store.notifications("friend", now_ms()).unwrap().len(), 1);
+        }
+        let (status, sent) = choose_moment(
+            &app,
+            "hill",
+            json!({
+                "moment": {"win": id}, "to": "circle"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            sent["recipients"], 1,
+            "only the retracted recipient can receive it again"
+        );
+        cleanup(app, path);
     }
 
     #[test]

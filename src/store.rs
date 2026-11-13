@@ -179,6 +179,7 @@ impl Store {
         crate::dev::initialize(&conn)?;
         crate::goals::initialize(&conn)?;
         crate::wins::initialize(&conn)?;
+        crate::shares::initialize(&conn)?;
         initialize_sync_signatures(&conn)?;
         crate::migrations::run(&conn)?;
         Ok(Self { conn, scratch })
