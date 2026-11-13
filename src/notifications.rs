@@ -711,10 +711,22 @@ impl Store {
     /// Retry times put newly queued messages ahead of previously failed pushes.
     /// Forgets notifications older than the activity feed reaches back.
     pub fn prune_notifications(&mut self, now_ms: i64) -> Result<(), Error> {
-        self.conn.execute(
+        let tx = self.conn.transaction()?;
+        tx.execute(
             "delete from notifications where created_at < ?1",
             [now_ms - ACTIVITY_AGE_MS],
         )?;
+        // Notes follow inbox retention; win delivery keys remain to prevent duplicate shares.
+        tx.execute(
+            "delete from moment_share_rows where notification not in (select id from notifications)",
+            [],
+        )?;
+        tx.execute(
+            "delete from moment_shares where created_at < ?1
+             and receipt not in (select receipt from moment_share_rows)",
+            [now_ms - ACTIVITY_AGE_MS],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

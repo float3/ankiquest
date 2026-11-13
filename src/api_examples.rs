@@ -875,6 +875,47 @@ async fn examples_match_the_handlers() {
         .await,
     ));
 
+    // New sharing examples come last so released examples keep their IDs and inbox rows.
+    crate::app::fix_now_ms(Some(NOW_MS));
+    let chosen_win = f.celebrate("hill", "level:8", "Level 8", "You reached level 8.");
+    let chosen_body = json!({
+        "moment": {"win": chosen_win},
+        "to": {"friends": ["friend"]},
+        "note": "Thanks for studying with me!"
+    });
+    let chosen = f
+        .call(
+            "POST",
+            "/api/share/hill",
+            Some("hill-secret"),
+            chosen_body.clone(),
+        )
+        .await;
+    f.keep_secret(&chosen["receipt"], "example-receipt");
+    let token = chosen["link"]["url"]
+        .as_str()
+        .unwrap()
+        .rsplit('/')
+        .next()
+        .unwrap();
+    f.keep_secret(&json!(token), "example-link");
+    examples.push(("share_moment", chosen.clone()));
+    examples.push((
+        "share_moment_duplicate",
+        f.call("POST", "/api/share/hill", Some("hill-secret"), chosen_body)
+            .await,
+    ));
+    examples.push((
+        "share_moment_undo",
+        f.call(
+            "DELETE",
+            &format!("/api/share/hill/{}", chosen["receipt"].as_str().unwrap()),
+            Some("hill-secret"),
+            Value::Null,
+        )
+        .await,
+    ));
+
     let update = std::env::var_os("UPDATE_API_EXAMPLES").is_some_and(|v| v == "1");
     let dir = examples_dir();
     let mut stale = Vec::new();

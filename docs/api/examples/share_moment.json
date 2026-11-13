@@ -1,0 +1,9 @@
+{
+  "link": {
+    "image": "https://anki.example.test/w/example-link-3.png",
+    "url": "https://anki.example.test/w/example-link-3"
+  },
+  "receipt": "example-receipt-1",
+  "recipients": 1,
+  "undo_until": 1793269800000
+}

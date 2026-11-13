@@ -86,6 +86,12 @@ const EXPORT: &[(&str, &str)] = &[
          from wins where user = ?1 order by id"),
     ("wins_delivered", "select d.win, d.recipient, d.day, d.automatic from win_deliveries d
          join wins w on w.id = d.win where w.user = ?1 order by d.win"),
+    ("moment_shares", "select receipt, sender, created_at, note, undone from moment_shares
+         where sender = ?1 or receipt in (select r.receipt from moment_share_rows r
+         join notifications n on n.id = r.notification where n.recipient = ?1)"),
+    ("moment_share_rows", "select receipt, notification from moment_share_rows
+         where receipt in (select receipt from moment_shares where sender = ?1)
+         or notification in (select id from notifications where recipient = ?1)"),
     ("daily_goal", "select mode, value, reached_day from goals where user = ?1"),
     ("sharing", "select policies, daily_cap from sharing_settings where user = ?1"),
     ("reactions", "select reactor, notification, sender, created_at from reactions
@@ -150,6 +156,12 @@ const OWNED: &[(&str, &str)] = &[
         "recipient = ?1 or offer in (select id from deck_copy_offers where sender = ?1)",
     ),
     ("deck_copy_offers", "sender = ?1"),
+    (
+        "moment_share_rows",
+        "receipt in (select receipt from moment_shares where sender = ?1)
+         or notification in (select id from notifications where recipient = ?1)",
+    ),
+    ("moment_shares", "sender = ?1"),
     ("notifications", "recipient = ?1 or sender = ?1"),
     ("community_members", "user = ?1"),
     ("community_requests", "creator = ?1"),
@@ -184,6 +196,7 @@ const OWNED: &[(&str, &str)] = &[
 /// Every column that holds a player's name. `forget` clears them all, and the startup check
 /// looks through them for players the server no longer knows.
 pub(crate) const NAMED: &[(&str, &str)] = &[
+    ("moment_shares", "sender"),
     ("account_removals", "user"),
     ("account_tokens", "user"),
     ("accounts", "user"),
@@ -285,6 +298,9 @@ const NOT_NAMES: &[&str] = &[
     "groups.invite",
     "groups.name",
     "languages.language",
+    "moment_shares.receipt",
+    "moment_shares.note",
+    "moment_share_rows.receipt",
     "notifications.body",
     "notifications.kind",
     "notifications.reply_to_body",
