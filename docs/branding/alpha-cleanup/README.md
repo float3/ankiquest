@@ -27,5 +27,6 @@ for offset in range(0, len(data), 4):
 Image.frombytes("RGBA", image.size, bytes(data)).save(destination)
 ```
 
-Regenerate the five matching Android WebPs with `tools/export_android_art.py`.
+Regenerate the five matching Android WebPs with
+`cargo run -p ankiquest-xtask -- export-android-art <android-checkout>`.
 The remaining mascot parity, framing and canonical-source work stays in #88.
