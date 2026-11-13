@@ -2,8 +2,8 @@
 
 Published on 2026-11-11: [AnkiQuest on AnkiWeb](https://ankiweb.net/shared/info/414948448).
 Installation code: **414948448**. The content below is the listing copy.
-For updates, use the checked `ankiquest-ankiweb-addon` CI artifact from the
-intended commit. Its numeric package ID and conflicts differ from the
+For updates, use `ankiquest-ankiweb.ankiaddon` from the GitHub release
+(or the nightly) of the intended version. Its numeric package ID and conflicts differ from the
 GitHub archive. Upload it through **Update** on the listing owner's account.
 
 ## Title
@@ -78,8 +78,8 @@ your account.
 ## Updating the listing
 
 1. Review and merge the intended change after both desktop CI jobs pass.
-2. Download that commit's `ankiquest-ankiweb-addon` artifact. For a local
-   build, run `python .github/scripts/package-addon.py --ankiweb --output ankiquest-ankiweb.ankiaddon` from the reviewed checkout.
+2. Download `ankiquest-ankiweb.ankiaddon` from that version's GitHub
+   release (`addon-<n>`), or from `addon-nightly`. For a local build, run `python .github/scripts/package-addon.py --ankiweb --output ankiquest-ankiweb.ankiaddon` from the reviewed checkout.
 3. Sign in to the owner account, open the listing, choose **Update**, attach
    the package to the appropriate version branch and save. Keep the actual
    oldest/current tested Anki versions in the branch fields.
