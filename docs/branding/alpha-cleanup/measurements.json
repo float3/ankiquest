@@ -58,5 +58,18 @@
       1254,
       1254
     ]
+  },
+  {
+    "pose": "duo/friends",
+    "source_sha256": "f72b28775d4ecad147d7b83276bd4b8239f7639685863421174565d508f921c6",
+    "output_sha256": "9b60a03f9b546916547b5953f2415f230486a3fa8759bdbf8876cd9569acb6c9",
+    "removed_pixels": 24911,
+    "removed_isolated_speck_pixels": 567,
+    "maximum_composited_channel_change": 9,
+    "pixels_above_alpha_4_unchanged": false,
+    "dimensions": [
+      1254,
+      1254
+    ]
   }
 ]

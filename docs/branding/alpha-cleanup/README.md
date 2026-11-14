@@ -27,6 +27,18 @@ for offset in range(0, len(data), 4):
 Image.frombytes("RGBA", image.size, bytes(data)).save(destination)
 ```
 
-Regenerate the five matching Android WebPs with
+## Duo
+
+`static/duo/friends.png` (Aki and Ankilope high-fiving) had the same faint
+pixels, shown as yellow and red specks around the ears and the high-five
+marks, plus isolated dark noise away from the drawing. It got the same
+rule, and additionally every 8-connected group of pixels above alpha 4
+whose alpha never exceeds 16 was cleared: 567 pixels in specks of at most
+alpha 11, none touching the drawing. Pixels in the drawing, its outline and
+the high-five marks are unchanged. Compositing over white, dark and magenta
+changes no channel by more than 9/255. Hashes are in
+[measurements](measurements.json).
+
+Regenerate the matching Android WebPs with
 `cargo run -p ankiquest-xtask -- export-android-art <android-checkout>`.
 The remaining mascot parity, framing and canonical-source work stays in #88.
