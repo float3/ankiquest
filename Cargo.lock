@@ -49,6 +49,7 @@ name = "ankiquest-xtask"
 version = "0.1.0"
 dependencies = [
  "image",
+ "resvg",
  "serde_json",
  "tempfile",
  "webp",

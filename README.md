@@ -1,3 +1,7 @@
+<p align="center">
+<img alt="" src="docs/graphics/banner_readme.png"/>
+</p>
+
 <a href="https://github.com/float3/ankiquest/releases/latest"><img src="https://img.shields.io/github/v/release/float3/ankiquest" alt="release"/></a>
 <a href="https://ankiweb.net/shared/info/414948448"><img src="https://img.shields.io/badge/AnkiWeb-414948448-2a6db0" alt="AnkiWeb add-on"/></a>
 <a href="https://github.com/float3/ankiquest/actions/workflows/ci.yml"><img src="https://github.com/float3/ankiquest/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>

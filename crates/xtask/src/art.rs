@@ -12,6 +12,8 @@ use std::process::ExitCode;
 use image::imageops::{self, FilterType};
 use image::{Rgba32FImage, RgbaImage};
 
+mod banner;
+
 /// Drawable folder inside an AnkiQuest-Android checkout.
 const DRAWABLES: &str = "AnkiDroid/src/main/res/drawable-nodpi";
 
@@ -150,6 +152,11 @@ pub fn run(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Runs the banner command: `[--social] [--out <file>]`.
+pub fn banner(args: &[String]) -> ExitCode {
+    banner::run(args)
 }
 
 /// Prints the usage text and fails.
