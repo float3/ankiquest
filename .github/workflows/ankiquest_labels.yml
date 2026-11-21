@@ -50,8 +50,10 @@ jobs:
     steps:
       - uses: AnkiQuest/AnkiQuest-Dev/.github/actions/conflict-scan@master
 
+  # Pull request events label one pull request; schedule and
+  # workflow_dispatch sweep every open one.
   pull-requests:
-    if: github.event_name == 'pull_request_target' || github.event_name == 'pull_request_review'
+    if: contains(fromJSON('["pull_request_target", "pull_request_review", "schedule", "workflow_dispatch"]'), github.event_name)
     uses: AnkiQuest/AnkiQuest-Dev/.github/workflows/pr-labels.yml@master
     permissions:
       contents: read
