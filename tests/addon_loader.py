@@ -42,10 +42,15 @@ class _Hooks(SimpleNamespace):
         return hook
 
 
-def fake_anki(test, mw):
-    """Replaces aqt, aqt.utils, aqt.qt, anki and anki.lang with stand-ins until `test` ends.
+# The Anki version anki.utils.int_version() reports under fake_anki: the add-on's minimum.
+ANKI_VERSION = 231000
 
-    aqt.mw is `mw`, Qt names are mocks and the language is English. Returns the aqt stand-in."""
+
+def fake_anki(test, mw):
+    """Replaces aqt, aqt.utils, aqt.qt, anki, anki.lang and anki.utils with stand-ins until `test` ends.
+
+    aqt.mw is `mw`, Qt names are mocks, the language is English and Anki is ANKI_VERSION.
+    Returns the aqt stand-in."""
     aqt = ModuleType("aqt")
     aqt.mw, aqt.gui_hooks = mw, _Hooks()
     utils = ModuleType("aqt.utils")
@@ -55,8 +60,12 @@ def fake_anki(test, mw):
     anki = ModuleType("anki")
     anki.lang = ModuleType("anki.lang")
     anki.lang.current_lang = "en"
+    anki.utils = ModuleType("anki.utils")
+    anki.utils.int_version = lambda: ANKI_VERSION
 
-    modules = patch.dict(sys.modules, {"aqt": aqt, "aqt.utils": utils, "aqt.qt": qt, "anki": anki, "anki.lang": anki.lang})
+    modules = patch.dict(sys.modules, {
+        "aqt": aqt, "aqt.utils": utils, "aqt.qt": qt, "anki": anki, "anki.lang": anki.lang, "anki.utils": anki.utils,
+    })
     modules.start()
     test.addCleanup(modules.stop)
     return aqt

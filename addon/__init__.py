@@ -1291,7 +1291,9 @@ def check_updates(quiet=True):
         elif not quiet:
             tooltip(tr("AnkiQuest is up to date (%s).") % updates.label(current))
 
-    mw.taskman.run_in_background(lambda: updates.available(channel), done)
+    from anki.utils import int_version
+
+    mw.taskman.run_in_background(lambda: updates.available(channel, int_version()), done)
 
 
 def maybe_check_updates():

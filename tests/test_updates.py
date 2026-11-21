@@ -2,19 +2,42 @@
 
 import json
 import tempfile
+from http import HTTPStatus
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from addon_loader import load_in_package
+from addon_loader import ANKI_VERSION, load_in_package
 import test_deck_completion as fixture
 
 updates = load_in_package("ankiquest_updates", "updates")
+client = load_in_package("ankiquest_updates", "client")
+
+ANKI_23_10 = 231000
+ANKI_24_11 = 241100
+LEGACY = "ankiquest.ankiaddon"
+CURRENT = "ankiquest-24.11.ankiaddon"
+NIGHTLY = "https://github.com/AnkiQuest/AnkiQuest-Desktop/releases/download/addon-nightly/"
 
 
-def release(tag, prerelease=False, draft=False, package=True):
-    assets = [{"name": "ankiquest.ankiaddon", "browser_download_url": "https://example.test/%s.ankiaddon" % tag}] if package else []
+def release(tag, prerelease=False, draft=False, package=True, names=(LEGACY,)):
+    names = names if package else ()
+    assets = [{"name": name, "browser_download_url": "https://example.test/%s/%s" % (tag, name)} for name in names]
     return {"tag_name": tag, "prerelease": prerelease, "draft": draft, "assets": assets}
+
+
+def answers(pages):
+    """A fetch stand-in that answers by URL; a missing URL is a 404, as GitHub answers a missing asset."""
+    asked = []
+
+    def get(url, timeout=20):
+        asked.append(url)
+        if url not in pages:
+            raise client.ServerError(HTTPStatus.NOT_FOUND, "")
+        return pages[url]
+
+    get.asked = asked
+    return get
 
 
 class UpdateTests(unittest.TestCase):
@@ -23,16 +46,66 @@ class UpdateTests(unittest.TestCase):
             release("addon-9"), release("addon-10"), release("addon-11", draft=True),
             release("addon-nightly", prerelease=True), release("quest-17"), release("addon-12", package=False),
         ]).encode()
-        best = updates.latest_stable(lambda url, timeout=20: listing)
+        best = updates.latest_stable(ANKI_23_10, lambda url, timeout=20: listing)
         self.assertEqual((best["release"], best["nightly"]), (10, 0))
-        self.assertTrue(best["url"].endswith("addon-10.ankiaddon"))
+        self.assertEqual(best["url"], "https://example.test/addon-10/" + LEGACY)
 
     def test_nightly_metadata_points_at_the_rolling_release(self):
         meta = json.dumps({"release": 10, "nightly": 3, "commit": "1a2b3c4d5e"}).encode()
-        nightly = updates.latest_nightly(lambda url, timeout=20: meta)
+        nightly = updates.latest_nightly(ANKI_23_10, lambda url, timeout=20: meta)
         self.assertEqual((nightly["release"], nightly["nightly"]), (10, 3))
-        self.assertEqual(nightly["url"], "https://github.com/AnkiQuest/AnkiQuest-Desktop/releases/download/addon-nightly/ankiquest.ankiaddon")
-        self.assertIsNone(updates.latest_nightly(lambda url, timeout=20: b'{"release": 0, "nightly": 1}'))
+        self.assertEqual(nightly["url"], NIGHTLY + LEGACY)
+        self.assertIsNone(updates.latest_nightly(ANKI_23_10, lambda url, timeout=20: b'{"release": 0, "nightly": 1}'))
+
+    def test_stable_builds_for_anki_24_11_need_anki_24_11(self):
+        # From the bridge release on, builds for Anki 24.11 are published only as CURRENT.
+        listing = json.dumps([release("addon-15", names=(CURRENT,)), release("addon-14")]).encode()
+        older = updates.latest_stable(ANKI_23_10, lambda url, timeout=20: listing)
+        self.assertEqual((older["release"], older["url"]), (14, "https://example.test/addon-14/" + LEGACY))
+        newer = updates.latest_stable(ANKI_24_11, lambda url, timeout=20: listing)
+        self.assertEqual((newer["release"], newer["url"]), (15, "https://example.test/addon-15/" + CURRENT))
+
+    def test_stable_prefers_the_build_for_the_newest_anki_it_runs_on(self):
+        listing = json.dumps([release("addon-14", names=(LEGACY, CURRENT))]).encode()
+        self.assertTrue(updates.latest_stable(ANKI_24_11, lambda url, timeout=20: listing)["url"].endswith(CURRENT))
+        self.assertTrue(updates.latest_stable(ANKI_23_10, lambda url, timeout=20: listing)["url"].endswith(LEGACY))
+
+    def test_nightly_for_anki_24_11_reads_its_own_metadata(self):
+        get = answers({
+            NIGHTLY + "addon-nightly-24.11.json": b'{"release": 15, "nightly": 2, "commit": "c"}',
+            NIGHTLY + "addon-nightly.json": b'{"release": 14, "nightly": 0, "commit": "b"}',
+        })
+        nightly = updates.latest_nightly(ANKI_24_11, get)
+        self.assertEqual((nightly["release"], nightly["nightly"], nightly["url"]), (15, 2, NIGHTLY + CURRENT))
+        nightly = updates.latest_nightly(ANKI_23_10, get)
+        self.assertEqual((nightly["release"], nightly["url"]), (14, NIGHTLY + LEGACY))
+
+    def test_nightly_falls_back_while_no_24_11_build_is_published(self):
+        get = answers({NIGHTLY + "addon-nightly.json": b'{"release": 14, "nightly": 3, "commit": "b"}'})
+        nightly = updates.latest_nightly(ANKI_24_11, get)
+        self.assertEqual((nightly["release"], nightly["nightly"], nightly["url"]), (14, 3, NIGHTLY + LEGACY))
+
+    def test_anki_23_10_never_asks_for_24_11_builds(self):
+        get = answers({NIGHTLY + "addon-nightly.json": b'{"release": 14, "nightly": 3, "commit": "b"}'})
+        updates.latest_nightly(ANKI_23_10, get)
+        self.assertEqual([NIGHTLY + "addon-nightly.json"], get.asked)
+
+    def test_missing_nightly_metadata_for_every_build_is_reported(self):
+        with self.assertRaises(client.ServerError):
+            updates.latest_nightly(ANKI_24_11, answers({}))
+        self.assertIsNone(updates.latest_nightly(ANKI_23_10 - 1, answers({})))
+
+    def test_nightly_errors_other_than_a_missing_build_are_reported(self):
+        def get(url, timeout=20):
+            raise client.ServerError(HTTPStatus.SERVICE_UNAVAILABLE, "")
+
+        with self.assertRaises(client.ServerError):
+            updates.latest_nightly(ANKI_24_11, get)
+
+    def test_the_manifest_minimum_names_a_published_build(self):
+        manifest = json.loads((Path(__file__).resolve().parents[1] / "addon/manifest.json").read_text("utf-8"))
+        self.assertIn(manifest["min_point_version"], [build.minimum for build in updates.BUILDS])
+        self.assertEqual(sorted(updates.BUILDS, reverse=True), list(updates.BUILDS), "newest minimum first")
 
     def test_newer_orders_release_then_nightly_and_never_updates_a_local_copy(self):
         stable10 = {"release": 10, "nightly": 0}
@@ -123,7 +196,7 @@ class UpdateOwnership(unittest.TestCase):
             self.installed(folder)
             self.addon.updates.SOURCE = self.addon.updates.UpdateSource.GITHUB
             self.addon.maybe_check_updates()
-            self.addon.updates.available.assert_called_once_with("stable")
+            self.addon.updates.available.assert_called_once_with("stable", ANKI_VERSION)
             self.addon.offer_update.assert_called_once()
 
 

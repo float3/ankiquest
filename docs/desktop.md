@@ -130,6 +130,16 @@ with that numeric package ID and a conflict with the GitHub `ankiquest`
 package; the GitHub artifact declares the reverse conflict. Repeat updates
 never declare their own package as a conflict.
 
+GitHub builds are published under names that carry their minimum Anki
+(`updates.BUILDS`). A copy reads the names for the newest minimum its Anki
+meets and falls back to older ones, so raising the minimum publishes the new
+builds under new names only and leaves the old names on the last build for the
+old minimum. The 24.11 builds are `ankiquest-24.11.ankiaddon` and
+`addon-nightly-24.11.json`; `ankiquest.ankiaddon` and `addon-nightly.json`
+are the 23.10 builds. This matters because Anki's installer replaces an
+add-on's files before it reports the archive incompatible; copies since #400
+also check the manifest first.
+
 Anki preserves a disabled installation when updating it. Remove the other
 copy before switching channels, restart, and sign in with the same account
 and server. Account upload checkpoints live in the Anki profile, so they
