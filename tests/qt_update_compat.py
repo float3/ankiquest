@@ -23,13 +23,14 @@ ROOT = Path(__file__).resolve().parents[1]
 app = QApplication.instance() or QApplication([])
 
 
-def archive(minimum, source):
+def archive(minimum, source, **limits):
     data = io.BytesIO()
     with ZipFile(data, "w") as package:
         package.writestr("manifest.json", json.dumps({
             "package": "ankiquest_upgrade_test",
             "name": "AnkiQuest upgrade test",
             "min_point_version": minimum,
+            **limits,
         }))
         package.writestr("__init__.py", source)
     data.seek(0)
@@ -69,6 +70,13 @@ class UpdateCompatibility(unittest.TestCase):
 
             self.assertEqual(original, module.read_text("utf-8"))
             self.assertTrue(manager.addon_meta("ankiquest_upgrade_test").compatible())
+            show_info.assert_not_called()
+
+            # An archive whose maximum is below this Anki is refused the same way.
+            incoming.write_bytes(archive(1, "# needs older Anki\n", max_point_version=-(_current_version - 1)).getvalue())
+            namespace["install_update"](incoming)
+            self.assertEqual(original, module.read_text("utf-8"))
+            self.assertIn("incompatible", namespace["tooltip"].call_args.args[0])
             show_info.assert_not_called()
 
             # Refusing one archive must not prevent a compatible update.

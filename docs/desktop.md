@@ -1,8 +1,8 @@
 # Desktop compatibility and packages
 
-AnkiQuest supports Anki 23.10 and newer with Qt 6. CI pins the oldest supported
-release (23.10, Python 3.9) and the current release (26.09.4, Python 3.12).
-The manifest keeps `min_point_version: 231000`; there is no known incompatible
+AnkiQuest supports Anki 24.11 and newer with Qt 6. CI pins the oldest supported
+release (24.11, Python 3.9) and the current release (26.09.4, Python 3.12).
+The manifest keeps `min_point_version: 241100`; there is no known incompatible
 newer release that needs a maximum version.
 
 ## Run the checks
@@ -20,7 +20,7 @@ cargo run --manifest-path tools/package-addon/Cargo.toml -- --output ankiquest.a
 
 On Windows, activate `.venv\Scripts\Activate.ps1` and set
 `$env:QT_QPA_PLATFORM = "offscreen"` before running the tests. For the oldest
-version, create another environment with `tests/requirements-anki-23.10.txt`.
+version, create another environment with `tests/requirements-anki-24.11.txt`.
 The current `aqt[qt]` extra pins its matching Qt, WebEngine and SIP packages;
 the older requirements explicitly pin those packages. Do not install an
 unbounded PyQt/WebEngine combination on top of these environments.
@@ -101,7 +101,7 @@ To read a new fixture or example, copy it from the same commit.
 
 ## API audit
 
-Checked against the installed 23.10 and 26.09.4 APIs:
+Checked against the installed 24.11 and 26.09.4 APIs:
 
 | API | Finding |
 | --- | --- |
@@ -129,6 +129,16 @@ uses code **414948448**. CI publishes an `ankiquest-ankiweb-addon` artifact
 with that numeric package ID and a conflict with the GitHub `ankiquest`
 package; the GitHub artifact declares the reverse conflict. Repeat updates
 never declare their own package as a conflict.
+
+GitHub builds are published under names that carry their minimum Anki
+(`updates.BUILDS`). A copy reads the names for the newest minimum its Anki
+meets and falls back to older ones, so raising the minimum publishes the new
+builds under new names only and leaves the old names on the last build for the
+old minimum. The 24.11 builds are `ankiquest-24.11.ankiaddon` and
+`addon-nightly-24.11.json`; `ankiquest.ankiaddon` and `addon-nightly.json`
+are the 23.10 builds. This matters because Anki's installer replaces an
+add-on's files before it reports the archive incompatible; copies since #400
+also check the manifest first.
 
 Anki preserves a disabled installation when updating it. Remove the other
 copy before switching channels, restart, and sign in with the same account

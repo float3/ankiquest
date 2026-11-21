@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - anki: '23.10'
+          - anki: '24.11'
             python: '3.9'
           - anki: '26.9.4'
             python: '3.12'
@@ -159,12 +159,12 @@ jobs:
           cargo test --locked --manifest-path "$PACKAGER"
       - name: Build the archive
         run: |
-          cargo run --locked --manifest-path "$PACKAGER" -- --updates github --output ankiquest.ankiaddon
+          cargo run --locked --manifest-path "$PACKAGER" -- --updates github --output ankiquest-24.11.ankiaddon
           cargo run --locked --manifest-path "$PACKAGER" -- --ankiweb --output ankiquest-ankiweb.ankiaddon
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ankiquest-addon
-          path: ankiquest.ankiaddon
+          path: ankiquest-24.11.ankiaddon
           if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

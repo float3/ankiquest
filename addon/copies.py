@@ -168,30 +168,14 @@ def _remove(name):
 
 
 def export_deck(col, deck_id, target):
-    """Cards, notes, media and deck options, never scheduling, with the modern exporter where Anki has it."""
+    """Cards, notes, media and deck options, never scheduling."""
     from anki.collection import DeckIdLimit
-
-    # Anki 23.10 has no ExportAnkiPackageOptions; only there the legacy exporter runs.
-    try:
-        from anki.import_export_pb2 import ExportAnkiPackageOptions
-    except ImportError:
-        _legacy_export(col, deck_id, target)
-        return
+    from anki.import_export_pb2 import ExportAnkiPackageOptions
 
     options = ExportAnkiPackageOptions(
         with_scheduling=False, with_deck_configs=True, with_media=True, legacy=False
     )
     col.export_anki_package(out_path=target, options=options, limit=DeckIdLimit(deck_id))
-
-
-def _legacy_export(col, deck_id, target):
-    from anki.exporting import AnkiPackageExporter
-
-    exporter = AnkiPackageExporter(col)
-    exporter.did = deck_id
-    exporter.includeSched = False
-    exporter.includeMedia = True
-    exporter.exportInto(target)
 
 
 def share(api, col, deck_id, deck_name, recipients, limit=MAX_BYTES):

@@ -1,0 +1,8 @@
+aqt[qt6]==24.11
+PyQt6==6.6.1
+PyQt6-Qt6==6.6.2
+PyQt6-WebEngine==6.6.0
+PyQt6-WebEngine-Qt6==6.6.2
+PyQt6-sip==13.6.0
+pyflakes==3.4.0
+tzdata==2026.2

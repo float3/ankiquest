@@ -1,4 +1,4 @@
-AnkiQuest needs Anki 23.10 or newer with Qt 6.
+AnkiQuest needs Anki 24.11 or newer with Qt 6.
 
 On the first profile open after you install AnkiQuest, or update to a version with the greeting, Aki greets you once on this computer, after Anki's own startup dialogs. Signed out, she offers **Sign in** and **Later**; signed in, **Let’s study**.
 

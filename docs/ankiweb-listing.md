@@ -14,8 +14,8 @@ AnkiQuest — study progress, streaks and friends
 
 Give your regular Anki study sessions a little company. AnkiQuest adds a
 study companion, XP, streaks, daily goals, quests and optional social features
-to Anki. It works with Anki 23.10 or newer using Qt 6.
-Use a current Anki release for everyday study; 23.10 is the compatibility floor.
+to Anki. It works with Anki 24.11 or newer using Qt 6.
+Use a current Anki release for everyday study; 24.11 is the compatibility floor.
 
 - **Today:** see your study progress, next deck, streak status and daily goal
   under the deck list.
